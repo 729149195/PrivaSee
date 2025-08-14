@@ -38,6 +38,18 @@ export default function AudioTest() {
   const [tokUncertHtml, setTokUncertHtml] = useState('')
   const [transcribeError, setTranscribeError] = useState('')
 
+  // TTS (Text -> WAV)
+  const [ttsOpen, setTtsOpen] = useState(false)
+  const [ttsText, setTtsText] = useState('')
+  const [ttsLanguage, setTtsLanguage] = useState('zh')
+  const [ttsSpeaker, setTtsSpeaker] = useState('')
+  const [ttsRefFile, setTtsRefFile] = useState(null)
+  const [ttsJobId, setTtsJobId] = useState('')
+  const [ttsProgress, setTtsProgress] = useState(0)
+  const [ttsStatus, setTtsStatus] = useState('')
+  const [ttsRunning, setTtsRunning] = useState(false)
+  const ttsPollRef = useRef(0)
+
   const escaped = (value) =>
     (value || '')
       .replace(/&/g, '&amp;')
@@ -121,6 +133,84 @@ export default function AudioTest() {
     setPiiHtml('')
     setTokUncertHtml('')
     setTranscribeError('')
+  }
+
+  // TTS helpers
+  const openTtsDialog = () => {
+    setTtsOpen(true)
+    setTtsText('')
+    setTtsLanguage('zh')
+    setTtsSpeaker('')
+    setTtsRefFile(null)
+    setTtsJobId('')
+    setTtsProgress(0)
+    setTtsStatus('')
+    setTtsRunning(false)
+    if (ttsPollRef.current) cancelAnimationFrame(ttsPollRef.current), (ttsPollRef.current = 0)
+  }
+  const closeTtsDialog = () => {
+    setTtsOpen(false)
+    setTtsRunning(false)
+    if (ttsPollRef.current) cancelAnimationFrame(ttsPollRef.current), (ttsPollRef.current = 0)
+  }
+  const pollTtsStatus = async (jobId) => {
+    try {
+      const resp = await fetch(`http://localhost:8000/audio/tts/status/${jobId}`)
+      if (!resp.ok) throw new Error('status error')
+      const js = await resp.json()
+      const p = Number(js.progress || 0)
+      setTtsProgress(isFinite(p) ? Math.max(0, Math.min(1, p)) : 0)
+      setTtsStatus(String(js.message || js.status || ''))
+      if (js.status === 'done') {
+        // fetch result
+        const r = await fetch(`http://localhost:8000/audio/tts/result/${jobId}`)
+        if (!r.ok) throw new Error('result error')
+        const blob = await r.blob()
+        const url = URL.createObjectURL(blob)
+        setAudioUrl(url)
+        setFile(new File([blob], 'tts.wav', { type: 'audio/wav' }))
+        setTtsRunning(false)
+        setTtsOpen(false)
+        return
+      }
+      if (js.status === 'error') {
+        setTtsRunning(false)
+        return
+      }
+    } catch (e) {
+      // stop on error
+      setTtsRunning(false)
+      return
+    }
+    // schedule next poll
+    if (ttsRunning) {
+      ttsPollRef.current = requestAnimationFrame(() => {
+        setTimeout(() => pollTtsStatus(jobId), 600)
+      })
+    }
+  }
+  const startTts = async () => {
+    if (!ttsText || !ttsText.trim()) return
+    try {
+      const form = new FormData()
+      form.append('text', ttsText)
+      form.append('language', ttsLanguage || 'zh')
+      if (ttsSpeaker && ttsSpeaker.trim()) form.append('speaker', ttsSpeaker.trim())
+      if (ttsRefFile) form.append('speaker_wav', ttsRefFile)
+      setTtsRunning(true)
+      setTtsProgress(0)
+      setTtsStatus('queued')
+      const resp = await fetch('http://localhost:8000/audio/tts/start', { method: 'POST', body: form })
+      if (!resp.ok) throw new Error('start error')
+      const js = await resp.json()
+      const jobId = js?.job_id
+      if (!jobId) throw new Error('no job id')
+      setTtsJobId(jobId)
+      setTimeout(() => pollTtsStatus(jobId), 400)
+    } catch (e) {
+      setTtsRunning(false)
+      setTtsStatus('error')
+    }
   }
 
   // Start/stop mic recording（最小改动：使用 MediaRecorder；Safari/Chrome 兼容尽量自适配）
@@ -617,6 +707,7 @@ export default function AudioTest() {
             <div>{numChannels != null ? `${numChannels}` : '-'}</div>
             <div style={{ gridColumn: '1 / -1' }}>
               <button className={styles.button} onClick={analyze} disabled={!file || analyzeLoading}>Analyze</button>
+              <button className={styles.button} style={{ marginTop: 8 }} onClick={openTtsDialog}>Text → WAV</button>
             </div>
           </div>
         </div>
@@ -744,6 +835,37 @@ export default function AudioTest() {
           </div>
         </div>
       </div>
+      {ttsOpen ? (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={closeTtsDialog}>
+          <div style={{ width: 560, maxWidth: '92vw', background: '#fff', borderRadius: 8, padding: 16, boxShadow: '0 8px 24px rgba(0,0,0,0.2)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Text to WAV</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 10, alignItems: 'center' }}>
+              <label style={{ color: '#555' }}>Text</label>
+              <textarea value={ttsText} onChange={(e) => setTtsText(e.target.value)} rows={4} style={{ width: '100%', resize: 'vertical' }} placeholder="Enter text to synthesize" />
+              <label style={{ color: '#555' }}>Language</label>
+              <input value={ttsLanguage} onChange={(e) => setTtsLanguage(e.target.value)} placeholder="zh" />
+              <label style={{ color: '#555' }}>Speaker</label>
+              <input value={ttsSpeaker} onChange={(e) => setTtsSpeaker(e.target.value)} placeholder="(optional)" />
+              <label style={{ color: '#555' }}>Speaker WAV</label>
+              <input type="file" accept="audio/*" onChange={(e) => setTtsRefFile(e.target.files?.[0] || null)} />
+              <div style={{ gridColumn: '1 / -1' }}>
+                {ttsRunning ? (
+                  <div>
+                    <div style={{ height: 8, background: '#f0f0f0', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{ width: `${Math.round(ttsProgress * 100)}%`, height: '100%', background: '#1677ff', transition: 'width 0.3s' }} />
+                    </div>
+                    <div style={{ marginTop: 8, color: '#555', fontSize: 12 }}>{Math.round(ttsProgress * 100)}% {ttsStatus || ''}</div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+              <button className={styles.button} onClick={closeTtsDialog} style={{ background: '#f0f0f0', color: '#333' }}>Cancel</button>
+              <button className={styles.button} onClick={startTts} disabled={ttsRunning || !ttsText.trim()} style={{ marginLeft: 8 }}>Start</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

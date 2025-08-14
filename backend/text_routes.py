@@ -138,6 +138,28 @@ def _get_lm(model_name: str):
         return cache[model_name]
     if not _TRANSFORMERS_AVAILABLE:
         return None
+    # 兼容 transformers 版本差异：提供缺失的 SequenceSummary（某些版本中被移除或迁移）
+    try:
+        import types as _types
+        from transformers import modeling_utils as _mu  # type: ignore
+        if not hasattr(_mu, "SequenceSummary"):
+            import torch.nn as _nn
+            class _SequenceSummary(_nn.Module):  # type: ignore
+                def __init__(self, *args, **kwargs):
+                    super().__init__()
+                    self.proj = _nn.Identity()
+                def forward(self, hidden_states, *args, **kwargs):  # noqa: D401
+                    return hidden_states
+            setattr(_mu, "SequenceSummary", _SequenceSummary)
+        # 某些版本需要确保模块属性可被 "from ... import SequenceSummary" 找到
+        pkg = _mu.__package__
+        if pkg:
+            import importlib as _importlib
+            _module = _importlib.import_module(pkg)
+            if not hasattr(_module, "SequenceSummary") and hasattr(_mu, "SequenceSummary"):
+                setattr(_module, "SequenceSummary", getattr(_mu, "SequenceSummary"))
+    except Exception:
+        pass
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
     model = AutoModelForCausalLM.from_pretrained(model_name)
     model.eval()
