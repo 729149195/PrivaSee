@@ -485,9 +485,14 @@ def start_tts(
         tf.write(speaker_wav.file.read())
         tf.flush(); tf.close()
     job_id = _uuid.uuid4().hex
-    th = _threading.Thread(target=_run_tts_job, args=(app, job_id, text.strip(), language.strip() or "zh", speaker, ref_path, out_path), daemon=True)
-    th.start()
+    # 初始化任务状态为 queued，先写入再启动线程，避免竞态覆盖完成态
     app.state.tts_jobs[job_id] = {"status": "queued", "progress": 0.0, "message": "queued", "output_path": None}
+    th = _threading.Thread(
+        target=_run_tts_job,
+        args=(app, job_id, text.strip(), language.strip() or "zh", speaker, ref_path, out_path),
+        daemon=True,
+    )
+    th.start()
     return {"job_id": job_id}
 
 
