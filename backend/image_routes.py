@@ -4,6 +4,9 @@ from pydantic import BaseModel
 router = APIRouter()
 APP_REF: FastAPI | None = None
 
+import logging
+logger = logging.getLogger(__name__)
+
 try:
     import torch
     import numpy as np
@@ -69,6 +72,8 @@ class ImgAnalysisResponse(BaseModel):
     height: int
     exif: dict | None = None
     clip_top: list[str] | None = None
+    clip_probs: dict[str, list[float]] | None = None
+    clip_labels: dict[str, list[str]] | None = None
     detections: list[ImgDetectBox]
     faces: list[ImgDetectBox]
     plates: list[ImgDetectBox]
@@ -164,8 +169,14 @@ def _get_clip_bundle(app_state):
     bundle = getattr(app_state, "clip_bundle", None)
     if bundle is not None:
         return bundle
-    clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-    clip_processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32")
+    try:
+        clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", local_files_only=True)
+        clip_processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32", local_files_only=True)
+    except Exception:
+        logger.warning("CLIP local cache not found; falling back to online download for 'openai/clip-vit-base-patch32'.")
+        clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+        clip_processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32")
+    clip_model.eval()
     app_state.clip_bundle = (clip_model, clip_processor)
     return app_state.clip_bundle
 
@@ -409,7 +420,22 @@ def analyze_image(file: UploadFile = File(...)):
                     for r in res:
                         ents.append(r.entity_type)
                         scores.append(r.score)
-                uncert = float(1.0 - max(scores) if scores else 1.0)
+                # Uncertainty via language-model IG+MC (same as TextTest)
+                try:
+                    from backend.text_routes import _get_lm, _integrated_gradients_saliency  # type: ignore
+                    bundle = _get_lm("distilgpt2")
+                    lm_uncert = None
+                    if bundle is not None:
+                        tok, mdl = bundle
+                        tokens = _integrated_gradients_saliency(tok, mdl, str(txt), samples=8, ig_steps=8, max_input_tokens=128, seed=42)
+                        if tokens:
+                            vals = [max(float(t.score_mean or 0.0), float(t.score_std or 0.0)) for t in tokens]
+                            import numpy as _np
+                            lm_uncert = float(_np.mean(_np.array(vals, dtype=_np.float32)))
+                    rule_uncert = float(1.0 - max(scores) if scores else 1.0)
+                    uncert = float(lm_uncert if lm_uncert is not None else rule_uncert)
+                except Exception:
+                    uncert = float(1.0 - max(scores) if scores else 1.0)
             except Exception:
                 ents, scores, uncert = [], [], None
             bx1, by1, bx2, by2 = float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys))
@@ -521,38 +547,7 @@ def analyze_image(file: UploadFile = File(...)):
 
     try:
         clip_model, clip_processor = _get_clip_bundle(getattr(APP_REF, "state", None))
-        clip_top = None
-        try:
-            blip = _get_captioner(getattr(APP_REF, "state", None))
-            if blip is not None:
-                blip_proc, blip_model = blip
-                import torch as _torch
-                with _torch.no_grad():
-                    inputs = blip_proc(images=img, return_tensors="pt")
-                    out = blip_model.generate(**inputs, max_new_tokens=30)
-                    caption = blip_proc.decode(out[0], skip_special_tokens=True).strip()
-                if caption:
-                    clip_top = [caption]
-        except Exception:
-            clip_top = None
-        with torch.no_grad():
-            pv = clip_processor(images=img, return_tensors="pt")["pixel_values"]
-        vision = clip_model.vision_model
-        outputs = vision(pixel_values=pv, output_attentions=True, return_dict=True)
-        attns = outputs.attentions
-        rollout = None
-        for a in attns:
-            a = a.mean(dim=1)
-            I = torch.eye(a.size(-1), device=a.device).unsqueeze(0)
-            a = a + I
-            a = a / a.sum(dim=-1, keepdim=True)
-            rollout = a if rollout is None else torch.bmm(rollout, a)
-        rel = rollout[:, 0, 1:]
-        num_tokens = rel.size(-1)
-        side = int(num_tokens ** 0.5)
-        rel = rel.reshape(-1, side, side)
-        rel = rel / (rel.max(dim=-1, keepdim=True)[0].max(dim=-2, keepdim=True)[0] + 1e-8)
-        pixel_heat = rel[0].detach().cpu().numpy().tolist()
+        clip_top = None  # do not match tags for now
 
         def _probs(opts: list[str]) -> np.ndarray:
             with torch.no_grad():
@@ -561,21 +556,89 @@ def analyze_image(file: UploadFile = File(...)):
             ex = np.exp(lg - lg.max())
             return ex / ex.sum()
 
-        io_probs = _probs(["an indoor scene", "an outdoor scene"])  # [p_indoor, p_outdoor]
+        clip_probs: dict[str, list[float]] = {}
+        clip_labels: dict[str, list[str]] = {}
+
+        labels_io = ["an indoor scene", "an outdoor scene"]
+        io_probs = _probs(labels_io)
+        clip_probs["indoor_outdoor"] = io_probs.tolist()
+        clip_labels["indoor_outdoor"] = labels_io
         p_outdoor = float(io_probs[1])
-        lm_opts = [
+
+        labels_landmark = [
             "a famous landmark", "a generic indoor room", "a close-up object", "a random photo without a distinctive location"
         ]
-        lm_probs = _probs(lm_opts)
+        lm_probs = _probs(labels_landmark)
+        clip_probs["landmark_set"] = lm_probs.tolist()
+        clip_labels["landmark_set"] = labels_landmark
         p_landmark = float(lm_probs[0])
+
+        # fill clip_top using top-1 label of each prompt set
+        try:
+            clip_top_list: list[str] = []
+            for k in ["indoor_outdoor", "landmark_set"]:
+                if k in clip_labels and k in clip_probs:
+                    lbls = clip_labels[k]
+                    probs = clip_probs[k]
+                    if isinstance(lbls, list) and isinstance(probs, list) and len(lbls) == len(probs) and len(lbls) > 0:
+                        import numpy as _np
+                        idx = int(_np.argmax(_np.array(probs, dtype=_np.float32)))
+                        clip_top_list.append(str(lbls[idx]))
+            if clip_top_list:
+                clip_top = clip_top_list
+        except Exception:
+            pass
+
+        # Integrated Gradients with SmoothGrad for top-1 prompt logit
+        pixel_heat = None
+        try:
+            import numpy as _np
+            texts_all = labels_io + labels_landmark
+            tin = clip_processor(text=texts_all, return_tensors="pt", padding=True)
+            pv0 = clip_processor(images=img, return_tensors="pt")["pixel_values"]
+            baseline = torch.zeros_like(pv0)
+            with torch.no_grad():
+                out0 = clip_model(input_ids=tin["input_ids"], attention_mask=tin.get("attention_mask", None), pixel_values=pv0)
+                target_i = int(_np.argmax(out0.logits_per_image[0].cpu().numpy()))
+
+            n_steps = 12
+            n_samples = 6
+            sigma = 0.08
+            attr_accum = torch.zeros_like(pv0)
+            for _ in range(n_samples):
+                noise = sigma * torch.randn_like(pv0)
+                pv_noisy = (pv0 + noise).clamp(-3.0, 3.0)
+                total_grad = torch.zeros_like(pv0)
+                for k in range(1, n_steps + 1):
+                    alpha = float(k) / float(n_steps)
+                    pv = (baseline + alpha * (pv_noisy - baseline)).detach().requires_grad_(True)
+                    out = clip_model(input_ids=tin["input_ids"], attention_mask=tin.get("attention_mask", None), pixel_values=pv)
+                    score = out.logits_per_image[0, target_i]
+                    clip_model.zero_grad(set_to_none=True)
+                    if pv.grad is not None:
+                        pv.grad.zero_()
+                    score.backward(retain_graph=True)
+                    total_grad = total_grad + pv.grad.detach()
+                ig = (pv_noisy - baseline) * (total_grad / float(n_steps))
+                attr_accum = attr_accum + ig
+            attr = attr_accum / float(n_samples)
+            sal = attr[0].abs().sum(dim=0)
+            sal = sal / (sal.max() + 1e-8)
+            pixel_heat = sal.detach().cpu().numpy().tolist()
+        except Exception:
+            pixel_heat = None
     except Exception:
+        logger.exception("CLIP analysis failed")
         clip_top = None
         p_outdoor = None
         p_landmark = None
         pixel_heat = None
+        clip_probs = None
+        clip_labels = None
 
     geo_candidates: list[GeoCandidate] | None = None
     geo_uncertainty: ImgAnalysisResponse.GeoUncertainty | None = None
+    _idx_used: bool = False
     try:
         idx = _get_landmark_index(getattr(APP_REF, "state", None))
         if idx is not None:
@@ -613,6 +676,7 @@ def analyze_image(file: UploadFile = File(...)):
             consistency = float(probs.max()) if probs.size > 0 else 0.0
             margin = float((D[0][0] - D[0][1]) if len(D[0]) > 1 else D[0][0])
             geo_uncertainty = ImgAnalysisResponse.GeoUncertainty(consistency=consistency, entropy_norm=ent_norm, margin=margin)
+            _idx_used = True
     except Exception:
         geo_candidates = None
         geo_uncertainty = None
@@ -632,6 +696,7 @@ def analyze_image(file: UploadFile = File(...)):
             exif["GPSLongitudeDecimal"] = lon
 
     if geo_uncertainty is None:
+        # compute TTA-based stability without using any external index
         try:
             clip_model, clip_processor = _get_clip_bundle(getattr(APP_REF, "state", None))
             crops = _tta_images(img, n=10)
@@ -650,7 +715,7 @@ def analyze_image(file: UploadFile = File(...)):
             mean_sim = float(_np.mean(sims)) if sims.size else 0.0
             std_sim = float(_np.std(sims)) if sims.size else 0.0
             consistency = max(0.0, min(1.0, (mean_sim + 1.0) / 2.0))
-            entropy_norm = max(0.0, min(1.0, std_sim / 0.2))
+            entropy_norm = max(0.0, min(1.0, std_sim / 0.3))
             geo_uncertainty = ImgAnalysisResponse.GeoUncertainty(consistency=consistency, entropy_norm=entropy_norm, margin=0.0)
         except Exception:
             pass
@@ -658,22 +723,19 @@ def analyze_image(file: UploadFile = File(...)):
     geo_prob: float | None = None
     try:
         if geo_uncertainty is not None:
-            base = max(0.0, min(1.0, geo_uncertainty.consistency * (1.0 - geo_uncertainty.entropy_norm)))
-            margin_norm = max(0.0, min(1.0, (geo_uncertainty.margin + 1.0) / 2.0)) if geo_uncertainty.margin is not None else 0.5
-            scene_gate = 1.0
-            if p_outdoor is not None:
-                scene_gate *= p_outdoor
-            if p_landmark is not None:
-                scene_gate *= (0.5 + 0.5 * p_landmark)
+            # database-free geolocatability: combine CLIP cues + TTA stability
+            consistency = max(0.0, min(1.0, float(geo_uncertainty.consistency or 0.0)))
+            stability = max(0.0, min(1.0, 1.0 - float(geo_uncertainty.entropy_norm or 0.0)))
+            po = float(p_outdoor) if p_outdoor is not None else 0.5
+            pl = float(p_landmark) if p_landmark is not None else 0.3
+            base = (0.35 * po + 0.35 * pl + 0.15 * consistency + 0.15 * stability)
             area = float(img.size[0] * img.size[1])
             face_area = sum((f.x2 - f.x1) * (f.y2 - f.y1) for f in faces)
             face_frac = min(1.0, face_area / area) if area > 0 else 0.0
-            plate_bonus = 0.2 if len(plates) > 0 else 0.0
-            text_bonus = min(0.3, 0.03 * len(ocr_boxes))
-            building_bonus = 0.2 if (clip_top and any(t in clip_top for t in ["a building", "a landmark"])) else 0.0
-            cues = max(0.1, min(1.0, 0.1 + plate_bonus + text_bonus + building_bonus))
-            face_gate = max(0.2, 1.0 - 1.5 * face_frac)
-            geo_prob = max(0.0, min(1.0, (0.5 * base + 0.5 * margin_norm) * scene_gate * cues * face_gate))
+            plate_bonus = min(0.2, 0.05 * len(plates))
+            text_bonus = min(0.2, 0.02 * len(ocr_boxes))
+            face_penalty = min(0.5, 1.0 * face_frac)
+            geo_prob = max(0.0, min(1.0, base + plate_bonus + text_bonus - face_penalty))
     except Exception:
         geo_prob = None
 
@@ -682,6 +744,8 @@ def analyze_image(file: UploadFile = File(...)):
         height=height,
         exif=exif or None,
         clip_top=clip_top,
+        clip_probs=clip_probs,
+        clip_labels=clip_labels,
         detections=detections,
         faces=faces,
         plates=plates,

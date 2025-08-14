@@ -6,6 +6,8 @@ export default function ImgTest() {
   const [imgUrl, setImgUrl] = useState('')
   const [meta, setMeta] = useState(null)
   const [clipTags, setClipTags] = useState([])
+  const [clipProbs, setClipProbs] = useState(null)
+  const [clipLabels, setClipLabels] = useState(null)
   const [geo, setGeo] = useState([])
   const [geoUnc, setGeoUnc] = useState(null)
   const [geoProb, setGeoProb] = useState(null)
@@ -73,12 +75,12 @@ export default function ImgTest() {
     }
   }
 
-  const drawHeat = (canvas, image, pixelHeat, ocrList) => {
+  const drawHeat = (canvas, image, pixelHeat, ocrList, faceList) => {
     const ctx = canvas.getContext('2d')
     canvas.width = image.width
     canvas.height = image.height
     ctx.drawImage(image, 0, 0)
-    // pixel-level CLIP attention heatmap if available
+    // pixel-level heat map if available
     if (pixelHeat && Array.isArray(pixelHeat) && pixelHeat.length) {
       const hH = pixelHeat.length
       const hW = pixelHeat[0].length
@@ -89,7 +91,8 @@ export default function ImgTest() {
       const imgData = tctx.createImageData(hW, hH)
       // color map: blue->yellow->red
       const colorMap = (v) => {
-        const x = Math.max(0, Math.min(1, v))
+        // stronger gamma to boost visibility
+        const x = Math.pow(Math.max(0, Math.min(1, v)), 0.35)
         const r = Math.round(255 * Math.max(0, 1.5 * x - 0.5))
         const g = Math.round(255 * Math.max(0, Math.min(1.5 * x, 1.5 * (1 - x))))
         const b = Math.round(255 * Math.max(0, 1.5 * (1 - x) - 0.5))
@@ -103,21 +106,34 @@ export default function ImgTest() {
           imgData.data[p++] = r
           imgData.data[p++] = g
           imgData.data[p++] = b
-          imgData.data[p++] = Math.round(180 * Math.max(0.1, Math.min(1, v)))
+          const a = Math.pow(Math.max(0, Math.min(1, v)), 0.35)
+          imgData.data[p++] = Math.round(245 * a)
         }
       }
       tctx.putImageData(imgData, 0, 0)
       ctx.imageSmoothingEnabled = false
-      ctx.globalCompositeOperation = 'multiply'
       ctx.drawImage(temp, 0, 0, image.width, image.height)
-      ctx.globalCompositeOperation = 'source-over'
     }
-    // overlay text uncertainty regions (light blue)
+    // overlay text uncertainty regions (light blue, stronger alpha)
     for (const t of (ocrList || [])) {
       if (t.uncert == null) continue
-      const a = Math.min(0.5, Math.max(0.1, t.uncert))
+      const a = Math.min(0.75, Math.max(0.15, t.uncert))
       ctx.fillStyle = `rgba(24,144,255,${a})`
       ctx.fillRect(t.x1, t.y1, t.x2 - t.x1, t.y2 - t.y1)
+    }
+
+    // overlay FACE regions with opacity based on (1 - score)
+    for (const f of (faceList || [])) {
+      if (!f || String(f.label).toUpperCase() !== 'FACE') continue
+      const u = 1 - Math.max(0, Math.min(1, f.score ?? 0))
+      const a = Math.min(0.75, Math.max(0.15, u))
+      // green tint for faces to区分于OCR
+      ctx.fillStyle = `rgba(82,196,26,${a})`
+      ctx.fillRect(f.x1, f.y1, f.x2 - f.x1, f.y2 - f.y1)
+      // add border to separate from heatmap
+      ctx.lineWidth = Math.max(2, Math.min(6, Math.round(Math.max(image.width, image.height) / 600)))
+      ctx.strokeStyle = 'rgba(82,196,26,1)'
+      ctx.strokeRect(f.x1, f.y1, f.x2 - f.x1, f.y2 - f.y1)
     }
   }
 
@@ -126,7 +142,7 @@ export default function ImgTest() {
     const img = new Image()
     img.onload = () => {
       if (canvasRef.current) drawBoxes(canvasRef.current, img, [...boxes, ...faces, ...plates, ...ocr], '#1677ff')
-      if (heatRef.current) drawHeat(heatRef.current, img, meta?.pixel_heat || null, ocr)
+      if (heatRef.current) drawHeat(heatRef.current, img, meta?.pixel_heat || null, ocr, faces)
     }
     img.src = imgUrl
   }, [imgUrl, boxes, faces, plates, ocr, heat, meta])
@@ -136,6 +152,8 @@ export default function ImgTest() {
     if (!f) return
     // Clear previous results
     setClipTags([])
+    setClipProbs(null)
+    setClipLabels(null)
     setMeta(null)
     setBoxes([])
     setFaces([])
@@ -164,6 +182,8 @@ export default function ImgTest() {
       const data = await resp.json()
       setMeta({ width: data.width, height: data.height, exif: data.exif || {}, pixel_heat: data.pixel_heat || null })
       setClipTags(data.clip_top || [])
+      setClipProbs(data.clip_probs || null)
+      setClipLabels(data.clip_labels || null)
       setBoxes(data.detections || [])
       setFaces(data.faces || [])
       setPlates(data.plates || [])
@@ -190,6 +210,18 @@ export default function ImgTest() {
             <input className={styles.input} type="file" accept="image/*" onChange={onUpload} />
             <label className={styles.label}>CLIP tags</label>
             <div>{clipTags.join(', ') || '-'}</div>
+            <label className={styles.label}>CLIP indoor/outdoor</label>
+            <div>
+              {clipProbs && clipLabels && clipLabels.indoor_outdoor && clipProbs.indoor_outdoor
+                ? clipLabels.indoor_outdoor.map((t, i) => `${t}: ${(clipProbs.indoor_outdoor[i] ?? 0).toFixed(2)}`).join(', ')
+                : '-'}
+            </div>
+            <label className={styles.label}>CLIP landmark set</label>
+            <div>
+              {clipProbs && clipLabels && clipLabels.landmark_set && clipProbs.landmark_set
+                ? clipLabels.landmark_set.map((t, i) => `${t}: ${(clipProbs.landmark_set[i] ?? 0).toFixed(2)}`).join(', ')
+                : '-'}
+            </div>
             <label className={styles.label}>Size</label>
             <div>{meta ? `${meta.width} × ${meta.height}` : '-'}</div>
             <label className={styles.label}>EXIF GPS</label>
