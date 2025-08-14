@@ -1,0 +1,172 @@
+.container {
+  margin: 0 auto;
+}
+
+.row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.col {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.colTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #595959;
+  display: inline-block;
+  margin: 0 0 6px 2px;
+}
+
+.box {
+  flex: 1 1 auto;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  overflow: auto;
+  position: relative;
+  padding: 10px;
+}
+
+.canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: #8c8c8c;
+}
+
+.emptyIcon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 2px dashed #d9d9d9;
+}
+
+.overlayLoading {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.overlayLoading.show {
+  display: flex;
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 3px solid #d9d9d9;
+  border-top-color: #1677ff;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.panel {
+  margin: 12px 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.panelSection {
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #fafafa;
+}
+
+.panelTitle {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #434343;
+}
+
+.panelGrid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 8px 10px;
+  align-items: center;
+}
+
+.label {
+  font-size: 12px;
+  color: #595959;
+}
+
+.select,
+.input {
+  padding: 6px 8px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+}
+
+.button {
+  padding: 8px 16px;
+  background: #1677ff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #8c8c8c;
+}
+
+.legendBar {
+  width: 120px;
+  height: 8px;
+  border-radius: 6px;
+  background: linear-gradient(to right, rgba(255, 77, 79, 0.1), rgba(255, 77, 79, 0.85));
+}
+
+.loadingPlaceholder {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.loadingLine {
+  height: 1em;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #f5f5f5 0%, #ececec 50%, #f5f5f5 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}

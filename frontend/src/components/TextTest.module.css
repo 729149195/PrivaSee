@@ -1,0 +1,339 @@
+.container {
+  margin: 0 auto;
+}
+
+.title {
+  margin: 0 0 12px;
+}
+
+.row {
+  display: flex;
+  align-items: stretch; /* ensure equal height */
+  gap: 12px;
+}
+
+.left,
+.middle,
+.right {
+  flex: 1 1 0; /* three equal-width columns */
+  display: flex; /* allow inner box to stretch to equal height */
+  flex-direction: column; /* stack title and box vertically */
+}
+
+.textBox {
+  flex: 1 1 auto; /* stretch to equal height */
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 8px 12px;
+  line-height: 1.5; /* match textarea line-height */
+  box-sizing: border-box;
+  background: #fff;
+  overflow: auto; /* allow scroll if overflow */
+  white-space: pre-wrap; /* wrap and keep line breaks */
+  word-break: break-word; /* long words break */
+}
+
+.uncertBox {
+  flex: 1 1 auto;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 8px 12px;
+  line-height: 1.5;
+  box-sizing: border-box;
+  background: #fff;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Heatmap span used for uncertainty highlighting */
+.heatSpan {
+  border-radius: 6px;
+  padding: 1px 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.uncertLegend {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #595959;
+}
+
+.rich {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* Highlight style for detected PII */
+.pii {
+  background-color: rgba(255, 213, 0, 0.35);
+  padding: 2px 6px; /* more padding for a rounded pill look */
+  border-radius: 8px; /* rounded corners */
+  position: relative;
+  display: inline-flex; /* turn into inline flex to vertically center contents */
+  align-items: center; /* center text and tag vertically */
+  gap: 6px; /* space between text and tag */
+  line-height: 1.5; /* match .textBox line-height */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.pii::after {
+  content: attr(data-entity);
+  display: inline-flex; /* make the tag a flex box for centering */
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  font-size: 12px;
+  height: 1.5em; /* equal to container line-height */
+  line-height: 1; /* avoid extra vertical offset */
+  border-radius: 8px; /* tag also rounded */
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(0,0,0,0.06);
+  color: #415262;
+}
+
+/* Type-based color accents */
+.type-PERSON { background-color: rgba(82,196,26,0.25); border-bottom-color: #389e0d; }
+.type-PERSON::after { background: rgba(82,196,26,0.25); color: #255504; }
+.type-LOCATION { background-color: rgba(114,46,209,0.2); border-bottom-color: #722ed1; }
+.type-LOCATION::after { background: rgba(114,46,209,0.2); color: #40197a; }
+.type-EMAIL_ADDRESS { background-color: rgba(250,173,20,0.25); border-bottom-color: #d48806; }
+.type-EMAIL_ADDRESS::after { background: rgba(250,173,20,0.25); color: #7c4a02; }
+.type-PHONE_NUMBER { background-color: rgba(135,208,104,0.25); border-bottom-color: #389e0d; }
+.type-PHONE_NUMBER::after { background: rgba(135,208,104,0.25); color: #255504; }
+.type-URL { background-color: rgba(24,144,255,0.2); border-bottom-color: #1677ff; }
+.type-URL::after { background: rgba(24,144,255,0.2); color: #0958d9; }
+.type-IP_ADDRESS { background-color: rgba(250,140,22,0.25); border-bottom-color: #d46b08; }
+.type-IP_ADDRESS::after { background: rgba(250,140,22,0.25); color: #7c3b02; }
+.type-CREDIT_CARD { background-color: rgba(255,77,79,0.2); border-bottom-color: #cf1322; }
+.type-CREDIT_CARD::after { background: rgba(255,77,79,0.2); color: #820014; }
+.type-US_BANK_NUMBER { background-color: rgba(255,77,79,0.2); border-bottom-color: #cf1322; }
+.type-US_BANK_NUMBER::after { background: rgba(255,77,79,0.2); color: #820014; }
+.type-IBAN_CODE { background-color: rgba(135,208,104,0.25); border-bottom-color: #389e0d; }
+.type-IBAN_CODE::after { background: rgba(135,208,104,0.25); color: #255504; }
+.type-DATE_TIME { background-color: rgba(255,192,203,0.35); border-bottom-color: #ff85c0; }
+.type-DATE_TIME::after { background: rgba(255,192,203,0.35); color: #a8071a; }
+.type-ORGANIZATION { background-color: rgba(64,169,255,0.2); border-bottom-color: #1677ff; }
+.type-ORGANIZATION::after { background: rgba(64,169,255,0.2); color: #0958d9; }
+.type-US_PASSPORT { background-color: rgba(255,214,102,0.25); border-bottom-color: #d48806; }
+.type-US_PASSPORT::after { background: rgba(255,214,102,0.25); color: #7c4a02; }
+.type-CRYPTO { background-color: rgba(135,208,104,0.25); border-bottom-color: #389e0d; }
+.type-CRYPTO::after { background: rgba(135,208,104,0.25); color: #255504; }
+
+.textarea {
+  width: 100%;
+  flex: 1 1 auto; /* stretch to equal height */
+  min-height: 40px;
+  max-height: none; /* remove maximum height */
+  padding: 8px 12px; /* match textBox padding */
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+  resize: none; /* keep visual parity and equal height */
+  line-height: 1.5;
+  overflow-y: hidden; /* hide vertical scrollbar */
+}
+
+/* Hide scrollbar in WebKit/Blink */
+.textarea::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.button {
+  width: 100%;
+  padding: 8px 16px;
+  background-color: #1677ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.controls {
+  margin-top: 12px;
+}
+
+.status {
+  margin-left: 8px;
+  color: #595959;
+}
+
+.error {
+  margin-left: 8px;
+  color: #cf1322;
+}
+
+.loading {
+  color: #8c8c8c;
+}
+
+/* Shimmer skeleton for loading states */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.loadingPlaceholder {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.loadingLine {
+  height: 1em;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #f5f5f5 0%, #ececec 50%, #f5f5f5 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+.panel {
+  margin: 12px 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.panelSection {
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #fafafa;
+}
+
+.panelTitle {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #434343;
+}
+
+.panelGrid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 8px 10px;
+  align-items: center;
+}
+
+.field { display: contents; }
+
+.label { font-size: 12px; color: #595959; }
+
+.number { width: 90px; }
+
+.help { grid-column: 1 / -1; font-size: 12px; color: #8c8c8c; }
+
+.colTitle { font-size: 14px; font-weight: 600; color: #595959; display: inline-block; }
+
+.inputTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #595959;
+  margin: 6px 0 6px 2px;
+}
+
+.colHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 3px 0 3px 2px;
+}
+
+.colHeader_uncert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 0 6px 2px;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #8c8c8c;
+}
+
+.legendBar {
+  width: 120px;
+  height: 8px;
+  border-radius: 6px;
+  background: linear-gradient(to right, rgba(255,77,79,0.1), rgba(255,77,79,0.85));
+}
+
+.select,
+.input {
+  padding: 6px 8px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+}
+
+.checkboxGroup {
+  max-height: 160px;
+  overflow: auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.checkboxItem {
+  margin-right: 12px;
+}
+
+/* Enhanced entity filter UI */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+
+.toolbarLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.count { font-size: 12px; color: #8c8c8c; }
+
+.btnSecondary {
+  padding: 4px 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 16px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.chipGroup {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.filterLegend { display: flex; align-items: center; gap: 0px; }
+.chipSample { pointer-events: none; transform: scale(0.7); }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 16px;
+  background: #fff;
+  cursor: pointer;
+  user-select: none;
+}
+
+.chipActive { border-color: #1677ff; background: #e6f4ff; }
+
+.chip input { position: absolute; opacity: 0; width: 0; height: 0; }
+.chip span { font-size: 12px; color: #262626; }
