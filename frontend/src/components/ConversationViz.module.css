@@ -1,0 +1,366 @@
+/* Drawer layout */
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  background: #fff;
+  box-shadow: -4px 0 24px rgba(0,0,0,0.08);
+  border-left: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  transition: width 0.22s ease;
+}
+
+.drawerCollapsed { width: 56px; }
+.drawerExpanded { width: 480px; }
+
+.drawerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.drawerTitle {
+  font-weight: 600;
+  color: #333;
+}
+
+.drawerTabs {
+  display: flex;
+  gap: 6px;
+}
+
+.drawerTab {
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid #f0f0f0;
+  background: #fafafa;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.drawerTabActive {
+  background: #e6f4ff;
+  border-color: #91caff;
+  color: #1677ff;
+}
+
+.drawerBody {
+  position: relative;
+  flex: 1;
+  overflow: auto;
+}
+
+.drawerHandle {
+  position: absolute;
+  top: 50%;
+  left: -12px;
+  transform: translate(-100%, -50%);
+  width: 32px;
+  height: 80px;
+  border-radius: 8px 0 0 8px;
+  background: #1677ff;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.drawerOverlayHidden { display: none; }
+.drawerOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.25);
+  z-index: 90;
+}
+
+/* In-component split layout */
+.splitContainer {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 12px;
+  align-items: start;
+  width: 100%;
+}
+
+.leftPane {
+  position: relative;
+  padding: 10px;
+}
+
+.rightPane {
+  position: relative;
+  border-left: 1px solid #f0f0f0;
+  padding-left: 12px;
+  min-height: 480px;
+}
+
+.resizer {
+  width: 6px;
+  cursor: col-resize;
+  background: rgba(0,0,0,0.06);
+  transition: background 0.15s ease;
+}
+.resizer:hover { background: rgba(0,0,0,0.12); }
+
+/* Flow canvas (Sankey + macro nodes) */
+.flowRoot {
+  position: relative;
+  padding: 8px 10px 16px 10px;
+}
+
+.flowSvg { width: 100%; height: 560px; }
+
+.nodeGroup { cursor: pointer; }
+.nodeRect { fill: #fafafa; stroke: #e8e8e8; }
+.nodeRectActive { stroke: #1677ff; }
+.microDot { stroke: #fff; stroke-width: 1.5px; }
+
+.legend {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: #595959;
+  font-size: 12px;
+  margin: 6px 0 16px 0;
+}
+
+.legendSection {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.legendTitle {
+  font-weight: 600;
+  color: #333;
+  margin-right: 8px;
+  min-width: 80px;
+}
+
+.legendSwatch { 
+  width: 12px; 
+  height: 12px; 
+  border-radius: 50%; 
+  border: 1px solid rgba(0,0,0,0.12); 
+  margin-right: 4px;
+}
+
+.kvRow { display: flex; justify-content: space-between; font-size: 12px; color: #595959; margin: 6px 0; }
+.meter {
+  position: relative;
+  height: 8px;
+  background: #f5f5f5;
+  border: 1px solid #f0f0f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.meterFill { height: 100%; background: linear-gradient(90deg,#91caff,#1677ff); }
+.meterEvict { position: absolute; right: 0; top: 0; height: 100%; background: #ffe7ba; }
+
+/* Simple modal */
+.modalOverlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+.modalCard { width: 720px; max-width: 92vw; max-height: 85vh; overflow: auto; background: #fff; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.25); padding: 12px; }
+
+/* Legacy timeline styles (kept for messages tab) */
+.overlaySvg { position: absolute; inset: 0; pointer-events: none; }
+
+/* Message list */
+.msgList {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: relative;
+}
+
+.msgRow {
+  display: flex;
+  align-items: flex-start;
+}
+
+.spineSlot {
+  width: 72px;
+  min-width: 72px;
+  display: flex;
+  justify-content: center;
+}
+
+.bubbleWrap {
+  position: relative;
+  max-width: min(720px, 86%);
+}
+
+.bubble {
+  background: #f5f5f5;
+  color: #222;
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  border: 1px solid #f0f0f0;
+}
+
+.bubbleUser {
+  background: #e6f4ff;
+  border-color: #bae0ff;
+}
+
+.bubbleAssistant {
+  background: #fafafa;
+  border-color: #f0f0f0;
+}
+
+.rowLeft {
+  flex-direction: row;
+}
+
+.rowRight {
+  flex-direction: row-reverse;
+}
+
+.metaBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #8c8c8c;
+  margin-bottom: 6px;
+}
+
+.toolBadge {
+  background: #fff;
+  border: 1px solid #e6f4ff;
+  color: #1677ff;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.topicDot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.contentText {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.contentTextCollapsed {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.mediaGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.thumb {
+  width: 100%;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #f0f0f0;
+}
+
+.fileItem {
+  font-size: 12px;
+  color: #595959;
+}
+
+.panelTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #444;
+  margin: 8px 0;
+}
+
+.topicItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  cursor: pointer;
+}
+
+.topicSwatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgba(0,0,0,0.08);
+}
+
+.searchBar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.searchInput {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+}
+
+.button {
+  padding: 6px 10px;
+  background: #1677ff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.buttonSecondary {
+  padding: 6px 10px;
+  background: #f0f0f0;
+  color: #333;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.highlight {
+  outline: 2px solid #ffa940;
+}
+
+.tooltip {
+  position: absolute;
+  background: #222;
+  color: #fff;
+  padding: 6px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+  pointer-events: none;
+  white-space: nowrap;
+  transform: translate(-50%, -120%);
+  opacity: 0;
+  transition: opacity 0.12s ease-in-out;
+}
+
+.tooltipShow {
+  opacity: 1;
+}
+
+@media (max-width: 900px) {
+  .drawerExpanded { width: 92vw; }
+  .splitContainer { grid-template-columns: 1fr; }
+  .rightPane { border-left: none; padding-left: 0; }
+}
+
+

@@ -4,6 +4,7 @@ import styles from './Home.module.css'
 import TextTest from '../components/TextTest'
 import ImgTest from '../components/ImgTest'
 import AudioTest from '../components/AudioTest'
+import ConversationViz from '../components/ConversationViz'
 
 export default function Home() {
   return (
@@ -13,6 +14,8 @@ export default function Home() {
       <ImgTest />
       <Divider />
       <AudioTest />
+      <Divider />
+      <ConversationViz />
     </div>
   )
 }

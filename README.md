@@ -3,10 +3,10 @@
 ## 启动
 
 - 前端（Vite + React）
-  - `npm run dev`
+  - `cd frontend && npm install && npm run dev`
 - 后端（FastAPI，conda 环境 `privasee`）
   - `conda activate privasee`
-  - `uvicorn main:app --reload --host 0.0.0.0 --port 8000`
+  - `cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8000`
 
 ---
 
@@ -95,19 +95,30 @@ Presidio 的检测器通常融合两类能力：
 
 ## 接口摘要
 
-- `POST /analyze`：PII 检测。入参：`text`, `model`, `entities`；出参：`[start,end,type,score]`。
-- `POST /entities`：返回当前模型支持的实体列表。
-- `POST /uncertainty`：不确定性估计。入参：`text`, `model`, `samples`, `ig_steps`, `seed`；出参：`[start,end,token,score_mean,score_std]`。
+- 文本
+  - `POST /analyze`：PII 检测。入参：`text`, `model`, `entities`；出参：`[start,end,type,score]`。
+  - `POST /entities`：返回当前模型支持的实体列表。
+  - `POST /uncertainty`：不确定性估计。入参：`text`, `model`, `samples`, `ig_steps`, `seed`；出参：`[start,end,token,score_mean,score_std]`。
+- 图片
+  - `POST /image/analyze`：图像综合分析（检测/人脸/车牌/OCR/CLIP/像素热力/地标检索）。
+- 音频
+  - `POST /audio/analyze`：波形/起音点/节拍/非静音/帧级不确定性。
+  - `POST /audio/transcribe`：音频转写（可选）。
+- 语音合成（TTS）
+  - `POST /audio/tts/start`：启动合成（表单字段：`text`、`language`、`speaker`、`speaker_wav`）。返回 `job_id`。
+  - `GET /audio/tts/status/{job_id}`：查询任务状态（`queued/running/done/error`）。
+  - `GET /audio/tts/result/{job_id}`：下载 WAV 结果（任务完成后）。
 
 ---
 
 ## 前端页面概览与操作说明
 
-页面包含三个组件并排或分组展示：
+页面包含四个组件并排或分组展示：
 
 - TextTest：文本 PII 实体高亮 + 文本不确定性热力
 - ImgTest：图片检测（PII/人脸/车牌/OCR）+ 图像不确定性热力 + 地标可定位概率
 - AudioTest：音频结构化事件（Onset/Beat/Active segment）+ 不确定性热力 + 原音频播放 + 转写文本的 PII 高亮与不确定性
+- ConversationViz：多模态对话流可视化（时间线 + 流图 + 上下文窗口）
 
 ### 文本（TextTest）
 
@@ -129,7 +140,7 @@ Presidio 的检测器通常融合两类能力：
   - 检测结果（PII/对象/人脸/车牌/OCR）叠加在图片上方，OCR 文本若命中 PII 也会标签显示
   - 不确定性热力：
     - 目标框不确定性（红色，基于置信度的反向/合成估计）
-    - OCR 文本不确定性（蓝色，基于 PII 置信度的补充估计）
+    - OCR 文本不确定性（蓝色，结合 PII 规则置信度与语言模型归因稳定性）
   - 预览原图
 
 常见用途：照片/截图中的 PII 预检（人脸、证件、车牌、可定位视觉线索），辅助脱敏与可共享性评估。
@@ -154,6 +165,13 @@ Presidio 的检测器通常融合两类能力：
 
 常见用途：会议录音/语音分享的合规检查与脱敏。优先人工听审不确定性较高的区域；在高不确定区段加大遮蔽保护。
 
+### 会话可视化（ConversationViz）
+
+- 左侧：对话消息气泡列表，支持搜索过滤、主题颜色标注、图片/文件预览；悬停显示 `timestamp/tokens/processing_time`。
+- 右侧：对话流图（Q→Context→A），节点含微点编码（输入类型与工具），曲线箭头动态流动，支持拖拽重排；全局上下文节点展示容量/使用/淘汰统计。
+- 数据：组件自带 demo 数据；也可通过 `data={...}` 传入同结构数据。
+- 依赖：`antd`（Splitter/Input/Button/Upload）、`d3`（SVG 渲染）。
+
 ---
 
 ## 后端接口（图片与音频）
@@ -167,10 +185,11 @@ Presidio 的检测器通常融合两类能力：
 - `width/height`：图像尺寸
 - `exif`：原始 EXIF，附加 `GPSLatitudeDecimal/GPSLongitudeDecimal`
 - `clip_top`：CLIP 文本提示的 top-k 标签
+- `clip_probs/clip_labels`：各提示集合的概率分布与对应标签列表
 - `detections/faces/plates`：YOLOv8 检测框
 - `ocr_boxes`：OCR 文本框（附带 `pii_types/pii_scores/uncert`）
 - `heat_boxes`：合成的不确定性框（红色叠加）
-- `pixel_heat`：CLIP 视觉注意力 roll-out（二维归一化热力）
+- `pixel_heat`：CLIP 像素级归因（Integrated Gradients + SmoothGrad，二维归一化热力）
 - `geo_candidates/geo_prob/geo_uncertainty`：地标检索与可定位概率估计
 
 ### 音频：`POST /audio/analyze`
@@ -196,6 +215,19 @@ Presidio 的检测器通常融合两类能力：
 - `text`：整段转写
 - `segments`：分段转写（`start/end/text`）
 
+### 语音合成（可选）：`POST /audio/tts/start` → `GET /audio/tts/status/{job_id}` → `GET /audio/tts/result/{job_id}`
+
+- 依赖：`TTS`（Coqui XTTS v2，多语种、多说话人），以及 `torch`。
+- 入参（`multipart/form-data`）：
+  - `text`：要合成的文本（支持中英混合）。
+  - `language`：如 `zh`、`en`，默认 `zh`。
+  - `speaker`：可选说话人标识。
+  - `speaker_wav`：可选参考音色音频（few-shot 克隆）。
+- 返回：
+  - `start`：`{ job_id }`
+  - `status`：`{ status, progress, message, output_path }`
+  - `result`：WAV 文件下载（当 `status=done`）
+
 ---
 
 ## 安装与依赖（conda 环境）
@@ -218,6 +250,23 @@ pip install librosa soundfile faster-whisper
 ```
 
 如 macOS 上 `brew install libsndfile` 无法访问 ghcr.io，可使用 conda-forge 渠道（如上）。
+
+可选组件（增强图像/语音能力）：
+
+```bash
+# 图像：地标检索（FAISS）、人脸检测（MediaPipe）、OCR（PaddleOCR 作为 EasyOCR 备选）
+pip install faiss-cpu mediapipe paddleocr
+
+# 语音：多语种 TTS（Coqui XTTS v2）
+pip install TTS
+```
+
+前端依赖：
+
+```bash
+cd frontend
+npm install
+```
 
 ---
 
@@ -243,6 +292,7 @@ pip install librosa soundfile faster-whisper
 ### 文本 Text
 
 #### PII 检测（Presidio + spaCy）
+
 - 管线：`AnalyzerEngine(spacy-nlp)` → 返回实体 `[start, end, type, score]`。
 - 识别器：
   - 统计式 NER：`PERSON/ORG/LOCATION` 等通用实体由 spaCy 模型（`en_core_web_sm` 或 `en_core_web_lg`）给出。
@@ -251,81 +301,101 @@ pip install librosa soundfile faster-whisper
 - 前端渲染：按实体类型映射颜色与标签，胶囊中显示 `TYPE + score`。
 
 参考：
+
 - Microsoft Presidio（Analyzer/Recognizer 体系、spaCy 接入）
 - spaCy（分词/标注/NER）
 
 #### 文本不确定性（IG + MC Dropout）
+
 - 语言模型：默认 `distilgpt2`（可切换 `gpt2`）。
 - 归因：Integrated Gradients（积分梯度），从零向量到真实嵌入等分 `ig_steps`（默认 16）积分，取 |Grad×Input| 的和作为每个 token 的影响力。
 - 采样：在推理时开启 Dropout，做 `samples` 次前向（默认 16），统计均值与标准差：
   - 均值 ≈ 影响力强弱
   - 标准差 ≈ 不确定性（归因稳定性差 → 不确定性高）
 - 归一化：对每条序列使用 95 分位进行鲁棒缩放，裁剪到 [0,1]，映射到红色透明度。
+ - 归一化：对每条序列使用 95 分位进行鲁棒缩放，裁剪到 [0,1]，映射到红色透明度。
+ - 兼容性：为兼容部分 `transformers` 版本在加载阶段缺失 `SequenceSummary` 的情况，后端在运行时为 `modeling_utils` 注入轻量同名占位（仅用于装载，不影响推理与归因）。
 
 参考：
+
 - Sundararajan et al., 2017（Axiomatic Attribution / Integrated Gradients）
 - Gal & Ghahramani, 2016（MC Dropout 近似贝叶斯）
 
 ### 图片 Image
 
-#### 目标/人脸/车牌检测（YOLOv8）
+#### 目标/人脸/车牌检测（YOLOv8 + MediaPipe）
+
 - 通用目标：`ultralytics/YOLOv8n`，从 `yolov8n.pt` 自动加载或本地权重。
-- 人脸：YOLOv8 社区权重（`yolov8n-face.pt`）。
+- 人脸：MediaPipe FaceDetection（全图 + `person` ROI 双层检测，召回更稳；与 YOLO 框合并时采用 IoU 加权平均）。
 - 车牌：YOLOv8 社区权重（`yolov8n-license-plate.pt`）。
 - 置信度近似不确定性：以 `1 - conf` 作为合成的框级不确定性，用红色半透明遮罩显示。
 
 参考：
+
 - Ultralytics YOLOv8 文档与仓库
 
-#### OCR（EasyOCR）与 OCR 文本的 PII 识别
-- OCR：`easyocr.Reader(["en", "ch_sim"])`，返回文本框与置信度。
-- 对 OCR 文本再走一轮 Presidio 分析（与文本模块一致），输出 PII 类型与分数；不确定性近似 `1 - max(score)`。
+#### OCR（PaddleOCR / EasyOCR）与 OCR 文本的 PII 识别
 
-#### CLIP Zero-shot 与 Pixel Attention Rollout
-- 文本-图像对齐：`openai/clip-vit-base-patch32`，对一组提示词打分得到 top-k 标签。
-- 像素级注意力：提取视觉编码器多层注意力，按层进行 roll-out（加恒等并归一），得到 [H×W] 的相对关注热力。
+- OCR：优先使用 `PaddleOCR(use_angle_cls=True)`；若不可用则回退 `easyocr.Reader(["en", "ch_sim"])`。
+- 对 OCR 文本再走一轮 Presidio 分析（与文本模块一致），并融合语言模型归因稳定性估计，输出 `pii_types/pii_scores/uncert`。
+
+#### CLIP Zero-shot 与像素级归因（IG + SmoothGrad）
+
+- 文本-图像对齐：`openai/clip-vit-base-patch32`，对预设提示集合计算相似度并输出概率分布与 top 标签。
+- 像素级归因：在 CLIP `pixel_values` 上做积分梯度，叠加噪声样本平均（SmoothGrad），得到归因强度热力图（归一化）。
 
 参考：
+
 - Radford et al., 2021（CLIP）
-- Abnar & Zuidema, 2020（Attention Rollout）
+- Sundararajan et al., 2017（Integrated Gradients）
+- Smilkov et al., 2017（SmoothGrad）
 
 #### 地标检索与不确定性（CLIP + FAISS + TTA）
+
 - 索引：遍历 `static/landmarks` 下图片，提取 CLIP 图像特征 → FAISS `IndexFlatIP` 建库。
 - 查询：对输入图片提 CLIP 特征并在索引中检索 top-k 候选。
 - TTA 不确定性：随机裁剪/水平翻转得到多张 patch，统计 top-1 投票的归一化熵与一致性，结合 margin 与场景先验合成为 `geo_prob`（0~1）。
 
 参考：
+
 - Johnson et al., 2017（FAISS）
 - 常见 TTA/投票熵做法（实践经验）
 
 ### 音频 Audio
 
 #### 读入与预处理
+
 - 首选 `soundfile`（支持多格式），回退 `librosa.load`，最终回退 Python `wave`（WAV）。
 - 通道：内部统一到 `float32`，必要时转单声道（平均）。
 - 前端绘图：波形下采样为定长数组（默认 1024 点）。
 
 #### 结构事件
+
 - Onset（起音点）：librosa 的谱差/能量突变检测；无 librosa 时以短窗能量突变近似。
 - Beat（节拍）：librosa 节拍追踪（DP + 动态节奏估计）；对语音类音频意义较弱。
 - Active segment（非静音）：librosa `effects.split(top_db=30)`；无 librosa 时以短窗能量阈值回退。
 
 参考：
+
 - librosa 文档（onset/beat/effects.split）
 
 #### 音频不确定性（帧级）
+
 - 谱熵：对 STFT 功率谱按帧归一化后计算熵，代表“能量分布均匀度”（越均匀越不确定/嘈杂/弱信号）。
 - 回退：若无 librosa，则用短窗能量的归一化波动近似。
 
 参考：
+
 - 经典谱熵指标在语音/音频分析中的应用（教材与综述）
 
 #### 转写（可选）与转写文本不确定性
+
 - 转写：`faster-whisper` 小模型（CPU，int8），支持 `vad_filter`；返回整段与分段时间戳。
 - 转写文本 PII：与文本模块一致，送入 `/analyze` 高亮实体。
 - 转写文本不确定性：同文本的不确定性方法（IG + MC Dropout）对转写文本渲染热力。
 
 参考：
+
 - Whisper（Radford et al., 2022），faster-whisper 的高效 CTranslate2 实现
 
 ### 默认超参与可调项（关键）
@@ -340,11 +410,13 @@ pip install librosa soundfile faster-whisper
 ## 架构与数据流
 
 前端（React）通过 HTTP 请求后端（FastAPI）：
+
 - TextTest：`/analyze`（PII），`/uncertainty`（文本不确定性）
 - ImgTest：`/image/analyze`
 - AudioTest：`/audio/analyze`（波形/事件/帧级不确定性），`/audio/transcribe`（可选转写）→ `/analyze`（转写 PII）→ `/uncertainty`（转写不确定性）
 
 渲染：
+
 - 文本：HTML 片段（高亮胶囊/不确定性 span）
 - 图片：Canvas 上绘制框/热力/像素热力
 - 音频：Canvas 波形/节拍/起音点/非静音 & 帧级热力，播放指示线与拖拽寻址
@@ -384,10 +456,9 @@ pip install librosa soundfile faster-whisper
 - Ultralytics YOLOv8 文档与代码
 - EasyOCR: JaidedAI EasyOCR
 - CLIP: Radford, Alec, et al., 2021. “Learning Transferable Visual Models From Natural Language Supervision.”
-- Attention Rollout: Abnar, Samira; Zuidema, Willem. 2020. “Quantifying Attention Flow in Transformers.”
+- SmoothGrad: Smilkov, Daniel; Thorat, Nikhil; Kim, Been; Viégas, Fernanda; Wattenberg, Martin. 2017. “SmoothGrad: removing noise by adding noise.”
 - FAISS: Johnson, Jeff, et al., 2017. “Billion-scale similarity search with GPUs.”
 - Whisper: Radford, Alec, et al., 2022. “Robust Speech Recognition via Large-Scale Weak Supervision.”（使用 faster-whisper 实现）
 - Integrated Gradients: Sundararajan, Mukund, et al., 2017. “Axiomatic Attribution for Deep Networks.”
 - MC Dropout: Gal, Yarin; Ghahramani, Zoubin. 2016. “Dropout as a Bayesian Approximation.”
 - librosa 文档与教程（onset/beat/STFT/谱熵）
-

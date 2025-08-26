@@ -12,6 +12,8 @@
   "dependencies": {
     "@ant-design/icons": "^6.0.0",
     "antd": "^5.27.0",
+    "d3": "7.9.0",
+    "d3-sankey": "0.12.3",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "zustand": "^5.0.7"
