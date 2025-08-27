@@ -718,9 +718,16 @@ export default function ConversationViz({ data }) {
         if (d.type === 'conversation_flow') return
         const path = this
         const len = Math.max(1, path.getTotalLength())
-        const numDots = Math.max(6, Math.floor(len / 30))
+        
+        // Fixed dot density: one dot every 30 pixels, minimum 3 dots per line
+        const dotSpacing = 60 // pixels between dots
+        const numDots = Math.max(3, Math.floor(len / dotSpacing))
+        
         const r = 3
-        const dur = Math.max(1.2, len / 120) // keep constant speed across lengths
+        // Fixed speed: dots move at consistent visual speed regardless of path length
+        const baseSpeed = 100 // pixels per second
+        const dur = len / baseSpeed // duration proportional to length for consistent speed
+        
         for (let i = 0; i < numDots; i++) {
           const grp = markersLayer.append('g')
           const dot = grp.append('circle')

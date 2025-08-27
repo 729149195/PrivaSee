@@ -11,7 +11,7 @@ export default function TextTest() {
     const abortRef = useRef(null)
     const inputRef = useRef(null)
     const [language, setLanguage] = useState('en')
-    const [model, setModel] = useState('spacy/en_core_web_lg')
+    const [model, setModel] = useState('spacy/en_core_web_sm')
     const [allEntities, setAllEntities] = useState([])
     const [selectedEntities, setSelectedEntities] = useState([])
     const [uncertHtml, setUncertHtml] = useState('')
