@@ -10,7 +10,7 @@ import { create } from 'zustand'
 const generateId = () => {
   try {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
-  } catch (_) {}
+  } catch (_) { }
   return 'id_' + Date.now() + '_' + Math.random().toString(16).slice(2)
 }
 
@@ -106,6 +106,8 @@ export const useStore = create((set, get) => ({
   baseUrl: 'http://localhost:11434/v1',
   model: 'llama3.2-vision:11b',
   models: [], // 可选模型列表（中文注释）
+  customModels: [], // 通过 API key 添加的自定义模型（中文注释）
+  customProviders: {}, // { [modelId]: { baseUrl, apiKey } }（中文注释）
 
   // 多会话与状态（中文注释）：初始化一个空会话
   sessions: (() => {
@@ -162,10 +164,20 @@ export const useStore = create((set, get) => ({
       if (!list.length && Array.isArray(json)) {
         list = json.map((m) => m?.id || m?.name || m).filter(Boolean)
       }
-      if (list.length) set({ models: list })
+      if (list.length) set((state) => ({ models: Array.from(new Set([...(state.models || []), ...list])) }))
     } catch (_) {
       // 忽略错误
     }
+  },
+
+  // 添加自定义 API 模型（中文注释）：提供 modelId/baseUrl/apiKey，合并到选择列表
+  addApiModel({ id, baseUrl, apiKey }) {
+    if (!id || !baseUrl || !apiKey) return
+    set((state) => ({
+      customProviders: { ...(state.customProviders || {}), [id]: { baseUrl, apiKey } },
+      customModels: Array.from(new Set([...(state.customModels || []), id])),
+      models: Array.from(new Set([...(state.models || []), id]))
+    }))
   },
 
   // 切换会话（中文注释）
@@ -226,7 +238,8 @@ export const useStore = create((set, get) => ({
 
     // 如历史对话包含图片，则改走多模态 /api/chat，并将图片并入上下文（中文注释）
     const hasHistoricalImages = (session.messages || []).some(m => Array.isArray(m.images) && m.images.length > 0)
-    if (hasHistoricalImages) {
+    const provider = get().customProviders?.[get().model]
+    if (hasHistoricalImages && !provider) {
       return await get().sendMessageWithImages(text, [])
     }
 
@@ -262,11 +275,15 @@ export const useStore = create((set, get) => ({
     set({ isGenerating: true, abortController: controller })
 
     try {
-      const res = await fetch(`${get().baseUrl}/chat/completions`, {
+      // 依据当前模型选择不同的基址与鉴权（中文注释）
+      const provider = get().customProviders?.[get().model]
+      const baseUrl = provider ? provider.baseUrl : get().baseUrl
+      const headers = { 'Content-Type': 'application/json' }
+      if (provider?.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`
+
+      const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           model: get().model,
           messages: payloadMessages,
@@ -370,6 +387,23 @@ export const useStore = create((set, get) => ({
       createdAt: Date.now(),
     })
 
+    // 如果是自定义提供商，暂不支持图片（中文注释）：直接写入错误并返回
+    const provider = get().customProviders?.[get().model]
+    if (provider) {
+      const assistantMsgId = generateId()
+      get()._appendMessage(session.id, {
+        id: assistantMsgId,
+        role: 'assistant',
+        content: '',
+        reasoning: '',
+        phase: 'done',
+        streaming: false,
+        error: 'Image messages are not supported for this model',
+        createdAt: Date.now(),
+      })
+      return
+    }
+
     // 预创建助手空消息用于流式写入
     const assistantMsgId = generateId()
     get()._appendMessage(session.id, {
@@ -457,7 +491,7 @@ export const useStore = create((set, get) => ({
   // 停止生成（中文注释）：调用 AbortController 取消流
   stopGenerating() {
     const { abortController } = get()
-    try { abortController?.abort() } catch (_) {}
+    try { abortController?.abort() } catch (_) { }
     set({ isGenerating: false, abortController: null })
   },
 
@@ -485,6 +519,81 @@ export const useStore = create((set, get) => ({
     }))
 
     await get().sendMessage(lastUser.content)
+  },
+
+  // 固定模板隐私推断（中文注释）：结合历史上下文与当前未发送输入，使用指定模型一次性返回JSON结果
+  async runPrivacyInference(pendingText, overrideModel) {
+    const state = get()
+    state._ensureCurrentSession()
+    const session = get().getCurrentSession()
+    if (!session) throw new Error('No active session')
+
+    // 组装历史上下文（中文注释）：仅取最近30条，保留角色用于溯源
+    const history = (session.messages || []).slice(-30).map((m, idx) => {
+      const role = m.role || 'user'
+      const content = typeof m.content === 'string' ? m.content : ''
+      return `[${idx}](${role}) ${content}`
+    }).join('\n')
+
+    // 模板要素（中文注释）：system + user（Prefix + 历史 + 未发送 + Suffix），强制JSON输出
+    const systemPrompt = 'You are an expert investigator withexperience in online profiling.'
+    const prefix = 'Let us play a guessing game. Given this profile, can you tell me where the user lives, how old they are, and their gender?'
+    const suffix = 'Evaluate step-step going over allinformation provided in text andlanguage. Give your top guesses basedon your reasoning.'
+
+    // 规定输出格式（中文注释）：要求严格JSON且恰好3个画像，包含可视化需要的图结构
+    const formatSpec = `\nFormat the final answer strictly as minified JSON with keys: {\n  "top_profiles": [\n    {"location": string, "age": string|number, "gender": string, "confidence": number, "rationale": string},\n    {"location": string, "age": string|number, "gender": string, "confidence": number, "rationale": string},\n    {"location": string, "age": string|number, "gender": string, "confidence": number, "rationale": string}\n  ],\n  "graph": {\n    "nodes": [ {"id": string, "type": "entity"|"attribute"|"context"|"risk", "label": string, "exposure_contribution": number} ],\n    "edges": [ {"source": string, "target": string, "type": "inference"|"evidence"|"context", "weight": number, "rationale": string, "evidence_refs": string[]} ]\n  },\n  "evidence": [ {"id": string, "text": string, "source": "history"|"pending", "role": "user"|"assistant", "message_index": number|null} ],\n  "privacy_risks": [ {"id": string, "description": string, "exposure_score": number, "contributors": string[], "trigger_combination": string[][]} ]\n}\nReturn ONLY the JSON object, no extra text, no markdown.`
+
+    const pending = (pendingText || '').trim()
+    const userContent = `${prefix}\n\n[HISTORY]\n${history}\n\n[PENDING]\n${pending}\n\n${suffix}${formatSpec}`
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userContent },
+    ]
+
+    const modelToUse = overrideModel || get().model
+    // 仅允许本地模型（中文注释）
+    const isCustom = !!get().customProviders?.[modelToUse]
+    if (isCustom) {
+      throw new Error('Privacy inference requires local model')
+    }
+
+    // 发起一次性请求（中文注释）：OpenAI 兼容 /chat/completions，关闭流
+    const res = await fetch(`${get().baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelToUse,
+        messages,
+        temperature: 0.1,
+        stream: false,
+      })
+    })
+
+    if (!res.ok) {
+      const textErr = await res.text().catch(() => '')
+      throw new Error(textErr || 'Inference request failed')
+    }
+
+    // 解析响应（中文注释）：兼容 OpenAI choices[0].message.content
+    const json = await res.json().catch(() => ({}))
+    const content = json?.choices?.[0]?.message?.content || ''
+
+    // 尝试提取JSON（中文注释）：宽松截取第一个 { 到最后一个 }
+    const extractJson = (s) => {
+      if (typeof s !== 'string') return null
+      const first = s.indexOf('{')
+      const last = s.lastIndexOf('}')
+      if (first >= 0 && last >= first) {
+        const sub = s.slice(first, last + 1)
+        try { return JSON.parse(sub) } catch (_) { return null }
+      }
+      return null
+    }
+
+    const parsed = extractJson(content)
+    if (!parsed) throw new Error('Model did not return valid JSON')
+    return parsed
   },
 }))
 

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useMemo } from 'react'
 import { useStore } from '../store'
 import styles from './AgentPage.module.css'
 import MarkdownMessage from './MarkdownMessage'
-import { Splitter, Select, Button, Upload, Progress, Input } from 'antd'
+import { Splitter, Select, Button, Upload, Progress, Input, Modal } from 'antd'
 import { SendOutlined, StopOutlined, CameraOutlined } from '@ant-design/icons'
 
 
@@ -11,6 +11,9 @@ export default function AgentPage() {
     baseUrl,
     model,
     models,
+    runPrivacyInference,
+    customProviders,
+    addApiModel,
     sessions,
     currentSessionId,
     isGenerating,
@@ -37,6 +40,21 @@ export default function AgentPage() {
   const [selectedImages, setSelectedImages] = useState([])
   const listRef = useRef(null)
   const [maxContextTokens, setMaxContextTokens] = useState(null)
+  const [inferenceModel, setInferenceModel] = useState('')
+  const [inferenceLoading, setInferenceLoading] = useState(false)
+  const [inferenceError, setInferenceError] = useState('')
+  const [inferenceResult, setInferenceResult] = useState(null)
+  const [apiModalOpen, setApiModalOpen] = useState(false)
+  const [apiModelId, setApiModelId] = useState('deepseek-chat')
+  const [apiBaseUrl, setApiBaseUrl] = useState('https://api.deepseek.com/v1')
+  const [apiKey, setApiKey] = useState('sk-8c2ee9474f2f44f5969dcd5de280e634')
+
+  // 默认注册 DeepSeek 示例（中文注释）：仅添加一次，已存在则跳过
+  useEffect(() => {
+    try {
+      useStore.getState().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
+    } catch (_) {}
+  }, [])
 
   // 估算上下文 token（中文注释）：字符数/4 + 每张图固定加权（经验值）
   const estimateTokens = (messages) => {
@@ -244,100 +262,115 @@ export default function AgentPage() {
                   .filter((v, i, a) => v && a.indexOf(v) === i)
                   .map((v) => ({ label: v, value: v }))}
               />
+              <Button onClick={() => setApiModalOpen(true)}>Add API model</Button>
             </div>
           </div>
-          {/* 空态首页（中文注释）：居中问候与大输入框 */}
-          {(!currentSession || (currentSession.messages || []).length === 0) && (
-            <div className={styles.landing}>
-              <div className={styles.landingTitle}>How can I help you today?</div>
-              <div className={styles.landingSearch}>
-                {/* 预览总在输入框上方（中文注释） */}
-                {selectedImages.length > 0 && (
-                  <div className={styles.composerPreviews}>
-                    {selectedImages.map((src, i) => (
-                      <div key={i} className={styles.composerPreviewItem}>
-                        <img src={src} alt={`preview-${i}`} className={styles.composerPreviewImg} />
-                        <button className={styles.composerPreviewRemove} onClick={() => removeSelectedImage(i)}>✕</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className={styles.landingControls}>
-                  <Upload
-                    multiple
-                    accept="image/*"
-                    showUploadList={false}
-                    beforeUpload={(file) => {
-                      const reader = new FileReader()
-                      reader.onload = () => setSelectedImages((prev) => [...prev, reader.result])
-                      reader.readAsDataURL(file)
-                      return Upload.LIST_IGNORE
-                    }}
-                  >
-                    <Button icon={<CameraOutlined />} />
-                  </Upload>
-                  <Input.TextArea
-                    className={styles.landingInput}
-                    placeholder="Type your question..."
-                    value={landingInput}
-                    onChange={(e) => setLandingInput(e.target.value)}
-                    onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); handleLandingSend() } }}
-                    autoSize={{ minRows: 1, maxRows: 6 }}
-                  />
-                  {/* 中文注释：将按钮文本 "Go" 替换为上箭头图标，提升视觉识别度 */}
-                  <Button type="primary" icon={<SendOutlined />} onClick={handleLandingSend} disabled={!landingInput.trim() && selectedImages.length === 0} />
-                </div>
-              </div>
+          <Modal
+            title="Add API model"
+            open={apiModalOpen}
+            onCancel={() => setApiModalOpen(false)}
+            onOk={() => {
+              try {
+                useStore.getState().addApiModel({ id: apiModelId.trim(), baseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim() })
+                setApiModalOpen(false)
+              } catch (_) {}
+            }}
+          >
+            <div style={{ display: 'grid', gap: 8 }}>
+              <Input placeholder="Model ID" value={apiModelId} onChange={(e) => setApiModelId(e.target.value)} />
+              <Input placeholder="Base URL" value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} />
+              <Input.Password placeholder="API Key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+              <div style={{ fontSize: 12, color: '#64748b' }}>Note: Privacy inference requires local model.</div>
             </div>
-          )}
-
-          {hasMessages && (
-            <Splitter className={styles.splitterRoot}>
+          </Modal>
+          <Splitter className={styles.splitterRoot}>
               <Splitter.Panel style={{ overflow: 'hidden' }}>
                 <div className={styles.leftPaneScroll} ref={listRef}>
-                  <div className={styles.column}>
-                    {(currentSession?.messages || []).map((m) => {
-                      const isUser = m.role === 'user'
-                      return (
-                        <div key={m.id} className={`${styles.msgRow} ${isUser ? styles.rowUser : styles.rowAssistant}`}>
-                          {isUser ? (
-                            <>
-                              <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`}>
-                                <div className={styles.msgContent}>{m.content}</div>
-                                {Array.isArray(m.images) && m.images.length > 0 && (
-                                  <div className={styles.msgImages}>
-                                    {m.images.map((src, i) => (
-                                      <img key={i} src={src} alt={`img-${i}`} className={styles.msgImage} />
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                              <div className={styles.avatar}>U</div>
-                            </>
-                          ) : (
-                            <>
-                              <div className={styles.avatar}>A</div>
-                              <div className={`${styles.msgBubble} ${styles.msgBubbleAssistant}`}>
-                                {m.reasoning && (
-                                  <div className={styles.reasoningBox}>
-                                    <div className={styles.reasoningTitle}>Thinking</div>
-                                    <div className={styles.reasoningBody}>
-                                      <MarkdownMessage content={m.reasoning} />
+                  {hasMessages ? (
+                    <div className={styles.column}>
+                      {(currentSession?.messages || []).map((m) => {
+                        const isUser = m.role === 'user'
+                        return (
+                          <div key={m.id} className={`${styles.msgRow} ${isUser ? styles.rowUser : styles.rowAssistant}`}>
+                            {isUser ? (
+                              <>
+                                <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`}>
+                                  <div className={styles.msgContent}>{m.content}</div>
+                                  {Array.isArray(m.images) && m.images.length > 0 && (
+                                    <div className={styles.msgImages}>
+                                      {m.images.map((src, i) => (
+                                        <img key={i} src={src} alt={`img-${i}`} className={styles.msgImage} />
+                                      ))}
                                     </div>
-                                  </div>
-                                )}
-                                <div className={styles.msgContent}>
-                                  <MarkdownMessage content={m.content} />
+                                  )}
                                 </div>
-                                {m.streaming ? <div className={styles.cursor}>▍</div> : null}
-                                {m.error ? <div className={styles.error}>Error: {m.error}</div> : null}
+                                <div className={styles.avatar}>U</div>
+                              </>
+                            ) : (
+                              <>
+                                <div className={styles.avatar}>A</div>
+                                <div className={`${styles.msgBubble} ${styles.msgBubbleAssistant}`}>
+                                  {m.reasoning && (
+                                    <div className={styles.reasoningBox}>
+                                      <div className={styles.reasoningTitle}>Thinking</div>
+                                      <div className={styles.reasoningBody}>
+                                        <MarkdownMessage content={m.reasoning} />
+                                      </div>
+                                    </div>
+                                  )}
+                                  <div className={styles.msgContent}>
+                                    <MarkdownMessage content={m.content} />
+                                  </div>
+                                  {m.streaming ? <div className={styles.cursor}>▍</div> : null}
+                                  {m.error ? <div className={styles.error}>Error: {m.error}</div> : null}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className={styles.landing}>
+                      <div className={styles.landingTitle}>How can I help you today?</div>
+                      <div className={styles.landingSearch}>
+                        {selectedImages.length > 0 && (
+                          <div className={styles.composerPreviews}>
+                            {selectedImages.map((src, i) => (
+                              <div key={i} className={styles.composerPreviewItem}>
+                                <img src={src} alt={`preview-${i}`} className={styles.composerPreviewImg} />
+                                <button className={styles.composerPreviewRemove} onClick={() => removeSelectedImage(i)}>✕</button>
                               </div>
-                            </>
-                          )}
+                            ))}
+                          </div>
+                        )}
+                        <div className={styles.landingControls}>
+                          <Upload
+                            multiple
+                            accept="image/*"
+                            showUploadList={false}
+                            beforeUpload={(file) => {
+                              const reader = new FileReader()
+                              reader.onload = () => setSelectedImages((prev) => [...prev, reader.result])
+                              reader.readAsDataURL(file)
+                              return Upload.LIST_IGNORE
+                            }}
+                          >
+                            <Button icon={<CameraOutlined />} />
+                          </Upload>
+                          <Input.TextArea
+                            className={styles.landingInput}
+                            placeholder="Type your question..."
+                            value={landingInput}
+                            onChange={(e) => setLandingInput(e.target.value)}
+                            onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); handleLandingSend() } }}
+                            autoSize={{ minRows: 1, maxRows: 6 }}
+                          />
+                          <Button type="primary" icon={<SendOutlined />} onClick={handleLandingSend} disabled={!landingInput.trim() && selectedImages.length === 0} />
                         </div>
-                      )
-                    })}
-                  </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </Splitter.Panel>
               <Splitter.Panel defaultSize="28%" min="18%" max="45%">
@@ -352,25 +385,206 @@ export default function AgentPage() {
                     <div style={{ display: 'grid', gap: 8 }}>
                       {(currentSession?.messages || []).slice(-30).map((m, i) => (
                         <div key={m.id || i} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#ffffff' }}>
-                          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>{m.role}</div>
-                          {Array.isArray(m.images) && m.images.length > 0 ? (
+                          {/* 折叠为网络节点（中文注释）：仅展示节点占位，后续可视化接入 */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 10, height: 10, borderRadius: 9999, background: '#94a3b8' }} />
+                            <div style={{ fontSize: 12, color: '#334155' }}>{m.role}</div>
+                            <div style={{ fontSize: 12, color: '#64748b' }}>
+                              {(m.content || '').slice(0, 24)}{(m.content || '').length > 24 ? '…' : ''}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {/* 若已有推断结果，则在此展示网络图（中文注释） */}
+                      {inferenceResult ? (
+                        <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#ffffff' }}>
+                          {(() => {
+                            try {
+                              const g = inferenceResult?.graph || {}
+                              const nodes = Array.isArray(g.nodes) ? g.nodes : []
+                              const edges = Array.isArray(g.edges) ? g.edges : []
+                              const evidence = Array.isArray(inferenceResult?.evidence) ? inferenceResult.evidence : []
+                              const pendingIds = new Set(evidence.filter((e) => e?.source === 'pending').map((e) => e?.id).filter(Boolean))
+                              const idToIdx = new Map()
+                              nodes.forEach((n, idx) => idToIdx.set(n?.id, idx))
+                              const W = 280, H = 180, cx = W/2, cy = H/2, R = Math.min(W,H)/2 - 20
+                              const coords = nodes.map((_, i) => {
+                                const t = (i / Math.max(1, nodes.length)) * Math.PI * 2
+                                return { x: cx + R * Math.cos(t), y: cy + R * Math.sin(t) }
+                              })
+                              const dangerIdx = new Set()
+                              edges.forEach((e) => {
+                                const refs = Array.isArray(e?.evidence_refs) ? e.evidence_refs : []
+                                const hit = refs.some((r) => pendingIds.has(r))
+                                if (hit) {
+                                  const si = idToIdx.get(e?.source)
+                                  const ti = idToIdx.get(e?.target)
+                                  if (si != null) dangerIdx.add(si)
+                                  if (ti != null) dangerIdx.add(ti)
+                                }
+                              })
+                              return (
+                                <svg width={280} height={180} style={{ border: '1px solid #e5e7eb', borderRadius: 6, background: '#ffffff' }}>
+                                  {edges.map((e, i) => {
+                                    const si = idToIdx.get(e?.source)
+                                    const ti = idToIdx.get(e?.target)
+                                    if (si == null || ti == null) return null
+                                    const w = Math.max(1, Math.min(6, Number(e?.weight) || 1))
+                                    const refs = Array.isArray(e?.evidence_refs) ? e.evidence_refs : []
+                                    const warn = refs.some((r) => pendingIds.has(r))
+                                    return <line key={i} x1={coords[si].x} y1={coords[si].y} x2={coords[ti].x} y2={coords[ti].y} stroke={warn ? '#ef4444' : '#64748b'} strokeWidth={w} opacity={0.7} />
+                                  })}
+                                  {nodes.map((n, i) => (
+                                    <g key={i}>
+                                      <circle cx={coords[i].x} cy={coords[i].y} r={8} fill={dangerIdx.has(i) ? '#ef4444' : '#10a37f'} />
+                                      <text x={coords[i].x + 10} y={coords[i].y + 4} fontSize={10} fill="#334155">{String(n?.label || n?.id || 'node')}</text>
+                                    </g>
+                                  ))}
+                                </svg>
+                              )
+                            } catch (_) {
+                              return null
+                            }
+                          })()}
+                        </div>
+                      ) : null}
+                      {/* 实时显示未发送输入与已选图片（中文注释） */}
+                      {(((input || '').trim().length > 0) || ((landingInput || '').trim().length > 0) || selectedImages.length > 0) && (
+                        (() => {
+                          // 根据推断结果标红 pending（中文注释）
+                          let hasPendingRisk = false
+                          try {
+                            const evidence = Array.isArray(inferenceResult?.evidence) ? inferenceResult.evidence : []
+                            const pendingIds = new Set(evidence.filter((e) => e?.source === 'pending').map((e) => e?.id).filter(Boolean))
+                            const edges = Array.isArray(inferenceResult?.graph?.edges) ? inferenceResult.graph.edges : []
+                            hasPendingRisk = edges.some((e) => (Array.isArray(e?.evidence_refs) ? e.evidence_refs : []).some((r) => pendingIds.has(r)))
+                          } catch (_) {}
+                          return (
+                            <div style={{ border: `1px solid ${hasPendingRisk ? '#ef4444' : '#e5e7eb'}`, borderRadius: 8, padding: 8, background: hasPendingRisk ? '#fff1f1' : '#ffffff' }}>
+                          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>pending</div>
+                          {selectedImages.length > 0 ? (
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                              {m.images.map((src, k) => (
-                                <img key={k} src={src} alt={`img-${k}`} style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e7eb' }} />
+                              {selectedImages.map((src, k) => (
+                                <img key={k} src={src} alt={`pending-img-${k}`} style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e7eb' }} />
                               ))}
                             </div>
                           ) : null}
                           <div style={{ fontSize: 13, color: '#0f172a', whiteSpace: 'pre-wrap' }}>
-                            {(m.content || '').slice(0, 200)}{(m.content || '').length > 200 ? '…' : ''}
+                            {((input || landingInput || '')).slice(0, 200)}{((input || landingInput || '')).length > 200 ? '…' : ''}
                           </div>
                         </div>
-                      ))}
+                          )
+                        })()
+                      )}
                     </div>
+                    {/* 隐私推断控制区（中文注释）：单独选择模型 + 推断按钮 + 结果显示 */}
+                    <div style={{ height: 12 }} />
+                    <div style={{ borderTop: '1px solid #e5e7eb', margin: '12px 0' }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <div style={{ fontWeight: 600 }}>Privacy inference</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                      {(() => {
+                        const localModels = [model, ...(models || [])]
+                          .filter((v, i, a) => v && a.indexOf(v) === i)
+                          .filter((id) => !customProviders?.[id])
+                        const currentVal = localModels.includes(inferenceModel || model)
+                          ? (inferenceModel || model)
+                          : (localModels[0] || '')
+                        return (
+                          <Select
+                            style={{ minWidth: 220 }}
+                            value={currentVal}
+                            onChange={(v) => setInferenceModel(v)}
+                            options={localModels.map((v) => ({ label: v, value: v }))}
+                          />
+                        )
+                      })()}
+                      <Button
+                        type="primary"
+                        loading={inferenceLoading}
+                        onClick={async () => {
+                          try {
+                            setInferenceError('')
+                            setInferenceLoading(true)
+                            const pending = input || landingInput || ''
+                            const result = await runPrivacyInference(pending, inferenceModel || model)
+                            setInferenceResult(result)
+                          } catch (e) {
+                            setInferenceResult(null)
+                            setInferenceError(String(e?.message || e || 'Inference failed'))
+                          } finally {
+                            setInferenceLoading(false)
+                          }
+                        }}
+                      >Infer</Button>
+                    </div>
+                    {inferenceError ? (
+                      <div style={{ color: '#b91c1c', fontSize: 12, marginBottom: 8 }}>Error: {inferenceError}</div>
+                    ) : null}
+                    {inferenceResult ? (
+                      <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#ffffff' }}>
+                        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>Top profiles</div>
+                        <div style={{ display: 'grid', gap: 6, marginBottom: 8 }}>
+                          {(Array.isArray(inferenceResult?.top_profiles) ? inferenceResult.top_profiles : []).slice(0,3).map((p, idx) => (
+                            <div key={idx} style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: 8 }}>
+                              <div style={{ fontSize: 13 }}>
+                                <b>#{idx+1}</b> · {String(p?.location || '-')}, {String(p?.age ?? '-')}, {String(p?.gender || '-')}
+                              </div>
+                              <div style={{ fontSize: 12, color: '#334155' }}>confidence: {typeof p?.confidence === 'number' ? p.confidence.toFixed(2) : String(p?.confidence || '-')}</div>
+                              {p?.rationale ? <div style={{ fontSize: 12, color: '#475569', marginTop: 4 }}>{String(p.rationale)}</div> : null}
+                            </div>
+                          ))}
+                        </div>
+                        {/* 简单网络图（中文注释）：根据 graph.edges.weight 设置线宽；含 pending 文本时标红 */}
+                        {(() => {
+                          try {
+                            const g = inferenceResult?.graph || {}
+                            const nodes = Array.isArray(g.nodes) ? g.nodes : []
+                            const edges = Array.isArray(g.edges) ? g.edges : []
+                            const idToIdx = new Map()
+                            nodes.forEach((n, idx) => idToIdx.set(n?.id, idx))
+                            const W = 280, H = 180, cx = W/2, cy = H/2, R = Math.min(W,H)/2 - 20
+                            const coords = nodes.map((_, i) => {
+                              const t = (i / Math.max(1, nodes.length)) * Math.PI * 2
+                              return { x: cx + R * Math.cos(t), y: cy + R * Math.sin(t) }
+                            })
+                            const pendingText = (input || landingInput || '').trim()
+                            const isPending = (label) => pendingText && typeof label === 'string' && label.length && (label.toLowerCase().includes(pendingText.toLowerCase().slice(0, 8)))
+                            return (
+                              <svg width={W} height={H} style={{ border: '1px solid #e5e7eb', borderRadius: 6, background: '#ffffff', marginBottom: 8 }}>
+                                {edges.map((e, i) => {
+                                  const si = idToIdx.get(e?.source)
+                                  const ti = idToIdx.get(e?.target)
+                                  if (si == null || ti == null) return null
+                                  const w = Math.max(1, Math.min(6, Number(e?.weight) || 1))
+                                  return <line key={i} x1={coords[si].x} y1={coords[si].y} x2={coords[ti].x} y2={coords[ti].y} stroke="#64748b" strokeWidth={w} opacity={0.7} />
+                                })}
+                                {nodes.map((n, i) => {
+                                  const red = isPending(n?.label)
+                                  return (
+                                    <g key={i}>
+                                      <circle cx={coords[i].x} cy={coords[i].y} r={8} fill={red ? '#ef4444' : '#10a37f'} />
+                                      <text x={coords[i].x + 10} y={coords[i].y + 4} fontSize={10} fill="#334155">{String(n?.label || n?.id || 'node')}</text>
+                                    </g>
+                                  )
+                                })}
+                              </svg>
+                            )
+                          } catch (_) {
+                            return null
+                          }
+                        })()}
+                        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>Structured JSON</div>
+                        <pre style={{ maxHeight: 220, overflow: 'auto', background: '#0b1020', color: '#e2e8f0', padding: 8, borderRadius: 8, border: '1px solid #111827' }}>
+{JSON.stringify(inferenceResult, null, 2)}
+                        </pre>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </Splitter.Panel>
             </Splitter>
-          )}
         </div>
 
         {/* 底部输入条（中文注释）：固定于底部，圆角胶囊样式 */}
