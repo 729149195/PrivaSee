@@ -5,10 +5,6 @@ import MarkdownMessage from './MarkdownMessage'
 import { Splitter, Select, Button, Upload, Progress, Input } from 'antd'
 import { SendOutlined, StopOutlined, CameraOutlined } from '@ant-design/icons'
 
-// 说明（中文注释）：
-// ChatGPT 风格 UI：左侧会话栏 + 右侧聊天区域；
-// 本地接口：使用 store 中的 sendMessage/stopGenerating，实现流式追加；
-// 在消息区实现与 ChatGPT 类似的对齐、头像占位、loading 动画与操作条。
 
 export default function AgentPage() {
   const {
@@ -111,7 +107,7 @@ export default function AgentPage() {
               }
             }
           }
-        } catch (_) {}
+        } catch (_) { }
 
         // 回退：OpenAI 兼容 /v1/models（某些服务会返回 context_length 等）
         if (!ctxVal) {
@@ -139,11 +135,11 @@ export default function AgentPage() {
                 )
               }
             }
-          } catch (_) {}
+          } catch (_) { }
         }
 
         if (typeof ctxVal === 'number' && ctxVal > 0) setMaxContextTokens(ctxVal)
-      } catch (_) {}
+      } catch (_) { }
     }
     fetchCtx()
   }, [baseUrl, model])
@@ -196,7 +192,7 @@ export default function AgentPage() {
     try {
       const urls = await Promise.all(files.map(toDataUrl))
       setSelectedImages((prev) => [...prev, ...urls])
-    } catch (_) {}
+    } catch (_) { }
     e.target.value = ''
   }
 
@@ -280,12 +276,13 @@ export default function AgentPage() {
                   >
                     <Button icon={<CameraOutlined />} />
                   </Upload>
-                  <Input
+                  <Input.TextArea
                     className={styles.landingInput}
                     placeholder="Type your question..."
                     value={landingInput}
                     onChange={(e) => setLandingInput(e.target.value)}
-                    onPressEnter={(e) => { e.preventDefault(); handleLandingSend() }}
+                    onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); handleLandingSend() } }}
+                    autoSize={{ minRows: 1, maxRows: 6 }}
                   />
                   {/* 中文注释：将按钮文本 "Go" 替换为上箭头图标，提升视觉识别度 */}
                   <Button type="primary" icon={<SendOutlined />} onClick={handleLandingSend} disabled={!landingInput.trim() && selectedImages.length === 0} />
@@ -299,76 +296,76 @@ export default function AgentPage() {
               <Splitter.Panel style={{ overflow: 'hidden' }}>
                 <div className={styles.leftPaneScroll} ref={listRef}>
                   <div className={styles.column}>
-                  {(currentSession?.messages || []).map((m) => {
-                    const isUser = m.role === 'user'
-                    return (
-                      <div key={m.id} className={`${styles.msgRow} ${isUser ? styles.rowUser : styles.rowAssistant}`}>
-                        {isUser ? (
-                          <>
-                            <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`}>
-                              <div className={styles.msgContent}>{m.content}</div>
-                              {Array.isArray(m.images) && m.images.length > 0 && (
-                                <div className={styles.msgImages}>
-                                  {m.images.map((src, i) => (
-                                    <img key={i} src={src} alt={`img-${i}`} className={styles.msgImage} />
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                            <div className={styles.avatar}>U</div>
-                          </>
-                        ) : (
-                          <>
-                            <div className={styles.avatar}>A</div>
-                            <div className={`${styles.msgBubble} ${styles.msgBubbleAssistant}`}>
-                              {m.reasoning && (
-                                <div className={styles.reasoningBox}>
-                                  <div className={styles.reasoningTitle}>Thinking</div>
-                                  <div className={styles.reasoningBody}>
-                                    <MarkdownMessage content={m.reasoning} />
+                    {(currentSession?.messages || []).map((m) => {
+                      const isUser = m.role === 'user'
+                      return (
+                        <div key={m.id} className={`${styles.msgRow} ${isUser ? styles.rowUser : styles.rowAssistant}`}>
+                          {isUser ? (
+                            <>
+                              <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`}>
+                                <div className={styles.msgContent}>{m.content}</div>
+                                {Array.isArray(m.images) && m.images.length > 0 && (
+                                  <div className={styles.msgImages}>
+                                    {m.images.map((src, i) => (
+                                      <img key={i} src={src} alt={`img-${i}`} className={styles.msgImage} />
+                                    ))}
                                   </div>
-                                </div>
-                              )}
-                              <div className={styles.msgContent}>
-                                <MarkdownMessage content={m.content} />
+                                )}
                               </div>
-                              {m.streaming ? <div className={styles.cursor}>▍</div> : null}
-                              {m.error ? <div className={styles.error}>Error: {m.error}</div> : null}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )
-                  })}
+                              <div className={styles.avatar}>U</div>
+                            </>
+                          ) : (
+                            <>
+                              <div className={styles.avatar}>A</div>
+                              <div className={`${styles.msgBubble} ${styles.msgBubbleAssistant}`}>
+                                {m.reasoning && (
+                                  <div className={styles.reasoningBox}>
+                                    <div className={styles.reasoningTitle}>Thinking</div>
+                                    <div className={styles.reasoningBody}>
+                                      <MarkdownMessage content={m.reasoning} />
+                                    </div>
+                                  </div>
+                                )}
+                                <div className={styles.msgContent}>
+                                  <MarkdownMessage content={m.content} />
+                                </div>
+                                {m.streaming ? <div className={styles.cursor}>▍</div> : null}
+                                {m.error ? <div className={styles.error}>Error: {m.error}</div> : null}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               </Splitter.Panel>
               <Splitter.Panel defaultSize="28%" min="18%" max="45%">
                 <div className={styles.rightPaneScroll}>
                   <div style={{ padding: 16 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 8 }}>Context window</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                    <Progress percent={contextPercent} size="small" style={{ flex: 1 }} />
-                    <div style={{ color: '#64748b', fontSize: 12 }}>{contextLabel}</div>
-                  </div>
-                  <div style={{ color: '#475569', fontSize: 12, marginBottom: 8 }}>Messages in context</div>
-                  <div style={{ display: 'grid', gap: 8 }}>
-                    {(currentSession?.messages || []).slice(-30).map((m, i) => (
-                      <div key={m.id || i} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#ffffff' }}>
-                        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>{m.role}</div>
-                        {Array.isArray(m.images) && m.images.length > 0 ? (
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                            {m.images.map((src, k) => (
-                              <img key={k} src={src} alt={`img-${k}`} style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e7eb' }} />
-                            ))}
+                    <div style={{ fontWeight: 600, marginBottom: 8 }}>Context window</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                      <Progress percent={contextPercent} size="small" style={{ flex: 1 }} />
+                      <div style={{ color: '#64748b', fontSize: 12 }}>{contextLabel}</div>
+                    </div>
+                    <div style={{ color: '#475569', fontSize: 12, marginBottom: 8 }}>Messages in context</div>
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      {(currentSession?.messages || []).slice(-30).map((m, i) => (
+                        <div key={m.id || i} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#ffffff' }}>
+                          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>{m.role}</div>
+                          {Array.isArray(m.images) && m.images.length > 0 ? (
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              {m.images.map((src, k) => (
+                                <img key={k} src={src} alt={`img-${k}`} style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e7eb' }} />
+                              ))}
+                            </div>
+                          ) : null}
+                          <div style={{ fontSize: 13, color: '#0f172a', whiteSpace: 'pre-wrap' }}>
+                            {(m.content || '').slice(0, 200)}{(m.content || '').length > 200 ? '…' : ''}
                           </div>
-                        ) : null}
-                        <div style={{ fontSize: 13, color: '#0f172a', whiteSpace: 'pre-wrap' }}>
-                          {(m.content || '').slice(0, 200)}{(m.content || '').length > 200 ? '…' : ''}
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </Splitter.Panel>

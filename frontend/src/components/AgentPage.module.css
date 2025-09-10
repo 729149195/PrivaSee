@@ -249,6 +249,8 @@
     font-size: 16px;
     color: var(--color-text-primary);
     font-family: var(--font-family-main);
+    resize: none;
+    white-space: pre-wrap; /* 自动换行并保留换行 */
 }
 
 /* 空态：输入行容器，保证预览在上、输入与按钮在下（中文注释） */
