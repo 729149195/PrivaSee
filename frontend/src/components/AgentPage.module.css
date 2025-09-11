@@ -742,3 +742,25 @@
     border-color: var(--color-accent-primary);
     box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.1);
 }
+
+/* 隐私标签容器（中文注释）：横向排列，自动换行，占满宽度 */
+.privacyGrid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-start; /* 左对齐（中文注释） */
+    align-content: flex-start; /* 多行左上对齐（中文注释） */
+    width: 100%;
+    font-size: 12px;
+}
+
+/* 复选项样式（中文注释）：紧凑行高，允许内容换行 */
+.privacyCheckbox {
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: normal;
+    display: inline-flex;
+    justify-content: flex-start; /* 复选项内部左对齐（中文注释） */
+    text-align: left; /* 文本左对齐（中文注释） */
+}

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { systemPrompt as privacySystemPrompt, prefix as privacyPrefix, suffix as privacySuffix, formatSpec as privacyFormatSpec } from './templates/privacyInferenceTemplate'
 
 // 说明（中文注释）：
 // 1) 本 store 管理 ChatGPT 风格的多会话、消息流与流式生成状态；
@@ -103,8 +104,8 @@ async function streamOllamaChatResponse(reader, onDelta) {
 
 export const useStore = create((set, get) => ({
   // 基础配置（中文注释）：指向本地 Ollama OpenAI 兼容接口
-  baseUrl: 'http://localhost:11434/v1',
-  model: 'llama3.2-vision:11b',
+  baseUrl: '/v1',
+  model: 'qwen2.5vl:7b',
   models: [], // 可选模型列表（中文注释）
   customModels: [], // 通过 API key 添加的自定义模型（中文注释）
   customProviders: {}, // { [modelId]: { baseUrl, apiKey } }（中文注释）
@@ -521,30 +522,30 @@ export const useStore = create((set, get) => ({
     await get().sendMessage(lastUser.content)
   },
 
-  // 固定模板隐私推断（中文注释）：结合历史上下文与当前未发送输入，使用指定模型一次性返回JSON结果
-  async runPrivacyInference(pendingText, overrideModel) {
+  // 固定模板隐私推断（中文注释）：结合历史上下文、未发送输入与选中属性，使用指定模型一次性返回JSON结果
+  async runPrivacyInference(pendingText, overrideModel, selectedAttributes) {
     const state = get()
     state._ensureCurrentSession()
     const session = get().getCurrentSession()
     if (!session) throw new Error('No active session')
 
-    // 组装历史上下文（中文注释）：仅取最近30条，保留角色用于溯源
-    const history = (session.messages || []).slice(-30).map((m, idx) => {
+    // 组装历史上下文（中文注释）：使用当前会话全部消息，保留角色用于溯源（与右侧证据图一一对应）
+    const history = (session.messages || []).map((m, idx) => {
       const role = m.role || 'user'
       const content = typeof m.content === 'string' ? m.content : ''
       return `[${idx}](${role}) ${content}`
     }).join('\n')
 
-    // 模板要素（中文注释）：system + user（Prefix + 历史 + 未发送 + Suffix），强制JSON输出
-    const systemPrompt = 'You are an expert investigator withexperience in online profiling.'
-    const prefix = 'Let us play a guessing game. Given this profile, can you tell me where the user lives, how old they are, and their gender?'
-    const suffix = 'Evaluate step-step going over allinformation provided in text andlanguage. Give your top guesses basedon your reasoning.'
-
-    // 规定输出格式（中文注释）：要求严格JSON且恰好3个画像，包含可视化需要的图结构
-    const formatSpec = `\nFormat the final answer strictly as minified JSON with keys: {\n  "top_profiles": [\n    {"location": string, "age": string|number, "gender": string, "confidence": number, "rationale": string},\n    {"location": string, "age": string|number, "gender": string, "confidence": number, "rationale": string},\n    {"location": string, "age": string|number, "gender": string, "confidence": number, "rationale": string}\n  ],\n  "graph": {\n    "nodes": [ {"id": string, "type": "entity"|"attribute"|"context"|"risk", "label": string, "exposure_contribution": number} ],\n    "edges": [ {"source": string, "target": string, "type": "inference"|"evidence"|"context", "weight": number, "rationale": string, "evidence_refs": string[]} ]\n  },\n  "evidence": [ {"id": string, "text": string, "source": "history"|"pending", "role": "user"|"assistant", "message_index": number|null} ],\n  "privacy_risks": [ {"id": string, "description": string, "exposure_score": number, "contributors": string[], "trigger_combination": string[][]} ]\n}\nReturn ONLY the JSON object, no extra text, no markdown.`
+    // 模板要素（中文注释）：system + user（Prefix + 历史 + 未发送 + Suffix），强制JSON输出（从模板模块导入）
+    const systemPrompt = privacySystemPrompt
+    const prefix = privacyPrefix
+    const suffix = privacySuffix
+    const formatSpec = privacyFormatSpec
 
     const pending = (pendingText || '').trim()
-    const userContent = `${prefix}\n\n[HISTORY]\n${history}\n\n[PENDING]\n${pending}\n\n${suffix}${formatSpec}`
+    const attrs = Array.isArray(selectedAttributes) ? selectedAttributes.filter(Boolean) : []
+    const attrsBlock = attrs.length ? `\n\n[SELECTED_ATTRIBUTES]\n${attrs.join('\n')}` : `\n\n[SELECTED_ATTRIBUTES]\n` 
+    const userContent = `${prefix}\n\n[HISTORY]\n${history}\n\n[PENDING]\n${pending}${attrsBlock}\n\n${suffix}${formatSpec}`
 
     const messages = [
       { role: 'system', content: systemPrompt },
