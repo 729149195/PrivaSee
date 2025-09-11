@@ -185,6 +185,21 @@ export default function AgentPage() {
   // 拉取模型列表（中文注释）：页面挂载时
   useEffect(() => { fetchModels?.() }, [fetchModels])
 
+  // 当上下文或 pending 存在图片时，强制主模型为多模态（中文注释）
+  useEffect(() => {
+    try {
+      const hasPendingImages = selectedImages.length > 0
+      const needMultimodal = Boolean(contextHasImages || hasPendingImages)
+      if (!needMultimodal) return
+      if (model && isModelMultimodal(model)) return
+      const list = [model, ...(models || [])].filter((v, i, a) => v && a.indexOf(v) === i)
+      const preferred = 'qwen2.5vl:7b'
+      const mm = list.filter((id) => isModelMultimodal(id))
+      if (mm.includes(preferred)) setModel?.(preferred)
+      else if (mm.length) setModel?.(mm[0])
+    } catch (_) {}
+  }, [model, models, contextHasImages, selectedImages, setModel, isModelMultimodal])
+
   // 根据当前模型查询实际上下文窗口（中文注释）：优先 /api/show，其次 /v1/models
   useEffect(() => {
     const fetchCtx = async () => {
@@ -273,13 +288,33 @@ export default function AgentPage() {
 
   // 属性级展示（中文注释）：不需要默认选择
 
-  // 右侧推断模型默认值与主模型解耦（中文注释）：优先选择本地模型列表第一个
+  // 右侧推断模型默认值与主模型解耦（中文注释）：优先选择 qwen2.5vl:7b，若不存在则回退到本地第一个
   useEffect(() => {
     try {
       const locals = (models || []).filter((id) => !customProviders?.[id])
-      if (!inferenceModel && locals.length) setInferenceModel(locals[0])
+      if (!inferenceModel) {
+        const preferred = 'qwen2.5vl:7b'
+        if (locals.includes(preferred)) setInferenceModel(preferred)
+        else if (locals.length) setInferenceModel(locals[0])
+        else setInferenceModel(preferred)
+      }
     } catch (_) {}
   }, [models, customProviders, inferenceModel])
+
+  // 当上下文或 pending 存在图片时，强制右侧使用多模态模型（中文注释）
+  useEffect(() => {
+    try {
+      const locals = (models || []).filter((id) => !customProviders?.[id])
+      const hasPendingImages = selectedImages.length > 0
+      const needMultimodal = Boolean(contextHasImages || hasPendingImages)
+      if (!needMultimodal) return
+      if (inferenceModel && isModelMultimodal(inferenceModel)) return
+      const preferred = 'qwen2.5vl:7b'
+      const mmList = locals.filter((id) => isModelMultimodal(id))
+      if (mmList.includes(preferred)) setInferenceModel(preferred)
+      else if (mmList.length) setInferenceModel(mmList[0])
+    } catch (_) {}
+  }, [models, customProviders, inferenceModel, contextHasImages, selectedImages])
 
   // 证据网络图（中文注释）：以最近消息为节点，依据 evidence_refs 共现构建边；宽度自适应
   const EvidenceGraph = ({ inferenceResult, messages, pendingText, pendingHas, pendingTooltip }) => {
@@ -745,15 +780,23 @@ export default function AgentPage() {
                 style={{ minWidth: 220 }}
                 value={model}
                 onChange={(v) => {
-                  if (contextHasImages && !isModelMultimodal(v)) {
-                    message.warning('Cannot switch to a non-multimodal model while images exist in context')
+                  const requireMultimodal = Boolean(contextHasImages || (selectedImages.length > 0))
+                  if (requireMultimodal && !isModelMultimodal(v)) {
+                    message.warning('Cannot switch to a non-multimodal model when images exist in context or pending')
                     return
                   }
                   setModel?.(v)
                 }}
-                options={[model, ...(models || [])]
-                  .filter((v, i, a) => v && a.indexOf(v) === i)
-                  .map((v) => ({ label: `${v}${isModelMultimodal(v) ? ' (multimodal)' : ' (text-only)'}`, value: v }))}
+                options={(() => {
+                  const requireMultimodal = Boolean(contextHasImages || (selectedImages.length > 0))
+                  return [model, ...(models || [])]
+                    .filter((v, i, a) => v && a.indexOf(v) === i)
+                    .map((v) => ({
+                      label: `${v}${isModelMultimodal(v) ? ' (multimodal)' : ' (text-only)'}`,
+                      value: v,
+                      disabled: (requireMultimodal && !isModelMultimodal(v))
+                    }))
+                })()}
               />
               <Button onClick={() => setApiModalOpen(true)}>Add API model</Button>
             </div>
@@ -916,6 +959,7 @@ export default function AgentPage() {
                         const localModels = (models || [])
                           .filter((v, i, a) => v && a.indexOf(v) === i)
                           .filter((id) => !customProviders?.[id])
+                        const requireMultimodal = Boolean(contextHasImages || (selectedImages.length > 0))
                         const currentVal = (inferenceModel && localModels.includes(inferenceModel))
                           ? inferenceModel
                           : (localModels[0] || '')
@@ -924,13 +968,13 @@ export default function AgentPage() {
                             style={{ minWidth: 220 }}
                             value={currentVal}
                             onChange={(v) => {
-                              if (contextHasImages && !isModelMultimodal(v)) {
-                                message.warning('Cannot switch to a non-multimodal model while images exist in context')
+                              if (requireMultimodal && !isModelMultimodal(v)) {
+                                message.warning('Cannot switch to a non-multimodal model when images exist in context or pending')
                                 return
                               }
                               setInferenceModel(v)
                             }}
-                            options={localModels.map((v) => ({ label: `${v}${isModelMultimodal(v) ? ' (multimodal)' : ' (text-only)'}`, value: v }))}
+                            options={localModels.map((v) => ({ label: `${v}${isModelMultimodal(v) ? ' (multimodal)' : ' (text-only)'}`, value: v, disabled: (requireMultimodal && !isModelMultimodal(v)) }))}
                           />
                         )
                       })()}
@@ -944,6 +988,11 @@ export default function AgentPage() {
                             const pending = input || landingInput || ''
                             const localModels = (models || []).filter((id) => !customProviders?.[id])
                             const usedModel = (inferenceModel && localModels.includes(inferenceModel)) ? inferenceModel : (localModels[0] || '')
+                            const requireMultimodal = Boolean(contextHasImages || (selectedImages.length > 0))
+                            if (requireMultimodal && !isModelMultimodal(usedModel)) {
+                              message.warning('A multimodal model is required when images exist in context or pending')
+                              return
+                            }
                             const result = await runPrivacyInference(pending, usedModel, selectedPrivacyTags)
                             setInferenceResult(result)
                           } catch (e) {
@@ -953,7 +1002,7 @@ export default function AgentPage() {
                             setInferenceLoading(false)
                           }
                         }}
-                        disabled={(() => { const ls=(models||[]).filter((id)=>!customProviders?.[id]); const used=(inferenceModel&&ls.includes(inferenceModel))?inferenceModel:(ls[0]||''); return !used })()}
+                        disabled={(() => { const ls=(models||[]).filter((id)=>!customProviders?.[id]); const requireMultimodal=Boolean(contextHasImages||(selectedImages.length>0)); const used=(inferenceModel&&ls.includes(inferenceModel))?inferenceModel:(ls[0]||''); if(!used) return true; if(requireMultimodal && !isModelMultimodal(used)) return true; return false })()}
                       >Infer</Button>
                     </div>
                     {inferenceError ? (
