@@ -105,7 +105,7 @@ async function streamOllamaChatResponse(reader, onDelta) {
 export const useStore = create((set, get) => ({
   // 基础配置（中文注释）：指向本地 Ollama OpenAI 兼容接口
   baseUrl: '/v1',
-  model: 'qwen2.5vl:7b',
+  model: 'gemma3:12b',
   models: [], // 可选模型列表（中文注释）
   customModels: [], // 通过 API key 添加的自定义模型（中文注释）
   customProviders: {}, // { [modelId]: { baseUrl, apiKey } }（中文注释）

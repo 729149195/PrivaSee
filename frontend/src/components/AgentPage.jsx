@@ -33,15 +33,16 @@ export default function AgentPage() {
   // 当前会话对象（中文注释）：需在引用它的 useMemo 之前定义
   const currentSession = getCurrentSession()
 
-  // 多模态能力检测（中文注释）：基于模型 ID 规则与是否自定义提供商
+  // 多模态能力检测（中文注释）：基于模型 ID 关键词 + 自定义提供商回退
   const isModelMultimodal = React.useCallback((id) => {
     try {
       if (!id) return false
-      // 自定义提供商（OpenAI 兼容 API）默认不支持图片（中文注释）
-      if (customProviders?.[id]) return false
+      // 先基于模型 ID 关键词判断（中文注释）：优先识别已知多模态家族
       const s = String(id).toLowerCase()
-      // 常见多模态/视觉模型关键词（中文注释）
-      return /(vision|vl|multi.?modal|llava|idefics|qwen[-_]?vl|gpt-?4o|xcomposer|internvl|minicpm-?v|pixtral)/.test(s)
+      if (/(vision|vl|multi.?modal|llava|idefics|qwen[-_]?vl|gpt-?4o|xcomposer|internvl|minicpm-?v|pixtral|gemma[-_]?3)/.test(s)) return true
+      // 自定义提供商（OpenAI 兼容 API）通常不支持图片；若上面未命中则认为是文本（中文注释）
+      if (customProviders?.[id]) return false
+      return false
     } catch (_) {
       return false
     }
@@ -193,7 +194,7 @@ export default function AgentPage() {
       if (!needMultimodal) return
       if (model && isModelMultimodal(model)) return
       const list = [model, ...(models || [])].filter((v, i, a) => v && a.indexOf(v) === i)
-      const preferred = 'qwen2.5vl:7b'
+      const preferred = 'gemma3:12b'
       const mm = list.filter((id) => isModelMultimodal(id))
       if (mm.includes(preferred)) setModel?.(preferred)
       else if (mm.length) setModel?.(mm[0])
@@ -288,12 +289,12 @@ export default function AgentPage() {
 
   // 属性级展示（中文注释）：不需要默认选择
 
-  // 右侧推断模型默认值与主模型解耦（中文注释）：优先选择 qwen2.5vl:7b，若不存在则回退到本地第一个
+  // 右侧推断模型默认值与主模型解耦（中文注释）：优先选择 gemma3:12b，若不存在则回退到本地第一个
   useEffect(() => {
     try {
       const locals = (models || []).filter((id) => !customProviders?.[id])
       if (!inferenceModel) {
-        const preferred = 'qwen2.5vl:7b'
+        const preferred = 'gemma3:12b'
         if (locals.includes(preferred)) setInferenceModel(preferred)
         else if (locals.length) setInferenceModel(locals[0])
         else setInferenceModel(preferred)
@@ -309,7 +310,7 @@ export default function AgentPage() {
       const needMultimodal = Boolean(contextHasImages || hasPendingImages)
       if (!needMultimodal) return
       if (inferenceModel && isModelMultimodal(inferenceModel)) return
-      const preferred = 'qwen2.5vl:7b'
+      const preferred = 'gemma3:12b'
       const mmList = locals.filter((id) => isModelMultimodal(id))
       if (mmList.includes(preferred)) setInferenceModel(preferred)
       else if (mmList.length) setInferenceModel(mmList[0])
