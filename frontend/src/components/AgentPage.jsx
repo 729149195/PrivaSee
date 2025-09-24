@@ -156,7 +156,7 @@ export default function AgentPage() {
   useEffect(() => {
     try {
       useStore.getState().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
-    } catch (_) {}
+    } catch (_) { }
   }, [])
 
   // 估算上下文 token（中文注释）：字符数/4 + 每张图固定加权（经验值）
@@ -198,7 +198,7 @@ export default function AgentPage() {
       const mm = list.filter((id) => isModelMultimodal(id))
       if (mm.includes(preferred)) setModel?.(preferred)
       else if (mm.length) setModel?.(mm[0])
-    } catch (_) {}
+    } catch (_) { }
   }, [model, models, contextHasImages, selectedImages, setModel, isModelMultimodal])
 
   // 根据当前模型查询实际上下文窗口（中文注释）：优先 /api/show，其次 /v1/models
@@ -299,7 +299,7 @@ export default function AgentPage() {
         else if (locals.length) setInferenceModel(locals[0])
         else setInferenceModel(preferred)
       }
-    } catch (_) {}
+    } catch (_) { }
   }, [models, customProviders, inferenceModel])
 
   // 当上下文或 pending 存在图片时，强制右侧使用多模态模型（中文注释）
@@ -314,7 +314,7 @@ export default function AgentPage() {
       const mmList = locals.filter((id) => isModelMultimodal(id))
       if (mmList.includes(preferred)) setInferenceModel(preferred)
       else if (mmList.length) setInferenceModel(mmList[0])
-    } catch (_) {}
+    } catch (_) { }
   }, [models, customProviders, inferenceModel, contextHasImages, selectedImages])
 
   // 证据网络图（中文注释）：以最近消息为节点，依据 evidence_refs 共现构建边；宽度自适应
@@ -332,12 +332,12 @@ export default function AgentPage() {
         }
       })
       ro.observe(wrapRef.current)
-      return () => { try { ro.disconnect() } catch (_) {} }
+      return () => { try { ro.disconnect() } catch (_) { } }
     }, [messages?.length])
 
     try {
       const ev = Array.isArray(inferenceResult?.evidence) ? inferenceResult.evidence : []
-      const evMap = new Map(ev.map((e) => [e?.id, e]).filter(([k,v]) => !!k))
+      const evMap = new Map(ev.map((e) => [e?.id, e]).filter(([k, v]) => !!k))
       const infoUnits = Array.isArray(inferenceResult?.info_units) ? inferenceResult.info_units : []
       const attributes = Array.isArray(inferenceResult?.attributes) ? inferenceResult.attributes.filter(a => (a?.best?.value !== 'N/A')) : []
       const edgesAll = Array.isArray(inferenceResult?.graph?.edges) ? inferenceResult.graph.edges : []
@@ -354,13 +354,13 @@ export default function AgentPage() {
       const pad = 24
       const extraColSpacing = 28
       const W = size.w
-      const colW = Math.max(240, Math.floor((W - pad*4) / 3))
-      const colX = [pad, pad + colW + pad + extraColSpacing, pad + (colW + pad)*2 + extraColSpacing*2]
+      const colW = Math.max(240, Math.floor((W - pad * 4) / 3))
+      const colX = [pad, pad + colW + pad + extraColSpacing, pad + (colW + pad) * 2 + extraColSpacing * 2]
       const gapY = 36
 
       // 根据节点数量动态增加高度，避免垂直拥挤（中文注释）
       const maxColCount = Math.max(layerMsg.length, layerInfo.length, layerAttributes.length)
-      const desiredH = Math.min(560, Math.max(240, pad*2 + Math.max(1, maxColCount) * gapY))
+      const desiredH = Math.min(560, Math.max(240, pad * 2 + Math.max(1, maxColCount) * gapY))
       const H = Math.max(size.h, desiredH)
 
       const columnHeights = [layerMsg.length, layerInfo.length, layerAttributes.length].map(cnt => Math.max(1, cnt) * gapY)
@@ -512,7 +512,7 @@ export default function AgentPage() {
         const hasAny = infoToAttribute.some(e => e.ti === ai)
         if (!hasAny && layerInfo.length) {
           const pairs = layerInfo.map((inf, si) => ({ si, c: Number(inf?.exposure_contribution) || 1 }))
-          pairs.sort((p,q) => q.c - p.c)
+          pairs.sort((p, q) => q.c - p.c)
           pairs.slice(0, Math.min(2, pairs.length)).forEach(p => addEdge(p.si, ai, (a?.exposure_contribution ?? 1)))
         }
       })
@@ -539,11 +539,11 @@ export default function AgentPage() {
             if (idx >= 0) riskyInfo.add(idx)
           }
         }
-      } catch (_) {}
+      } catch (_) { }
 
       // 权重映射（中文注释）：线宽与透明度
       // 加强连线粗细对比度（中文注释）：使用对数缩放映射
-      const wAll = [...infoToAttribute.map(e=>e.w), ...infoToInfo.map(e=>e.w), ...msgToInfo.map(e=>e.w)]
+      const wAll = [...infoToAttribute.map(e => e.w), ...infoToInfo.map(e => e.w), ...msgToInfo.map(e => e.w)]
       const wMin = wAll.length ? Math.min(...wAll) : 1
       const wMax = wAll.length ? Math.max(...wAll) : 1
       const scaleOpacity = (w) => {
@@ -558,10 +558,10 @@ export default function AgentPage() {
       }
 
       // 曲线函数（中文注释）：三次贝塞尔，加入水平弯曲与垂直偏移以降低重叠
-      const curve = (x1,y1,x2,y2,k=0) => {
+      const curve = (x1, y1, x2, y2, k = 0) => {
         const dx = Math.max(24, Math.min(160, (x2 - x1) * 0.45))
         const oy = k
-        return `M ${x1},${y1} C ${x1+dx},${y1+oy} ${x2-dx},${y2-oy} ${x2},${y2}`
+        return `M ${x1},${y1} C ${x1 + dx},${y1 + oy} ${x2 - dx},${y2 - oy} ${x2},${y2}`
       }
 
       return (
@@ -570,7 +570,7 @@ export default function AgentPage() {
             <defs>
               <marker id="arrow-dark" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#334155" /></marker>
               <marker id="arrow-gray" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" /></marker>
-              <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="1" stdDeviation="1" floodColor="#0f172a" floodOpacity="0.15"/></filter>
+              <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="1" stdDeviation="1" floodColor="#0f172a" floodOpacity="0.15" /></filter>
             </defs>
 
             {(() => {
@@ -581,9 +581,9 @@ export default function AgentPage() {
               groups.forEach((arr) => {
                 const n = arr.length
                 arr.forEach((e, idx) => {
-                  const offset = (idx - (n-1)/2) * 6
+                  const offset = (idx - (n - 1) / 2) * 6
                   paths.push(
-                    <path key={`m2i-${e.si}-${e.ti}-${idx}`} d={curve(msgPos[e.si].x+16, msgPos[e.si].y, infoPos[e.ti].x-46, infoPos[e.ti].y, offset)} stroke="#94a3b8" strokeWidth={scaleStroke(e.w)} opacity={scaleOpacity(e.w)} fill="none" markerEnd="url(#arrow-gray)">
+                    <path key={`m2i-${e.si}-${e.ti}-${idx}`} d={curve(msgPos[e.si].x + 16, msgPos[e.si].y, infoPos[e.ti].x - 46, infoPos[e.ti].y, offset)} stroke="#94a3b8" strokeWidth={scaleStroke(e.w)} opacity={scaleOpacity(e.w)} fill="none" markerEnd="url(#arrow-gray)">
                       <title>{`message -> ${layerInfo[e.ti]?.label || 'info'}`}</title>
                     </path>
                   )
@@ -598,9 +598,9 @@ export default function AgentPage() {
               groups.forEach((arr, key) => {
                 const n = arr.length
                 arr.forEach((e, idx) => {
-                  const offset = (idx - (n-1)/2) * 6
+                  const offset = (idx - (n - 1) / 2) * 6
                   paths.push(
-                    <path key={`i2i-${key}-${idx}`} d={curve(infoPos[e.si].x+46, infoPos[e.si].y, infoPos[e.ti].x-46, infoPos[e.ti].y, offset)} stroke="#64748b" strokeWidth={scaleStroke(e.w)} opacity={scaleOpacity(e.w)} fill="none" markerEnd="url(#arrow-dark)">
+                    <path key={`i2i-${key}-${idx}`} d={curve(infoPos[e.si].x + 46, infoPos[e.si].y, infoPos[e.ti].x - 46, infoPos[e.ti].y, offset)} stroke="#64748b" strokeWidth={scaleStroke(e.w)} opacity={scaleOpacity(e.w)} fill="none" markerEnd="url(#arrow-dark)">
                       <title>{`${layerInfo[e.si]?.label || 'info'} -> ${layerInfo[e.ti]?.label || 'info'} (w=${e.w})`}</title>
                     </path>
                   )
@@ -615,9 +615,9 @@ export default function AgentPage() {
               groups.forEach((arr) => {
                 const n = arr.length
                 arr.forEach((e, idx) => {
-                  const offset = (idx - (n-1)/2) * 6
+                  const offset = (idx - (n - 1) / 2) * 6
                   paths.push(
-                    <path key={`i2a-${e.si}-${e.ti}-${idx}`} d={curve(infoPos[e.si].x+46, infoPos[e.si].y, attrPos[e.ti].x-16, attrPos[e.ti].y, offset)} stroke="#334155" strokeWidth={scaleStroke(e.w)} opacity={scaleOpacity(e.w)} fill="none" markerEnd="url(#arrow-dark)">
+                    <path key={`i2a-${e.si}-${e.ti}-${idx}`} d={curve(infoPos[e.si].x + 46, infoPos[e.si].y, attrPos[e.ti].x - 16, attrPos[e.ti].y, offset)} stroke="#334155" strokeWidth={scaleStroke(e.w)} opacity={scaleOpacity(e.w)} fill="none" markerEnd="url(#arrow-dark)">
                       <title>{`${layerInfo[e.si]?.label || 'info'} -> ${layerAttributes[e.ti]?.name || 'attribute'} (w=${e.w})`}</title>
                     </path>
                   )
@@ -645,7 +645,7 @@ export default function AgentPage() {
               const w = Math.max(120, Math.min(220, 12 * Math.ceil(label.length * 0.9)))
               return (
                 <g key={n.id} filter="url(#shadow)">
-                  <rect x={infoPos[i].x - w/2} y={infoPos[i].y - 16} width={w} height={32} rx={8} ry={8} fill={riskyInfo.has(i) ? '#fee2e2' : '#e6f4f1'} stroke={riskyInfo.has(i) ? '#ef4444' : '#10a37f'} />
+                  <rect x={infoPos[i].x - w / 2} y={infoPos[i].y - 16} width={w} height={32} rx={8} ry={8} fill={riskyInfo.has(i) ? '#fee2e2' : '#e6f4f1'} stroke={riskyInfo.has(i) ? '#ef4444' : '#10a37f'} />
                   <text x={infoPos[i].x} y={infoPos[i].y} fontSize={11} fill="#334155" textAnchor="middle" dominantBaseline="middle">{label}</text>
                   <title>{`info: ${label}`}</title>
                 </g>
@@ -723,7 +723,7 @@ export default function AgentPage() {
       const pendingIds = new Set(evidence.filter((e) => e?.source === 'pending').map((e) => e?.id).filter(Boolean))
       const edges = Array.isArray(inferenceResult?.graph?.edges) ? inferenceResult.graph.edges : []
       hasPendingRisk = edges.some((e) => (Array.isArray(e?.evidence_refs) ? e.evidence_refs : []).some((r) => pendingIds.has(r)))
-    } catch (_) {}
+    } catch (_) { }
     return (
       <div style={{ border: `1px solid ${hasPendingRisk ? '#ef4444' : '#e5e7eb'}`, borderRadius: 8, padding: 8, background: hasPendingRisk ? '#fff1f1' : '#ffffff' }}>
         <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>pending</div>
@@ -810,7 +810,7 @@ export default function AgentPage() {
               try {
                 useStore.getState().addApiModel({ id: apiModelId.trim(), baseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim() })
                 setApiModalOpen(false)
-              } catch (_) {}
+              } catch (_) { }
             }}
           >
             <div style={{ display: 'grid', gap: 8 }}>
@@ -822,253 +822,253 @@ export default function AgentPage() {
           </Modal>
           <Splitter className={styles.splitterRoot}>
             <Splitter.Panel style={{ overflow: 'hidden' }}>
-                <div className={styles.leftPaneScroll} ref={listRef}>
-                  {hasMessages ? (
-                    <div className={styles.column}>
-                      {(currentSession?.messages || []).map((m) => {
-                        const isUser = m.role === 'user'
-                        return (
-                          <div key={m.id} className={`${styles.msgRow} ${isUser ? styles.rowUser : styles.rowAssistant}`}>
-                            {isUser ? (
-                              <>
-                                <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`}>
-                                  <div className={styles.msgContent}>{m.content}</div>
-                                  {Array.isArray(m.images) && m.images.length > 0 && (
-                                    <div className={styles.msgImages}>
-                                      {m.images.map((src, i) => (
-                                        <img key={i} src={src} alt={`img-${i}`} className={styles.msgImage} />
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                                <div className={styles.avatar}>U</div>
-                              </>
-                            ) : (
-                              <>
-                                <div className={styles.avatar}>A</div>
-                                <div className={`${styles.msgBubble} ${styles.msgBubbleAssistant}`}>
-                                  {m.reasoning && (
-                                    <div className={styles.reasoningBox}>
-                                      <div className={styles.reasoningTitle}>Thinking</div>
-                                      <div className={styles.reasoningBody}>
-                                        <MarkdownMessage content={m.reasoning} />
-                                      </div>
-                                    </div>
-                                  )}
-                                  <div className={styles.msgContent}>
-                                    <MarkdownMessage content={m.content} />
+              <div className={styles.leftPaneScroll} ref={listRef}>
+                {hasMessages ? (
+                  <div className={styles.column}>
+                    {(currentSession?.messages || []).map((m) => {
+                      const isUser = m.role === 'user'
+                      return (
+                        <div key={m.id} className={`${styles.msgRow} ${isUser ? styles.rowUser : styles.rowAssistant}`}>
+                          {isUser ? (
+                            <>
+                              <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`}>
+                                <div className={styles.msgContent}>{m.content}</div>
+                                {Array.isArray(m.images) && m.images.length > 0 && (
+                                  <div className={styles.msgImages}>
+                                    {m.images.map((src, i) => (
+                                      <img key={i} src={src} alt={`img-${i}`} className={styles.msgImage} />
+                                    ))}
                                   </div>
-                                  {m.streaming ? <div className={styles.cursor}>▍</div> : null}
-                                  {m.error ? <div className={styles.error}>Error: {m.error}</div> : null}
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <div className={styles.landing}>
-                      <div className={styles.landingTitle}>How can I help you today?</div>
-                      <div className={styles.landingSearch}>
-                        {selectedImages.length > 0 && (
-                          <div className={styles.composerPreviews}>
-                            {selectedImages.map((src, i) => (
-                              <div key={i} className={styles.composerPreviewItem}>
-                                <img src={src} alt={`preview-${i}`} className={styles.composerPreviewImg} />
-                                <button className={styles.composerPreviewRemove} onClick={() => removeSelectedImage(i)}>✕</button>
+                                )}
                               </div>
-                            ))}
-                          </div>
-                        )}
-                        <div className={styles.landingControls}>
-                          <Upload
-                            disabled={!currentModelIsMultimodal}
-                            multiple
-                            accept="image/*"
-                            showUploadList={false}
-                            beforeUpload={(file) => {
-                              const reader = new FileReader()
-                              reader.onload = () => setSelectedImages((prev) => [...prev, reader.result])
-                              reader.readAsDataURL(file)
-                              return Upload.LIST_IGNORE
-                            }}
-                          >
-                            <Button icon={<CameraOutlined />} disabled={!currentModelIsMultimodal} title={currentModelIsMultimodal ? '' : 'Current model does not support images'} />
-                          </Upload>
-                          <Input.TextArea
-                            className={styles.landingInput}
-                            placeholder="Type your question..."
-                            value={landingInput}
-                            onChange={(e) => setLandingInput(e.target.value)}
-                            onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); handleLandingSend() } }}
-                            autoSize={{ minRows: 1, maxRows: 6 }}
-                          />
-                          <Button type="primary" icon={<SendOutlined />} onClick={handleLandingSend} disabled={!landingInput.trim() && selectedImages.length === 0} />
+                              <div className={styles.avatar}>U</div>
+                            </>
+                          ) : (
+                            <>
+                              <div className={styles.avatar}>A</div>
+                              <div className={`${styles.msgBubble} ${styles.msgBubbleAssistant}`}>
+                                {m.reasoning && (
+                                  <div className={styles.reasoningBox}>
+                                    <div className={styles.reasoningTitle}>Thinking</div>
+                                    <div className={styles.reasoningBody}>
+                                      <MarkdownMessage content={m.reasoning} />
+                                    </div>
+                                  </div>
+                                )}
+                                <div className={styles.msgContent}>
+                                  <MarkdownMessage content={m.content} />
+                                </div>
+                                {m.streaming ? <div className={styles.cursor}>▍</div> : null}
+                                {m.error ? <div className={styles.error}>Error: {m.error}</div> : null}
+                              </div>
+                            </>
+                          )}
                         </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-            </Splitter.Panel>
-            <Splitter.Panel defaultSize="28%" min="18%" max="45%">
-                <div className={styles.rightPaneScroll}>
-                  <div style={{ padding: 16 }}>
-                    <div style={{ fontWeight: 600, marginBottom: 8 }}>Context window</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                      <Progress percent={contextPercent} size="small" style={{ flex: 1 }} />
-                      <div style={{ color: '#64748b', fontSize: 12 }}>{contextLabel}</div>
-                    </div>
-                    <div style={{ color: '#475569', fontSize: 12, marginBottom: 8 }}>Evidence graph</div>
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#ffffff' }}>
-                      {inferenceResult ? (
-                        <EvidenceGraph
-                          inferenceResult={inferenceResult}
-                          messages={(currentSession?.messages || [])}
-                          pendingText={(input || landingInput || '')}
-                          pendingHas={Boolean((input || '').trim() || (landingInput || '').trim() || selectedImages.length)}
-                          pendingTooltip={`${(input || landingInput || '').slice(0, 180)}${((input || landingInput || '').length > 180) ? '…' : ''}${selectedImages.length ? `\n[${selectedImages.length} image(s) selected]` : ''}`}
-                        />
-                      ) : (
-                        <div style={{ fontSize: 12, color: '#64748b' }}>Run inference to view the evidence graph.</div>
-                      )}
-                    </div>
-                    {/* 实时显示未发送输入与已选图片（中文注释） */}
-                    {(((input || '').trim().length > 0) || ((landingInput || '').trim().length > 0) || selectedImages.length > 0) && renderPendingCard()}
-                    {/* 隐私推断控制区（中文注释）：单独选择模型 + 推断按钮 + 结果显示 */}
-                    <div style={{ height: 12 }} />
-                    <div style={{ borderTop: '1px solid #e5e7eb', margin: '12px 0' }} />
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                      <div style={{ fontWeight: 600 }}>Privacy inference</div>
-                    </div>
-                    {/* 隐私标签常显（中文注释）：自适应列，宽度占满，无滚动条 */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <div style={{ fontSize: 12, color: '#64748b' }}>Privacy tags (optional)</div>
-                      <div style={{ fontSize: 12, color: '#64748b' }}>{selectedPrivacyTags.length} selected</div>
-                    </div>
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#ffffff', marginBottom: 8 }}>
-                      <Checkbox.Group value={selectedPrivacyTags} onChange={setSelectedPrivacyTags}>
-                        <div className={styles.privacyGrid}>
-                          {PRIVACY_TAGS.map(opt => (
-                            <Checkbox key={opt.value} value={opt.value} className={styles.privacyCheckbox}>{opt.label}</Checkbox>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className={styles.landing}>
+                    <div className={styles.landingTitle}>How can I help you today?</div>
+                    <div className={styles.landingSearch}>
+                      {selectedImages.length > 0 && (
+                        <div className={styles.composerPreviews}>
+                          {selectedImages.map((src, i) => (
+                            <div key={i} className={styles.composerPreviewItem}>
+                              <img src={src} alt={`preview-${i}`} className={styles.composerPreviewImg} />
+                              <button className={styles.composerPreviewRemove} onClick={() => removeSelectedImage(i)}>✕</button>
+                            </div>
                           ))}
                         </div>
-                      </Checkbox.Group>
+                      )}
+                      <div className={styles.landingControls}>
+                        <Upload
+                          disabled={!currentModelIsMultimodal}
+                          multiple
+                          accept="image/*"
+                          showUploadList={false}
+                          beforeUpload={(file) => {
+                            const reader = new FileReader()
+                            reader.onload = () => setSelectedImages((prev) => [...prev, reader.result])
+                            reader.readAsDataURL(file)
+                            return Upload.LIST_IGNORE
+                          }}
+                        >
+                          <Button icon={<CameraOutlined />} disabled={!currentModelIsMultimodal} title={currentModelIsMultimodal ? '' : 'Current model does not support images'} />
+                        </Upload>
+                        <Input.TextArea
+                          className={styles.landingInput}
+                          placeholder="Type your question..."
+                          value={landingInput}
+                          onChange={(e) => setLandingInput(e.target.value)}
+                          onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); handleLandingSend() } }}
+                          autoSize={{ minRows: 1, maxRows: 6 }}
+                        />
+                        <Button type="primary" icon={<SendOutlined />} onClick={handleLandingSend} disabled={!landingInput.trim() && selectedImages.length === 0} />
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-                      {(() => {
-                        const localModels = (models || [])
-                          .filter((v, i, a) => v && a.indexOf(v) === i)
-                          .filter((id) => !customProviders?.[id])
-                        const requireMultimodal = Boolean(contextHasImages || (selectedImages.length > 0))
-                        const currentVal = (inferenceModel && localModels.includes(inferenceModel))
-                          ? inferenceModel
-                          : (localModels[0] || '')
-                        return (
-                          <Select
-                            style={{ minWidth: 220 }}
-                            value={currentVal}
-                            onChange={(v) => {
-                              if (requireMultimodal && !isModelMultimodal(v)) {
-                                message.warning('Cannot switch to a non-multimodal model when images exist in context or pending')
-                                return
-                              }
-                              setInferenceModel(v)
-                            }}
-                            options={localModels.map((v) => ({ label: `${v}${isModelMultimodal(v) ? ' (multimodal)' : ' (text-only)'}`, value: v, disabled: (requireMultimodal && !isModelMultimodal(v)) }))}
-                          />
-                        )
-                      })()}
-                      <Button
-                        type="primary"
-                        loading={inferenceLoading}
-                        onClick={async () => {
-                          try {
-                            setInferenceError('')
-                            setInferenceLoading(true)
-                            const pending = input || landingInput || ''
-                            const localModels = (models || []).filter((id) => !customProviders?.[id])
-                            const usedModel = (inferenceModel && localModels.includes(inferenceModel)) ? inferenceModel : (localModels[0] || '')
-                            const requireMultimodal = Boolean(contextHasImages || (selectedImages.length > 0))
-                            if (requireMultimodal && !isModelMultimodal(usedModel)) {
-                              message.warning('A multimodal model is required when images exist in context or pending')
+                  </div>
+                )}
+              </div>
+            </Splitter.Panel>
+            <Splitter.Panel defaultSize="28%" min="18%" max="45%">
+              <div className={styles.rightPaneScroll}>
+                <div style={{ padding: 16 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 8 }}>Context window</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                    <Progress percent={contextPercent} size="small" style={{ flex: 1 }} />
+                    <div style={{ color: '#64748b', fontSize: 12 }}>{contextLabel}</div>
+                  </div>
+                  <div style={{ color: '#475569', fontSize: 12, marginBottom: 8 }}>Evidence graph</div>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#ffffff' }}>
+                    {inferenceResult ? (
+                      <EvidenceGraph
+                        inferenceResult={inferenceResult}
+                        messages={(currentSession?.messages || [])}
+                        pendingText={(input || landingInput || '')}
+                        pendingHas={Boolean((input || '').trim() || (landingInput || '').trim() || selectedImages.length)}
+                        pendingTooltip={`${(input || landingInput || '').slice(0, 180)}${((input || landingInput || '').length > 180) ? '…' : ''}${selectedImages.length ? `\n[${selectedImages.length} image(s) selected]` : ''}`}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 12, color: '#64748b' }}>Run inference to view the evidence graph.</div>
+                    )}
+                  </div>
+                  {/* 实时显示未发送输入与已选图片（中文注释） */}
+                  {(((input || '').trim().length > 0) || ((landingInput || '').trim().length > 0) || selectedImages.length > 0) && renderPendingCard()}
+                  {/* 隐私推断控制区（中文注释）：单独选择模型 + 推断按钮 + 结果显示 */}
+                  <div style={{ height: 12 }} />
+                  <div style={{ borderTop: '1px solid #e5e7eb', margin: '12px 0' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <div style={{ fontWeight: 600 }}>Privacy inference</div>
+                  </div>
+                  {/* 隐私标签常显（中文注释）：自适应列，宽度占满，无滚动条 */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>Privacy tags (optional)</div>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>{selectedPrivacyTags.length} selected</div>
+                  </div>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#ffffff', marginBottom: 8 }}>
+                    <Checkbox.Group value={selectedPrivacyTags} onChange={setSelectedPrivacyTags}>
+                      <div className={styles.privacyGrid}>
+                        {PRIVACY_TAGS.map(opt => (
+                          <Checkbox key={opt.value} value={opt.value} className={styles.privacyCheckbox}>{opt.label}</Checkbox>
+                        ))}
+                      </div>
+                    </Checkbox.Group>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                    {(() => {
+                      const localModels = (models || [])
+                        .filter((v, i, a) => v && a.indexOf(v) === i)
+                        .filter((id) => !customProviders?.[id])
+                      const requireMultimodal = Boolean(contextHasImages || (selectedImages.length > 0))
+                      const currentVal = (inferenceModel && localModels.includes(inferenceModel))
+                        ? inferenceModel
+                        : (localModels[0] || '')
+                      return (
+                        <Select
+                          style={{ minWidth: 220 }}
+                          value={currentVal}
+                          onChange={(v) => {
+                            if (requireMultimodal && !isModelMultimodal(v)) {
+                              message.warning('Cannot switch to a non-multimodal model when images exist in context or pending')
                               return
                             }
-                            const result = await runPrivacyInference(pending, usedModel, selectedPrivacyTags)
-                            setInferenceResult(result)
-                          } catch (e) {
-                            setInferenceResult(null)
-                            setInferenceError(String(e?.message || e || 'Inference failed'))
-                          } finally {
-                            setInferenceLoading(false)
+                            setInferenceModel(v)
+                          }}
+                          options={localModels.map((v) => ({ label: `${v}${isModelMultimodal(v) ? ' (multimodal)' : ' (text-only)'}`, value: v, disabled: (requireMultimodal && !isModelMultimodal(v)) }))}
+                        />
+                      )
+                    })()}
+                    <Button
+                      type="primary"
+                      loading={inferenceLoading}
+                      onClick={async () => {
+                        try {
+                          setInferenceError('')
+                          setInferenceLoading(true)
+                          const pending = input || landingInput || ''
+                          const localModels = (models || []).filter((id) => !customProviders?.[id])
+                          const usedModel = (inferenceModel && localModels.includes(inferenceModel)) ? inferenceModel : (localModels[0] || '')
+                          const requireMultimodal = Boolean(contextHasImages || (selectedImages.length > 0))
+                          if (requireMultimodal && !isModelMultimodal(usedModel)) {
+                            message.warning('A multimodal model is required when images exist in context or pending')
+                            return
                           }
-                        }}
-                        disabled={(() => { const ls=(models||[]).filter((id)=>!customProviders?.[id]); const requireMultimodal=Boolean(contextHasImages||(selectedImages.length>0)); const used=(inferenceModel&&ls.includes(inferenceModel))?inferenceModel:(ls[0]||''); if(!used) return true; if(requireMultimodal && !isModelMultimodal(used)) return true; return false })()}
-                      >Infer</Button>
-                    </div>
-                    {inferenceError ? (
-                      <div style={{ color: '#b91c1c', fontSize: 12, marginBottom: 8 }}>Error: {inferenceError}</div>
-                    ) : null}
-                    {inferenceResult ? (
-                      <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#ffffff' }}>
-                        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>Attributes</div>
-                        <div style={{ display: 'grid', gap: 6, marginBottom: 8 }}>
-                          {(Array.isArray(inferenceResult?.attributes) ? inferenceResult.attributes : [])
-                            .filter(a => a && a.best && a.best.value !== 'N/A')
-                            .map((a, idx) => (
-                              <div key={a?.name || idx} style={{ border: '2px solid #e5e7eb', borderRadius: 8, padding: 10, background: '#ffffff' }}>
-                                <div style={{ fontSize: 13 }}>
-                                  <b>{String(a?.name || '')}</b> · {String(a?.best?.value)}
+                          const result = await runPrivacyInference(pending, usedModel, selectedPrivacyTags)
+                          setInferenceResult(result)
+                        } catch (e) {
+                          setInferenceResult(null)
+                          setInferenceError(String(e?.message || e || 'Inference failed'))
+                        } finally {
+                          setInferenceLoading(false)
+                        }
+                      }}
+                      disabled={(() => { const ls = (models || []).filter((id) => !customProviders?.[id]); const requireMultimodal = Boolean(contextHasImages || (selectedImages.length > 0)); const used = (inferenceModel && ls.includes(inferenceModel)) ? inferenceModel : (ls[0] || ''); if (!used) return true; if (requireMultimodal && !isModelMultimodal(used)) return true; return false })()}
+                    >Infer</Button>
+                  </div>
+                  {inferenceError ? (
+                    <div style={{ color: '#b91c1c', fontSize: 12, marginBottom: 8 }}>Error: {inferenceError}</div>
+                  ) : null}
+                  {inferenceResult ? (
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#ffffff' }}>
+                      <div style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>Attributes</div>
+                      <div style={{ display: 'grid', gap: 6, marginBottom: 8 }}>
+                        {(Array.isArray(inferenceResult?.attributes) ? inferenceResult.attributes : [])
+                          .filter(a => a && a.best && a.best.value !== 'N/A')
+                          .map((a, idx) => (
+                            <div key={a?.name || idx} style={{ border: '2px solid #e5e7eb', borderRadius: 8, padding: 10, background: '#ffffff' }}>
+                              <div style={{ fontSize: 13 }}>
+                                <b>{String(a?.name || '')}</b> · {String(a?.best?.value)}
+                              </div>
+                              <div style={{ fontSize: 12, color: '#334155' }}>confidence: {Number.isFinite(a?.best?.confidence) ? Number(a.best.confidence).toFixed(2) : '-'}</div>
+                              {a?.best?.rationale ? <div style={{ fontSize: 12, color: '#475569', marginTop: 4 }}>{String(a.best.rationale)}</div> : null}
+                              {Array.isArray(a?.top_predictions) && a.top_predictions.length ? (
+                                <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+                                  top-3: {a.top_predictions.map((tp) => `${tp?.value} (${Number.isFinite(tp?.confidence) ? Number(tp.confidence).toFixed(2) : '-'})`).join(' · ')}
                                 </div>
-                                <div style={{ fontSize: 12, color: '#334155' }}>confidence: {Number.isFinite(a?.best?.confidence) ? Number(a.best.confidence).toFixed(2) : '-'}</div>
-                                {a?.best?.rationale ? <div style={{ fontSize: 12, color: '#475569', marginTop: 4 }}>{String(a.best.rationale)}</div> : null}
-                                {Array.isArray(a?.top_predictions) && a.top_predictions.length ? (
-                                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
-                                    top-3: {a.top_predictions.map((tp) => `${tp?.value} (${Number.isFinite(tp?.confidence) ? Number(tp.confidence).toFixed(2) : '-'})`).join(' · ')}
-                                  </div>
-                                ) : null}
+                              ) : null}
+                            </div>
+                          ))}
+                      </div>
+                      {/* 修改建议列表（中文注释）：trade-off 视角的规避建议 */}
+                      {Array.isArray(inferenceResult?.mitigation_suggestions) && inferenceResult.mitigation_suggestions.length > 0 ? (
+                        <>
+                          <div style={{ fontSize: 12, color: '#64748b', margin: '8px 0 6px' }}>Mitigation suggestions</div>
+                          <div style={{ display: 'grid', gap: 8 }}>
+                            {inferenceResult.mitigation_suggestions.map((s, idx) => (
+                              <div key={s?.id || idx} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#f8fafc' }}>
+                                <div style={{ fontSize: 13, color: '#0f172a', marginBottom: 4 }}>{String(s?.description || '')}</div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 12, color: '#334155' }}>
+                                  {Array.isArray(s?.targeted_info_units) && s.targeted_info_units.length > 0 ? (
+                                    <div>targets: {s.targeted_info_units.join(', ')}</div>
+                                  ) : null}
+                                  {Array.isArray(s?.suggested_transformations) && s.suggested_transformations.length > 0 ? (
+                                    <div>transforms: {s.suggested_transformations.join(', ')}</div>
+                                  ) : null}
+                                  {Number.isFinite(s?.expected_risk_reduction) ? (
+                                    <div>risk↓: {s.expected_risk_reduction}</div>
+                                  ) : null}
+                                  {s?.expected_utility_impact ? (
+                                    <div>utility impact: {String(s.expected_utility_impact)}</div>
+                                  ) : null}
+                                  {s?.tradeoffs ? (
+                                    <div>trade-offs: privacy {s.tradeoffs?.privacy ?? '-'} / utility {s.tradeoffs?.utility ?? '-'} / complexity {s.tradeoffs?.complexity ?? '-'}</div>
+                                  ) : null}
+                                </div>
                               </div>
                             ))}
-                        </div>
-                        {/* 修改建议列表（中文注释）：trade-off 视角的规避建议 */}
-                        {Array.isArray(inferenceResult?.mitigation_suggestions) && inferenceResult.mitigation_suggestions.length > 0 ? (
-                          <>
-                            <div style={{ fontSize: 12, color: '#64748b', margin: '8px 0 6px' }}>Mitigation suggestions</div>
-                            <div style={{ display: 'grid', gap: 8 }}>
-                              {inferenceResult.mitigation_suggestions.map((s, idx) => (
-                                <div key={s?.id || idx} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#f8fafc' }}>
-                                  <div style={{ fontSize: 13, color: '#0f172a', marginBottom: 4 }}>{String(s?.description || '')}</div>
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 12, color: '#334155' }}>
-                                    {Array.isArray(s?.targeted_info_units) && s.targeted_info_units.length > 0 ? (
-                                      <div>targets: {s.targeted_info_units.join(', ')}</div>
-                                    ) : null}
-                                    {Array.isArray(s?.suggested_transformations) && s.suggested_transformations.length > 0 ? (
-                                      <div>transforms: {s.suggested_transformations.join(', ')}</div>
-                                    ) : null}
-                                    {Number.isFinite(s?.expected_risk_reduction) ? (
-                                      <div>risk↓: {s.expected_risk_reduction}</div>
-                                    ) : null}
-                                    {s?.expected_utility_impact ? (
-                                      <div>utility impact: {String(s.expected_utility_impact)}</div>
-                                    ) : null}
-                                    {s?.tradeoffs ? (
-                                      <div>trade-offs: privacy {s.tradeoffs?.privacy ?? '-'} / utility {s.tradeoffs?.utility ?? '-'} / complexity {s.tradeoffs?.complexity ?? '-'}</div>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </>
-                        ) : null}
+                          </div>
+                        </>
+                      ) : null}
 
-                        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 6, marginTop: 8 }}>Structured JSON</div>
-                        <pre style={{ maxHeight: 440, overflow: 'auto', background: '#0b1020', color: '#e2e8f0', padding: 8, borderRadius: 8, border: '1px solid #111827' }}>
-{JSON.stringify(inferenceResult, null, 2)}
-                        </pre>
-                      </div>
-                    ) : null}
-                  </div>
+                      <div style={{ fontSize: 12, color: '#64748b', marginBottom: 6, marginTop: 8 }}>Structured JSON</div>
+                      <pre style={{ maxHeight: 440, overflow: 'auto', background: '#0b1020', color: '#e2e8f0', padding: 8, borderRadius: 8, border: '1px solid #111827' }}>
+                        {JSON.stringify(inferenceResult, null, 2)}
+                      </pre>
+                    </div>
+                  ) : null}
                 </div>
+              </div>
             </Splitter.Panel>
           </Splitter>
         </div>
