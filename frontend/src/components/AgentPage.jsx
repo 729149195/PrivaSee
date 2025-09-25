@@ -919,7 +919,7 @@ export default function AgentPage() {
                     <Progress percent={contextPercent} size="small" style={{ flex: 1 }} />
                     <div style={{ color: '#64748b', fontSize: 12 }}>{contextLabel}</div>
                   </div>
-                  <div style={{ color: '#475569', fontSize: 12, marginBottom: 8 }}>Evidence graph</div>
+                  <div style={{ fontWeight: 600, marginBottom: 8 }}>Evidence graph</div>
                   <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#ffffff' }}>
                     {inferenceResult ? (
                       <EvidenceGraph
@@ -937,7 +937,7 @@ export default function AgentPage() {
                   {/* 实时显示未发送输入与已选图片（中文注释） */}
                   {(((input || '').trim().length > 0) || ((landingInput || '').trim().length > 0) || selectedImages.length > 0) && renderPendingCard()}
                   {/* 隐私推断控制区（中文注释）：单独选择模型 + 推断按钮 + 结果显示 */}
-                  <div style={{ height: 8 }} />
+                  
                   <div style={{ borderTop: '1px solid #e5e7eb', margin: '12px 0' }} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                     <div style={{ fontWeight: 600 }}>Privacy inference</div>
