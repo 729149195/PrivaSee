@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { systemPrompt as privacySystemPrompt, prefix as privacyPrefix, suffix as privacySuffix, formatSpec as privacyFormatSpec } from './templates/privacyInferenceTemplate'
 
 // 说明（中文注释）：
 // 1) 本 store 管理 ChatGPT 风格的多会话、消息流与流式生成状态；
@@ -522,80 +521,6 @@ export const useStore = create((set, get) => ({
     await get().sendMessage(lastUser.content)
   },
 
-  // 固定模板隐私推断（中文注释）：结合历史上下文、未发送输入与选中属性，使用指定模型一次性返回JSON结果
-  async runPrivacyInference(pendingText, overrideModel, selectedAttributes) {
-    const state = get()
-    state._ensureCurrentSession()
-    const session = get().getCurrentSession()
-    if (!session) throw new Error('No active session')
-
-    // 组装历史上下文（中文注释）：使用当前会话全部消息，保留角色用于溯源（与右侧证据图一一对应）
-    const history = (session.messages || []).map((m, idx) => {
-      const role = m.role || 'user'
-      const content = typeof m.content === 'string' ? m.content : ''
-      return `[${idx}](${role}) ${content}`
-    }).join('\n')
-
-    // 模板要素（中文注释）：system + user（Prefix + 历史 + 未发送 + Suffix），强制JSON输出（从模板模块导入）
-    const systemPrompt = privacySystemPrompt
-    const prefix = privacyPrefix
-    const suffix = privacySuffix
-    const formatSpec = privacyFormatSpec
-
-    const pending = (pendingText || '').trim()
-    const attrs = Array.isArray(selectedAttributes) ? selectedAttributes.filter(Boolean) : []
-    const attrsBlock = attrs.length ? `\n\n[SELECTED_ATTRIBUTES]\n${attrs.join('\n')}` : `\n\n[SELECTED_ATTRIBUTES]\n` 
-    const userContent = `${prefix}\n\n[HISTORY]\n${history}\n\n[PENDING]\n${pending}${attrsBlock}\n\n${suffix}${formatSpec}`
-
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userContent },
-    ]
-
-    const modelToUse = overrideModel || get().model
-    // 仅允许本地模型（中文注释）
-    const isCustom = !!get().customProviders?.[modelToUse]
-    if (isCustom) {
-      throw new Error('Privacy inference requires local model')
-    }
-
-    // 发起一次性请求（中文注释）：OpenAI 兼容 /chat/completions，关闭流
-    const res = await fetch(`${get().baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: modelToUse,
-        messages,
-        temperature: 0.1,
-        stream: false,
-      })
-    })
-
-    if (!res.ok) {
-      const textErr = await res.text().catch(() => '')
-      throw new Error(textErr || 'Inference request failed')
-    }
-
-    // 解析响应（中文注释）：兼容 OpenAI choices[0].message.content
-    const json = await res.json().catch(() => ({}))
-    const content = json?.choices?.[0]?.message?.content || ''
-
-    // 尝试提取JSON（中文注释）：宽松截取第一个 { 到最后一个 }
-    const extractJson = (s) => {
-      if (typeof s !== 'string') return null
-      const first = s.indexOf('{')
-      const last = s.lastIndexOf('}')
-      if (first >= 0 && last >= first) {
-        const sub = s.slice(first, last + 1)
-        try { return JSON.parse(sub) } catch (_) { return null }
-      }
-      return null
-    }
-
-    const parsed = extractJson(content)
-    if (!parsed) throw new Error('Model did not return valid JSON')
-    return parsed
-  },
 }))
 
 
