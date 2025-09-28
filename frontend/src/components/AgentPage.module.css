@@ -709,6 +709,94 @@
     padding: 12px 16px 16px;
 }
 
+/* 信息元提取 UI（中文注释） */
+.infonRuns {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.infonEmpty {
+    color: var(--color-text-tertiary);
+    font-size: 12px;
+}
+
+.infonRunCard {
+    border: 1px solid var(--color-border-light);
+    background: var(--color-bg-secondary);
+    border-radius: var(--border-radius-md);
+    padding: 12px;
+    box-shadow: var(--color-shadow-light);
+}
+
+.infonRunHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.infonRunTitle {
+    font-weight: 600;
+}
+
+.infonRunMeta {
+    color: var(--color-text-tertiary);
+    font-size: 12px;
+}
+
+.infonError {
+    color: #c62828;
+    font-size: 12px;
+    margin-top: 8px;
+}
+
+.infonJsonList {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.infonJsonCode {
+    margin: 0;
+    background: #0b1020;
+    color: #e2e8f0;
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid #111827;
+    font-size: 12px;
+    line-height: 1.4;
+    max-height: 220px;
+    overflow: auto;
+}
+
+.infonItem {
+    border-left: 3px solid var(--color-accent-primary);
+    padding-left: 8px;
+    margin-bottom: 8px;
+}
+
+.infonType {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-accent-primary);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+    letter-spacing: 0.5px;
+}
+
+.infonDetails {
+    margin-top: 8px;
+}
+
+.infonDetailsSummary {
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
 .modelPicker {
     display: flex;
     align-items: center;

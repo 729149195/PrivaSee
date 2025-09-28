@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useMemo } from 'react'
 import { useStore } from '../store'
 import styles from './AgentPage.module.css'
 import MarkdownMessage from './MarkdownMessage'
-import { Splitter, Select, Button, Upload, Progress, Input, Modal } from 'antd'
+import { Splitter, Select, Button, Upload, Progress, Spin, Input, Modal } from 'antd'
 import { SendOutlined, StopOutlined, CameraOutlined } from '@ant-design/icons'
 
 
@@ -27,6 +27,12 @@ export default function AgentPage() {
     _ensureCurrentSession,
     fetchModels,
     setModel,
+    // 信息元提取（中文注释）
+    startPendingInfons,
+    abortPendingInfons,
+    startMessageInfons,
+    clearAllPendingInfons,
+    infonSessions,
   } = useStore()
 
   // 当前会话对象（中文注释）：需在引用它的 useMemo 之前定义
@@ -70,6 +76,8 @@ export default function AgentPage() {
   const [apiModelId, setApiModelId] = useState('')
   const [apiBaseUrl, setApiBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
+  // 500ms 防抖计时器（中文注释）
+  const pendingTimerRef = useRef(null)
 
 
 
@@ -216,13 +224,17 @@ export default function AgentPage() {
     const text = (input || '').trim()
     const hasImages = selectedImages.length > 0
     if (!text && !hasImages) return
+    // 发送前清除所有 pending 信息元提取，message 任务将替代它们（中文注释）
+    try { clearAllPendingInfons?.() } catch (_) {}
     setInput('')
     if (hasImages) {
       const imgs = [...selectedImages]
       setSelectedImages([])
-      await useStore.getState().sendMessageWithImages(text, imgs)
+      const userId = await useStore.getState().sendMessageWithImages(text, imgs)
+      try { startMessageInfons?.(userId) } catch (_) {}
     } else {
-      await sendMessage(text)
+      const userId = await sendMessage(text)
+      try { startMessageInfons?.(userId) } catch (_) {}
     }
   }
 
@@ -230,13 +242,17 @@ export default function AgentPage() {
     const text = (landingInput || '').trim()
     const hasImages = selectedImages.length > 0
     if (!text && !hasImages) return
+    // 发送前清除所有 pending 信息元提取，message 任务将替代它们（中文注释）
+    try { clearAllPendingInfons?.() } catch (_) {}
     setLandingInput('')
     if (hasImages) {
       const imgs = [...selectedImages]
       setSelectedImages([])
-      await useStore.getState().sendMessageWithImages(text, imgs)
+      const userId = await useStore.getState().sendMessageWithImages(text, imgs)
+      try { startMessageInfons?.(userId) } catch (_) {}
     } else {
-      await sendMessage(text)
+      const userId = await sendMessage(text)
+      try { startMessageInfons?.(userId) } catch (_) {}
     }
   }
 
@@ -260,6 +276,35 @@ export default function AgentPage() {
   const removeSelectedImage = (idx) => {
     setSelectedImages((prev) => prev.filter((_, i) => i !== idx))
   }
+
+  // 输入变化时，立刻中止 pending 的提取（中文注释）
+  useEffect(() => {
+    try { abortPendingInfons?.(false) } catch (_) {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input, landingInput])
+
+  // 500ms 防抖：在用户停止输入 500ms 后启动 pending 提取（中文注释）
+  useEffect(() => {
+    const textToUse = hasMessages ? (input || '').trim() : (landingInput || '').trim()
+    const imgs = [...selectedImages]
+    if (pendingTimerRef.current) {
+      clearTimeout(pendingTimerRef.current)
+      pendingTimerRef.current = null
+    }
+    // 若无输入也无图片，则不启动（中文注释）
+    if (!textToUse && imgs.length === 0) return
+    pendingTimerRef.current = setTimeout(() => {
+      try { startPendingInfons?.(textToUse, imgs) } catch (_) {}
+      pendingTimerRef.current = null
+    }, 500)
+    return () => {
+      if (pendingTimerRef.current) {
+        clearTimeout(pendingTimerRef.current)
+        pendingTimerRef.current = null
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input, landingInput, selectedImages, hasMessages])
 
   return (
     <div className={styles.shell}>
@@ -436,14 +481,58 @@ export default function AgentPage() {
                 )}
               </div>
             </Splitter.Panel>
-            <Splitter.Panel defaultSize="28%" min="18%" max="45%">
+            <Splitter.Panel defaultSize="35%" min="25%" max="50%">
               <div className={styles.rightPaneScroll}>
                 <div className={styles.rightPaneHeader}>
                   <div className={styles.rightPaneTitle}>Privacy inference</div>
                 </div>
                 <div className={styles.rightPaneBody}>
-                  {/* 实时显示未发送输入与已选图片（中文注释） - 暂时隐藏 */}
-                  {/* {(((input || '').trim().length > 0) || ((landingInput || '').trim().length > 0) || selectedImages.length > 0) && renderPendingCard()} */}
+                  <div className={styles.infonRuns}>
+                    {(() => {
+                      const runs = (infonSessions?.[currentSession?.id]?.runs) || []
+                      if (!runs.length) return <div className={styles.infonEmpty}>No inference yet</div>
+                      const sorted = [...runs].sort((a, b) => b.createdAt - a.createdAt)
+                      return sorted.map((r) => {
+                        const title = r.modality === 'text' ? 'Text' : `Image${Number.isFinite(r.imageIndex) ? ` #${r.imageIndex + 1}` : ''}`
+                        const status = r.status
+                        const percent = status === 'done' ? 100 : (status === 'running' ? 66 : (status === 'error' ? 0 : 0))
+                        const allInfons = Array.isArray(r?.resultJson?.infons) ? r.resultJson.infons : []
+                        return (
+                          <div key={r.id} className={styles.infonRunCard}>
+                            <div className={styles.infonRunHeader}>
+                              <div className={styles.infonRunTitle}>
+                                {title}
+                                <span style={{ marginLeft: '8px', fontSize: '12px' }}>
+                                  {status === 'running' && <Spin size="small" />}
+                                  {status === 'done' && <span style={{ color: '#52c41a' }}>✓</span>}
+                                  {status === 'error' && <span style={{ color: '#ff4d4f' }}>✕</span>}
+                                  {status === 'aborted' && <span style={{ color: '#faad14' }}>⏸</span>}
+                                </span>
+                              </div>
+                              <div className={styles.infonRunMeta}>{r.targetType}</div>
+                            </div>
+                            {status === 'error' && r.error ? (
+                              <div className={styles.infonError}>{r.error}</div>
+                            ) : null}
+                            {allInfons.length > 0 ? (
+                              <div className={styles.infonJsonList}>
+                                {allInfons.map((infon, idx) => (
+                                  <div key={idx} className={styles.infonItem}>
+                                    <div className={styles.infonType}>{infon.infon_type || 'Unknown'}</div>
+                                    <pre className={styles.infonJsonCode}>{JSON.stringify(infon, null, 2)}</pre>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                            <details className={styles.infonDetails}>
+                              <summary className={styles.infonDetailsSummary}>Raw stream</summary>
+                              <pre className={styles.infonJsonCode}>{r.buffer || ''}</pre>
+                            </details>
+                          </div>
+                        )
+                      })
+                    })()}
+                  </div>
                 </div>
               </div>
             </Splitter.Panel>
