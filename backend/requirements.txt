@@ -1,0 +1,11 @@
+# 数据库和机器学习依赖包
+faiss-cpu==1.12.0
+pymongo==4.15.1
+sentence-transformers==5.1.1
+scikit-learn==1.7.2
+numpy==1.26.3
+
+# 注意：PyTorch相关包已经存在于环境中
+# torch==2.4.1+cu118
+# torchaudio==2.4.1+cu118
+# torchvision==0.19.1+cu118

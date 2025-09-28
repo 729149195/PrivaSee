@@ -261,25 +261,6 @@ export default function AgentPage() {
     setSelectedImages((prev) => prev.filter((_, i) => i !== idx))
   }
 
-  // 渲染 pending 卡片（中文注释）：根据推断结果标红
-  const renderPendingCard = () => {
-    return (
-      <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, background: '#ffffff' }}>
-        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>pending</div>
-        {selectedImages.length > 0 ? (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {selectedImages.map((src, k) => (
-              <img key={k} src={src} alt={`pending-img-${k}`} style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e7eb' }} />
-            ))}
-          </div>
-        ) : null}
-        <div style={{ fontSize: 13, color: '#0f172a', whiteSpace: 'pre-wrap' }}>
-          {((input || landingInput || '')).slice(0, 200)}{((input || landingInput || '')).length > 200 ? '…' : ''}
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className={styles.shell}>
       {/* 左侧：侧边栏 */}
@@ -461,8 +442,8 @@ export default function AgentPage() {
                   <div className={styles.rightPaneTitle}>Privacy inference</div>
                 </div>
                 <div className={styles.rightPaneBody}>
-                  {/* 实时显示未发送输入与已选图片（中文注释） */}
-                  {(((input || '').trim().length > 0) || ((landingInput || '').trim().length > 0) || selectedImages.length > 0) && renderPendingCard()}
+                  {/* 实时显示未发送输入与已选图片（中文注释） - 暂时隐藏 */}
+                  {/* {(((input || '').trim().length > 0) || ((landingInput || '').trim().length > 0) || selectedImages.length > 0) && renderPendingCard()} */}
                 </div>
               </div>
             </Splitter.Panel>
