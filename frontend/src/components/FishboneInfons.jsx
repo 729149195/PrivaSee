@@ -140,16 +140,19 @@ export default function FishboneInfons() {
   const leftPad = 24
   const rightPad = 24
   const topPad = 16
-  const bottomPad = 24
+  const bottomPad = 10
   const diagOffset = Math.max(90, Math.min(220, Math.floor(width * 0.28))) // 主分叉在 x/y 各偏移
   const mainDiagLen = diagOffset // 45° 对角线，dx=dy
-  const rowGap = Math.max(110, Math.floor(diagOffset * 0.9)) // 轴上相邻锚点间距
+  const rowGap = Math.max(100, Math.floor(diagOffset * 0.4)) // 轴上相邻锚点间距
   const subSlantLen = 16 // 小分叉短斜长度
-  const maxNodesPerRun = 8
+  const maxNodesPerRun = Infinity
   const nodeSize = 12 // 节点方块尺寸（中文注释）
-  const labelGap = 8 // 节点到文本的水平间距（中文注释）
-  const labelMinGap = 10 // 相邻文本间的最小间隔（中文注释）
+  const labelGap = 12 // 节点到文本的水平间距（中文注释）
+  const labelMinGap = 18 // 相邻文本间的最小间隔（中文注释）
   const leafDiagStep = 16 // 叶子沿主分叉的最小间距（像素，按对角线方向）（中文注释）
+  const subTrunkStart = 40 // 次级主分支起始到第一叶子的距离（px）（中文注释）
+  const subTrunkStep = Math.max(18, Math.min(32, Math.floor(width * 0.03))) // 自适应密度（中文注释）
+  const leafLen = Math.max(18, Math.min(34, Math.floor(width * 0.02) + 4)) // 自适应叶子长度（中文注释）
 
   // 预先计算整体高度（中文注释）：扫描所有分叉端点 y 范围
   const axisX = Math.round(width / 2)
@@ -158,18 +161,21 @@ export default function FishboneInfons() {
   let bottomMost = startY
   for (let ri = 0; ri < rounds.length; ri++) {
     const anchorY = startY + ri * rowGap
-    const endY = anchorY - mainDiagLen // 右侧分支也向上45°（中文注释）
-    const hasRuns = (((rounds[ri]?.userRuns || []).length) + ((rounds[ri]?.assistantRuns || []).length)) > 0
-    if (!hasRuns) {
-      topMost = Math.min(topMost, endY)
-      bottomMost = Math.max(bottomMost, anchorY)
-    } else {
-      // 即使没有 infons 也要考虑小分叉短斜（中文注释）
-      topMost = Math.min(topMost, endY - subSlantLen)
-      bottomMost = Math.max(bottomMost, anchorY)
-    }
+    const endY = anchorY - mainDiagLen // 45° 主分叉向上（中文注释）
+    const runsInRound = [...(rounds[ri]?.userRuns || [])]
+    const maxInf = runsInRound.reduce((m, r) => Math.max(m, Array.isArray(r?.resultJson?.infons) ? r.resultJson.infons.length : 0), 0)
+    const trunkLen = subTrunkStart + subTrunkStep * Math.max(0, maxInf - 1)
+    const topCandidate = endY - trunkLen - leafLen
+    // 同时考虑中轴大气泡半径（中文注释）
+    const infonCount = rounds[ri]?.infonCount || 0
+    const clusterR_est = Math.max(12, Math.min(30, 12 + infonCount * 1.2))
+    topMost = Math.min(topMost, topCandidate, anchorY - clusterR_est)
+    bottomMost = Math.max(bottomMost, anchorY + clusterR_est)
   }
-  const height = Math.max(bottomMost + bottomPad, startY + bottomPad)
+  // 将顶部留白强制调节为“2.5 个节点高度”（中文注释）：允许向上/向下微移
+  const desiredTopMargin = Math.round(nodeSize * 0.5)
+  const vShift = (-35 - topMost)
+  const height = Math.max(bottomMost + bottomPad + vShift, startY + bottomPad + vShift)
 
   if (!rounds.length) {
     return (
@@ -186,11 +192,11 @@ export default function FishboneInfons() {
     <div ref={containerRef} className={styles.fishboneRoot}>
       <svg className={styles.fishboneSvg} width="100%" height={height}>
         {/* 竖直时间轴（中文注释） */}
-        <line x1={axisX} y1={topPad / 2} x2={axisX} y2={height - bottomPad / 2} className={styles.fishboneAxis} />
+        <line x1={axisX} y1={topPad / 2 + vShift} x2={axisX} y2={height - bottomPad / 2} className={styles.fishboneAxis} />
 
         {rounds.map((round, ri) => {
           const anchorX = axisX
-          const anchorY = startY + ri * anchorStepY
+          const anchorY = (startY + vShift) + ri * anchorStepY
           const sideLeft = (ri % 2) === 0 // 左右交替（中文注释）
           const endX = sideLeft ? (anchorX - mainDiagLen) : (anchorX + mainDiagLen)
           const endY = anchorY - mainDiagLen // 一律向上45°（中文注释）
@@ -207,34 +213,80 @@ export default function FishboneInfons() {
               {/* 主分叉（中文注释） */}
               <line x1={anchorX} y1={anchorY} x2={endX} y2={endY} className={styles.fishboneBranch} />
 
-              {/* 轴-主分叉交点的空心/实心圆（中文注释） */}
+              {/* 轴-主分叉交点的大气泡（中文注释） */}
               <circle cx={anchorX} cy={anchorY} r={clusterR} className={`${styles.fishboneCluster} ${round.pending ? styles.fishboneClusterHollow : styles.fishboneClusterSolid}`} />
               {/* 模型回复（assistantRuns）的信息元：绘制在圆形内部（中文注释） */}
               {(() => {
                 const asRuns = [...round.assistantRuns]
                 const infons = asRuns.flatMap((r) => Array.isArray(r?.resultJson?.infons) ? r.resultJson.infons : [])
-                const maxN = 10
+                const maxN = 24
                 const shown = infons.slice(0, maxN)
                 if (!shown.length) return null
-                const s = 8 // 方块边长
-                const g = 6 // 间距
-                const cols = Math.min(3, shown.length)
-                const rows = Math.ceil(shown.length / cols)
-                const gridW = cols * s + (cols - 1) * g
-                const gridH = rows * s + (rows - 1) * g
-                const startX = anchorX - gridW / 2
-                const startY2 = anchorY - gridH / 2
+                const rPad = 3
+                const rLarge = Math.max(12, clusterR - 1)
+                // 根据数量自适应缩放小气泡半径（中文注释）
+                let rSmall = Math.max(4, Math.min(8, Math.floor(rLarge * 0.24)))
+                rSmall = Math.max(3, Math.min(rSmall, Math.floor((rLarge * 0.5) / Math.sqrt(shown.length + 1))))
+                const rAvail = Math.max(2, rLarge - rPad - rSmall)
+
+                // 初始位置：Fermat 螺旋（黄金角）+ 半径开方分布（中文注释）
+                const golden = Math.PI * (3 - Math.sqrt(5))
+                const pts = shown.map((_, idx) => {
+                  const t = (idx + 0.5) / Math.max(1, shown.length)
+                  const angle = idx * golden
+                  const rad = Math.sqrt(t) * rAvail
+                  return { x: anchorX + rad * Math.cos(angle), y: anchorY + rad * Math.sin(angle) }
+                })
+
+                // 位置松弛：简单斥力+向心+边界收敛，确保最小间距（中文注释）
+                const minDist = rSmall * 2 + 2
+                const minDist2 = minDist * minDist
+                const iters = Math.min(60, 20 + shown.length * 2)
+                for (let iter = 0; iter < iters; iter++) {
+                  for (let i = 0; i < pts.length; i++) {
+                    for (let j = i + 1; j < pts.length; j++) {
+                      let dx = pts[j].x - pts[i].x
+                      let dy = pts[j].y - pts[i].y
+                      let d2 = dx * dx + dy * dy
+                      if (d2 < 1e-6) { dx = (Math.random() - 0.5) * 0.01; dy = (Math.random() - 0.5) * 0.01; d2 = dx * dx + dy * dy }
+                      if (d2 < minDist2) {
+                        const d = Math.sqrt(d2)
+                        const push = (minDist - d) * 0.5
+                        const ux = dx / d
+                        const uy = dy / d
+                        pts[i].x -= ux * push
+                        pts[i].y -= uy * push
+                        pts[j].x += ux * push
+                        pts[j].y += uy * push
+                      }
+                    }
+                  }
+                  for (let i = 0; i < pts.length; i++) {
+                    // 向心
+                    pts[i].x += (anchorX - pts[i].x) * 0.05
+                    pts[i].y += (anchorY - pts[i].y) * 0.05
+                    // 边界约束
+                    const dx = pts[i].x - anchorX
+                    const dy = pts[i].y - anchorY
+                    const d = Math.sqrt(dx * dx + dy * dy) || 1
+                    if (d > rAvail) {
+                      const s = rAvail / d
+                      pts[i].x = anchorX + dx * s
+                      pts[i].y = anchorY + dy * s
+                    }
+                  }
+                }
+
                 return (
                   <g>
+                    <circle cx={anchorX} cy={anchorY} r={rLarge} className={styles.fishboneBubbleLargeRing} />
                     {shown.map((infon, idx) => {
-                      const col = idx % cols
-                      const row = Math.floor(idx / cols)
-                      const nx = Math.round(startX + col * (s + g))
-                      const ny = Math.round(startY2 + row * (s + g))
+                      const nx = Math.round(pts[idx].x)
+                      const ny = Math.round(pts[idx].y)
                       const label = getInfonKeyword(infon)
                       return (
                         <g key={`as-${ri}-${idx}`}>
-                          <rect x={nx - s / 2} y={ny - s / 2} width={s} height={s} rx={1.5} ry={1.5} className={`${styles.fishboneNodeSquare} ${styles.fishboneClickable}`} onClick={() => setSelectedInfon(infon)} />
+                          <circle cx={nx} cy={ny} r={rSmall} className={`${styles.fishboneBubbleSmall} ${styles.fishboneClickable}`} onClick={() => setSelectedInfon(infon)} />
                           <title>{label}</title>
                         </g>
                       )
@@ -249,37 +301,56 @@ export default function FishboneInfons() {
                 const baseX = Math.round(anchorX + dx * tRun)
                 const baseY = Math.round(anchorY + dy * tRun)
                 const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
-                const list = infons.slice(0, maxNodesPerRun)
-                const tStep = leafDiagStep / Math.max(1, mainDiagLen)
-
-                // 生成对称偏移序列（中文注释）：中心优先，向两侧展开
-                const offsets = list.map((_, idx) => idx - (list.length - 1) / 2)
-
-                const leaves = list.map((infon, idx) => {
-                  const t = Math.max(0.05, Math.min(0.95, tRun + offsets[idx] * tStep))
-                  const bx = Math.round(anchorX + dx * t)
-                  const by = Math.round(anchorY + dy * t)
-                  const slantEndX = bx + (sideLeft ? -subSlantLen : subSlantLen)
-                  const slantEndY = by - subSlantLen
+                const listAll = infons
+                // 将 infon 按类型分组：SIT 在交界点；其余（包含 REL）作为叶子，REL 渲染为圆形（中文注释）
+                const sits = []
+                const leavesInput = [] // { infon, isRel }
+                for (let idx = 0; idx < listAll.length; idx++) {
+                  const infon = listAll[idx]
+                  const t = String(infon?.infon_type || '').toUpperCase()
+                  if (t === 'SIT') sits.push(infon)
+                  else leavesInput.push({ infon, isRel: t === 'REL' })
+                }
+                // 构建竖直次级主分支，并沿其布置 45° 叶子（中文注释）
+                const trunkLen = subTrunkStart + subTrunkStep * Math.max(0, Math.max(0, leavesInput.length - 1))
+                const trunkTopX = baseX
+                const trunkTopY = baseY - trunkLen
+                // 叶子：记录文本包围盒（中文注释）
+                const leaves = leavesInput.map((item, idx) => {
+                  const infon = item.infon
+                  const attachY = baseY - (subTrunkStart + idx * subTrunkStep)
+                  const attachX = baseX
+                  const nx = attachX + (sideLeft ? -leafLen : leafLen)
+                  const ny = attachY - leafLen
                   const label = getInfonKeyword(infon)
-                  const labelW = measureText(label)
-                  const baseNeed = (nodeSize / 2) + 4 + labelGap + labelW + 8
-                  const stubMax = sideLeft ? (slantEndX - leftPad) : (width - rightPad - slantEndX)
-                  const stubLen = Math.max(60, Math.min(stubMax, baseNeed))
-                  const stubEndX = slantEndX + (sideLeft ? -stubLen : stubLen)
-                  const stubEndY = slantEndY
-
-                  const nx = stubEndX
-                  const ny = stubEndY
-
-                  const maxLabelPx = Math.max(0, stubLen - ((nodeSize / 2) + 4 + labelGap))
+                  const maxLabelPx = Math.max(40, leafLen - (nodeSize / 2 + 4 + labelGap))
                   const textShown = truncateToPx(label, maxLabelPx)
                   const confidence = Math.max(0, Math.min(1, Number(infon?.confidence ?? 0)))
-                  const barW = nodeSize * 1.6
-                  const barX = nx - barW / 2
-                  const barY = ny + nodeSize / 2 + 2
+                  // 文本包围盒估计（中文注释）
+                  const textWidth = measureText(textShown)
+                  const textHeight = 12
+                  const textX = nx + (sideLeft ? -labelGap : labelGap)
+                  const textY = ny
+                  const boxLeft = sideLeft ? (textX - textWidth) : textX
+                  const boxRight = sideLeft ? textX : (textX + textWidth)
+                  const boxTop = textY - textHeight / 2
+                  const boxBottom = textY + textHeight / 2
+                  return { trunkX: attachX, trunkY: attachY, nx, ny, textShown, confidence, infon, textX, textY, textWidth, textHeight, boxLeft, boxRight, boxTop, boxBottom, isRel: !!item.isRel }
+                })
 
-                  return { bx, by, slantEndX, slantEndY, stubEndX, stubEndY, nx, ny, textShown, confidence, infon }
+                // SIT 情景：在交界点绘制圆形与 modality 文本（中文注释）
+                const sitLabels = sits.map((infon) => {
+                  const label = String(infon?.modality ?? 'SIT')
+                  const textShown = truncateToPx(label, Math.max(60, Math.floor(leafLen * 2)))
+                  const textWidth = measureText(textShown)
+                  const textHeight = 12
+                  const textX = baseX + (sideLeft ? -labelGap : labelGap)
+                  const textY = baseY
+                  const boxLeft = sideLeft ? (textX - textWidth) : textX
+                  const boxRight = sideLeft ? textX : (textX + textWidth)
+                  const boxTop = textY - textHeight / 2
+                  const boxBottom = textY + textHeight / 2
+                  return { infon, textShown, textX, textY, textWidth, textHeight, boxLeft, boxRight, boxTop, boxBottom }
                 })
 
                 // 运行中：在该 run 的末尾再放置一个旋转圈（中文注释）
@@ -287,25 +358,36 @@ export default function FishboneInfons() {
                   if (run.status !== 'running') return null
                   if (leaves.length > 0) {
                     const last = leaves[leaves.length - 1]
-                    return { x: last.stubEndX + (sideLeft ? -8 : 8), y: last.stubEndY }
+                    return { x: last.nx + (sideLeft ? -8 : 8), y: last.ny }
                   }
-                  const slantEndX = baseX + (sideLeft ? -subSlantLen : subSlantLen)
-                  const slantEndY = baseY - subSlantLen
-                  const stubEndX = slantEndX + (sideLeft ? -60 : 60)
-                  const stubEndY = slantEndY
-                  return { x: stubEndX + (sideLeft ? -8 : 8), y: stubEndY }
+                  const nx = baseX + (sideLeft ? -leafLen : leafLen)
+                  const ny = baseY - leafLen
+                  return { x: nx + (sideLeft ? -8 : 8), y: ny }
                 })()
 
                 return (
                   <g key={run.id}>
+                    {/* 竖直次级主分支 */}
+                    <line x1={baseX} y1={baseY} x2={trunkTopX} y2={trunkTopY} className={styles.fishboneSubTrunk} />
+                    {/* 信息元节点：常规方形，REL 为圆形；均带文本与进度（中文注释）*/}
                     {leaves.map((leaf, li) => (
                       <g key={`${run.id}-leaf-${li}`}>
-                        <line x1={leaf.bx} y1={leaf.by} x2={leaf.slantEndX} y2={leaf.slantEndY} className={styles.fishboneSubBranch} />
-                        <line x1={leaf.slantEndX} y1={leaf.slantEndY} x2={leaf.stubEndX} y2={leaf.stubEndY} className={styles.fishboneSubStub} />
-                        <rect x={leaf.nx - nodeSize / 2} y={leaf.ny - nodeSize / 2} width={nodeSize} height={nodeSize} rx={2} ry={2} className={`${styles.fishboneNodeSquare} ${styles.fishboneClickable}`} onClick={() => setSelectedInfon(leaf.infon)} />
+                        <line x1={leaf.trunkX} y1={leaf.trunkY} x2={leaf.nx} y2={leaf.ny} className={styles.fishboneSubBranch} />
+                        {leaf.isRel ? (
+                          <circle cx={leaf.nx} cy={leaf.ny} r={nodeSize / 2} className={`${styles.fishboneRelCircle} ${styles.fishboneClickable}`} onClick={() => setSelectedInfon(leaf.infon)} />
+                        ) : (
+                          <rect x={leaf.nx - nodeSize / 2} y={leaf.ny - nodeSize / 2} width={nodeSize} height={nodeSize} rx={2} ry={2} className={`${styles.fishboneNodeSquare} ${styles.fishboneClickable}`} onClick={() => setSelectedInfon(leaf.infon)} />
+                        )}
                         <rect x={leaf.nx - nodeSize * 0.8} y={leaf.ny + nodeSize / 2 + 2} width={nodeSize * 1.6} height={2} rx={1} ry={1} className={styles.fishboneProgressBg} />
                         <rect x={leaf.nx - nodeSize * 0.8} y={leaf.ny + nodeSize / 2 + 2} width={nodeSize * 1.6 * leaf.confidence} height={2} rx={1} ry={1} className={styles.fishboneProgressFill} />
-                        <text x={leaf.nx + (sideLeft ? -labelGap : labelGap)} y={leaf.ny} dominant-baseline="middle" className={styles.fishboneNodeText} textAnchor={sideLeft ? 'end' : 'start'}>{leaf.textShown}</text>
+                        <text x={leaf.textX} y={leaf.textY} dominantBaseline="middle" className={styles.fishboneNodeText} textAnchor={sideLeft ? 'end' : 'start'}>{leaf.textShown}</text>
+                      </g>
+                    ))}
+                    {/* SIT 情景节点：交界点圆形 + modality 文本（中文注释） */}
+                    {sitLabels.map((s, si) => (
+                      <g key={`${run.id}-sit-${si}`} className={styles.fishboneClickable} onClick={() => setSelectedInfon(s.infon)}>
+                        <circle cx={baseX} cy={baseY} r={nodeSize / 2} className={styles.fishboneSITCircle} />
+                        <text x={s.textX} y={s.textY} dominantBaseline="middle" className={styles.fishboneSITText} textAnchor={sideLeft ? 'end' : 'start'}>{s.textShown}</text>
                       </g>
                     ))}
                     {spinnerPos ? (

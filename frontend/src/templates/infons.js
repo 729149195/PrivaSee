@@ -36,7 +36,7 @@ Situation Theory distinguishes these fundamental infon types, each with specific
    - Structure: {"iid": "tim:...", "infon_type": "TIM", "temporal_value": "ISO8601|fuzzy_expression", "granularity": "year|month|day|hour|..."}
    
 4. **Spatial Location Infons (LOC)**: Places, coordinates, visual bounding boxes
-   - Structure: {"iid": "loc:...", "infon_type": "LOC", "spatial_value": "place_name|coordinate", "bbox": [x,y,w,h] (for visual)}
+   - Structure: {"iid": "loc:...", "infon_type": "LOC", "spatial_value": "place_name|coordinate", "bbox": [x,y,w,h]}
    
 5. **Relation Infons (REL)**: Predicates linking other infons
    - Structure: {"iid": "rel:...", "infon_type": "REL", "relation_name": "...", "arity": N, "arg_types": [...]}
@@ -45,8 +45,10 @@ Situation Theory distinguishes these fundamental infon types, each with specific
    - Structure: {"iid": "typ:...", "infon_type": "TYP", "type_name": "...", "category": "..."}
 
 【Output Principle】
-Extract each distinct information primitive as a separate infon. For "我今年27岁了":
-- Individual infon for "我" (speaker)
+Extract each distinct information primitive as a separate infon. For "我叫王小明，今年27岁了":
+- Individual infon for "我" (user)
+- Relation infon for "名字" (name relation linking individual and parameter)
+- Parameter infon for "王小明" (name value)
 - Parameter infon for "27" (age value)
 - Temporal location infon for "今年" (current year)
 - Relation infon for "年龄关系" (age relation linking individual and parameter)
@@ -64,10 +66,7 @@ Each infon type serves specific representational purposes:
 - **LOC**: Describe spatial information (places, coordinates, visual regions with bbox)
 - **REL**: Define relationships/predicates connecting other infons
 - **TYP**: Classify entities into categories/types
-- **SIT**: Represent discourse contexts, scenes, or situational frames
-
-【Composite Infons】
-Complex logical structures (AND, OR, NOT, EXISTS, FORALL) combine multiple atomic infons using operator infons with "composite_structure" field.
+- **SIT**: Represent discourse contexts, scenes, events, or situational frames
 `;
 
 export const OUTPUT_CONSTRAINTS = String.raw`
@@ -82,7 +81,6 @@ export const OUTPUT_CONSTRAINTS = String.raw`
 
 export const OUTPUT_FORMAT = String.raw`
 {
-  "run_metadata": {"source_id": "str", "record_time": "ISO8601", "generator": "str", "notes": "str"},
   "infons": [
     {
       "iid": "ind:...", "infon_type": "IND", 
@@ -127,11 +125,7 @@ export const OUTPUT_FORMAT = String.raw`
       "record_time": "ISO8601", "occur_time": "ISO8601",
       "confidence": 1.0, "support": {"sid":"sit:self","justification":"direct_observation"}
     }
-  ],
-  "quality_report": {
-    "stats": {"num_infons_by_type": {"IND":0,"PAR":0,"TIM":0,"LOC":0,"REL":0,"TYP":0,"SIT":0}},
-    "warnings": ["str"]
-  }
+  ]
 }
 `;
 
@@ -147,12 +141,14 @@ For each text input, extract separate infons for each distinct information primi
 6. **Relation Infons (REL)**: Extract predicates connecting other infons (age_of, lives_in, works_for)
 7. **Type Infons (TYP)**: Extract categories/classes when explicitly stated
 
-Example for "我今年27岁了":
+Example for "我叫王小明，今年27岁了":
 - SIT infon: text context span
 - IND infon: "我" (speaker/first person)  
+- REL infon: "名字" (name relation linking individual and parameter)
+- PAR infon: "王小明" (name value)
 - TIM infon: "今年" (current year temporal reference)
+- REL infon: "年龄关系" (age relation linking individual and parameter)
 - PAR infon: "27" (numerical value)
-- REL infon: age relationship connecting IND and PAR infons
 `;
 
 export const IMAGE_EXTRACTION = String.raw`
@@ -199,12 +195,13 @@ export const SELF_CHECKLIST = String.raw`
 `;
 
 export const EXAMPLES_SNIPPET = String.raw`
-【Example】Text "我今年27岁了" extracts:
-- SIT infon: {"iid":"sit:text1", "infon_type":"SIT", "modality":"text", "context_span":{"text":{"char_start":0,"char_end":6}}}
-- IND infon: {"iid":"ind:speaker", "infon_type":"IND", "names":["我"], "references":["first_person"]}
+【Example】Text "我叫王小明，今年27岁了" extracts:
+- IND infon: {"iid":"ind:user", "infon_type":"IND", "names":["我"], "references":["first_person"]}
+- REL infon: {"iid":"rel:name_relation", "infon_type":"REL", "relation_name":"name", "arg_refs":["ind:user","par:name"]}
+- PAR infon: {"iid":"par:name", "infon_type":"PAR", "value":"王小明", "data_type":"string"}
 - TIM infon: {"iid":"tim:current_year", "infon_type":"TIM", "temporal_value":"今年", "granularity":"year"}
 - PAR infon: {"iid":"par:27", "infon_type":"PAR", "value":"27", "data_type":"number"}
-- REL infon: {"iid":"rel:age_relation", "infon_type":"REL", "relation_name":"age_of", "arg_refs":["ind:speaker","par:27"]}
+- REL infon: {"iid":"rel:age_relation", "infon_type":"REL", "relation_name":"age_of", "arg_refs":["ind:user","par:27"]}
 `;
 
 /* ---------- Combinator: Assemble final system prompt on demand ---------- */

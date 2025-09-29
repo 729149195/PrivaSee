@@ -735,10 +735,15 @@
 
 .fishboneSubBranch { stroke: #a7b4cc; stroke-width: 2; }
 .fishboneSubStub { stroke: #bec8db; stroke-width: 2; }
+.fishboneSubTrunk { stroke: #a7b4cc; stroke-width: 2; }
 
 .fishboneClusterRect { fill: var(--color-bg-primary); stroke: #93a3bf; stroke-width: 2; }
 .fishboneClusterHollow { fill: transparent; }
 .fishboneClusterSolid { fill: rgba(16, 163, 127, 0.08); }
+
+/* 模型输出气泡（中文注释） */
+.fishboneBubbleLargeRing { fill: none; stroke: rgba(16, 163, 127, 0.18); stroke-width: 6; }
+.fishboneBubbleSmall { fill: #1f78ff; stroke: #ffffff; stroke-width: 1; }
 
 .fishboneNodeSquare { fill: #1f78ff; }
 .fishboneClickable { cursor: pointer; }
@@ -747,6 +752,17 @@
 
 .fishboneProgressBg { fill: rgba(0,0,0,0.15); }
 .fishboneProgressFill { fill: var(--color-accent-primary); }
+
+/* SIT 圆形节点（中文注释） */
+.fishboneSITCircle { fill: #ffb020; stroke: #ffffff; stroke-width: 1; }
+ .fishboneSITText { font-size: 11px; fill: var(--color-text-secondary); paint-order: stroke; stroke: var(--color-bg-primary); stroke-width: 3px; }
+
+/* REL 圆形节点（中文注释） */
+.fishboneRelCircle { fill: #5b8def; stroke: #ffffff; stroke-width: 1; }
+ 
+/* 防止文字阻挡点击路径（中文注释） */
+.fishboneRelText { pointer-events: none; }
+.fishboneNodeText { pointer-events: none; }
 
 /* 详情表格（中文注释） */
 .fishboneDetails { margin-top: 10px; border: 1px solid var(--color-border-light); border-radius: var(--border-radius-md); background: var(--color-bg-secondary); overflow: hidden; }

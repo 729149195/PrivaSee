@@ -305,7 +305,7 @@ export default function AgentPage() {
     pendingTimerRef.current = setTimeout(() => {
       try { startPendingInfons?.(textToUse, imgs) } catch (_) {}
       pendingTimerRef.current = null
-    }, 500)
+    }, 1500)
     return () => {
       if (pendingTimerRef.current) {
         clearTimeout(pendingTimerRef.current)

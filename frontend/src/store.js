@@ -345,6 +345,14 @@ export const useStore = create((set, get) => ({
   clearAllPendingInfons() {
     const session = get().getCurrentSession()
     if (!session) return
+    try {
+      const runs = (get().infonSessions?.[session.id]?.runs) || []
+      runs.forEach((r) => {
+        if (r.targetType === 'pending' && r.status === 'running') {
+          try { r.controller?.abort?.() } catch (_) {}
+        }
+      })
+    } catch (_) {}
     set((state) => {
       const box = state.infonSessions?.[session.id] || { runs: [] }
       const nextRuns = box.runs.filter(r => r.targetType !== 'pending')
@@ -523,7 +531,13 @@ export const useStore = create((set, get) => ({
     const session = get().getCurrentSession()
     if (!session) return
     const runs = (get().infonSessions?.[session.id]?.runs) || []
-    // 清除所有 pending 运行，因为 message 任务将替代它们
+    // 先中止所有 pending 运行
+    runs.forEach((r) => {
+      if (r.targetType === 'pending' && r.status === 'running') {
+        try { r.controller?.abort?.() } catch (_) {}
+      }
+    })
+    // 再移除
     const toRemove = new Set(runs.filter(r => r.targetType === 'pending').map(r => r.id))
     if (toRemove.size > 0) {
       set((state) => {
@@ -551,7 +565,15 @@ export const useStore = create((set, get) => ({
     // 文本：只有 hash 改变才重提；若改变则移除旧文本 pending 结果（中文注释）
     if (t) {
       if (textHash !== get().lastPendingTextHash) {
-        // 清理旧的 pending 文本 run
+        // 先中止旧的 pending 文本 run，再移除
+        try {
+          const currentRuns = (get().infonSessions?.[session.id]?.runs) || []
+          currentRuns.forEach((r) => {
+            if (r.targetType === 'pending' && r.modality === 'text' && r.status === 'running') {
+              try { r.controller?.abort?.() } catch (_) {}
+            }
+          })
+        } catch (_) {}
         set((state) => {
           const box = state.infonSessions?.[session.id] || { runs: [] }
           const nextRuns = box.runs.filter(r => !(r.targetType === 'pending' && r.modality === 'text'))
@@ -560,7 +582,15 @@ export const useStore = create((set, get) => ({
         get()._startTextInfonRun({ targetType: 'pending', targetKey: 'pending', text: t })
       }
     } else {
-      // 没有文本则清理所有 pending 文本 run
+      // 没有文本则中止并清理所有 pending 文本 run
+      try {
+        const currentRuns = (get().infonSessions?.[session.id]?.runs) || []
+        currentRuns.forEach((r) => {
+          if (r.targetType === 'pending' && r.modality === 'text' && r.status === 'running') {
+            try { r.controller?.abort?.() } catch (_) {}
+          }
+        })
+      } catch (_) {}
       set((state) => {
         const box = state.infonSessions?.[session.id]
         if (!box) return {}
@@ -570,9 +600,18 @@ export const useStore = create((set, get) => ({
     }
 
     // 图片：新增只为新 hash 启动；移除消失的 hash 的 run（中文注释）
+    // 中止并移除不再存在的图片 pending runs
+    try {
+      const box = get().infonSessions?.[session.id] || { runs: [] }
+      const currentHashes = new Set(imageHashes)
+      box.runs.forEach((r) => {
+        if (r.targetType === 'pending' && r.modality === 'image' && !currentHashes.has(r._hash) && r.status === 'running') {
+          try { r.controller?.abort?.() } catch (_) {}
+        }
+      })
+    } catch (_) {}
     set((state) => {
       const box = state.infonSessions?.[session.id] || { runs: [] }
-      // 先移除不存在的图片 hash 的 pending runs
       const currentHashes = new Set(imageHashes)
       let nextRuns = box.runs.filter(r => !(r.targetType === 'pending' && r.modality === 'image' && !currentHashes.has(r._hash)))
       // 再为新增的 hash 启动 run
@@ -600,6 +639,15 @@ export const useStore = create((set, get) => ({
     if (!m) return
     const t = (m.content || '').trim()
     const imgs = Array.isArray(m.images) ? m.images.filter(Boolean) : []
+    // 先中止旧的该 message 的运行，再清理（中文注释）
+    try {
+      const runs = (get().infonSessions?.[session.id]?.runs) || []
+      runs.forEach((r) => {
+        if (r.targetType === 'message' && r.targetKey === messageId && r.status === 'running') {
+          try { r.controller?.abort?.() } catch (_) {}
+        }
+      })
+    } catch (_) {}
     // 清理旧的该 message 的 runs（中文注释）
     set((state) => {
       const box = state.infonSessions?.[session.id] || { runs: [] }
