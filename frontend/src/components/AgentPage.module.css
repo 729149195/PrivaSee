@@ -716,6 +716,61 @@
     gap: 12px;
 }
 
+/* 鱼骨图样式（中文注释） */
+.fishboneRoot {
+    border: 1px dashed var(--color-border-light);
+    border-radius: var(--border-radius-md);
+    background: var(--color-bg-secondary);
+    padding: 8px;
+    margin-bottom: 12px;
+}
+
+.fishboneSvg {
+    display: block;
+}
+
+.fishboneAxis { stroke: var(--color-border-medium); stroke-width: 3; }
+
+.fishboneBranch { stroke: #93a3bf; stroke-width: 3; }
+
+.fishboneSubBranch { stroke: #a7b4cc; stroke-width: 2; }
+.fishboneSubStub { stroke: #bec8db; stroke-width: 2; }
+
+.fishboneClusterRect { fill: var(--color-bg-primary); stroke: #93a3bf; stroke-width: 2; }
+.fishboneClusterHollow { fill: transparent; }
+.fishboneClusterSolid { fill: rgba(16, 163, 127, 0.08); }
+
+.fishboneNodeSquare { fill: #1f78ff; }
+.fishboneClickable { cursor: pointer; }
+
+.fishboneNodeText { font-size: 11px; fill: var(--color-text-secondary); paint-order: stroke; stroke: var(--color-bg-primary); stroke-width: 3px; }
+
+.fishboneProgressBg { fill: rgba(0,0,0,0.15); }
+.fishboneProgressFill { fill: var(--color-accent-primary); }
+
+/* 详情表格（中文注释） */
+.fishboneDetails { margin-top: 10px; border: 1px solid var(--color-border-light); border-radius: var(--border-radius-md); background: var(--color-bg-secondary); overflow: hidden; }
+.fishboneDetailsTitle { padding: 8px 10px; font-weight: 600; border-bottom: 1px solid var(--color-border-light); }
+.fishboneTable { width: 100%; border-collapse: collapse; font-size: 12px; }
+.fishboneTable td { border-bottom: 1px dashed var(--color-border-light); padding: 6px 8px; vertical-align: top; }
+.fishboneKey { width: 160px; color: var(--color-text-secondary); }
+.fishboneValue { color: var(--color-text-primary); }
+.fishbonePre { margin: 0; background: transparent; color: var(--color-text-primary); white-space: pre-wrap; word-break: break-word; }
+
+/* 旋转圈：使用 CSS 动画（中文注释） */
+.fishboneSpinnerCircle {
+    fill: none;
+    stroke: var(--color-accent-primary);
+    stroke-width: 2;
+    stroke-dasharray: 24 10;
+    animation: fishbone-dash 1s linear infinite;
+}
+
+@keyframes fishbone-dash {
+    from { stroke-dashoffset: 0; }
+    to { stroke-dashoffset: -68; }
+}
+
 .infonEmpty {
     color: var(--color-text-tertiary);
     font-size: 12px;

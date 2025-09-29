@@ -43,9 +43,6 @@ Situation Theory distinguishes these fundamental infon types, each with specific
    
 6. **Type Infons (TYP)**: Categories, classes, types
    - Structure: {"iid": "typ:...", "infon_type": "TYP", "type_name": "...", "category": "..."}
-   
-7. **Situation Infons (SIT)**: Discourse contexts, scenes, situations
-   - Structure: {"iid": "sit:...", "infon_type": "SIT", "modality": "text|image|audio", "context_span": {...}}
 
 【Output Principle】
 Extract each distinct information primitive as a separate infon. For "我今年27岁了":

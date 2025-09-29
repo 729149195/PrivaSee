@@ -4,6 +4,7 @@ import styles from './AgentPage.module.css'
 import MarkdownMessage from './MarkdownMessage'
 import { Splitter, Select, Button, Upload, Progress, Spin, Input, Modal } from 'antd'
 import { SendOutlined, StopOutlined, CameraOutlined } from '@ant-design/icons'
+import FishboneInfons from './FishboneInfons'
 
 
 export default function AgentPage() {
@@ -224,17 +225,21 @@ export default function AgentPage() {
     const text = (input || '').trim()
     const hasImages = selectedImages.length > 0
     if (!text && !hasImages) return
-    // 发送前清除所有 pending 信息元提取，message 任务将替代它们（中文注释）
-    try { clearAllPendingInfons?.() } catch (_) {}
     setInput('')
     if (hasImages) {
       const imgs = [...selectedImages]
       setSelectedImages([])
       const userId = await useStore.getState().sendMessageWithImages(text, imgs)
-      try { startMessageInfons?.(userId) } catch (_) {}
+      try {
+        const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
+        if (!adopted) startMessageInfons?.(userId)
+      } catch (_) {}
     } else {
       const userId = await sendMessage(text)
-      try { startMessageInfons?.(userId) } catch (_) {}
+      try {
+        const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
+        if (!adopted) startMessageInfons?.(userId)
+      } catch (_) {}
     }
   }
 
@@ -242,17 +247,21 @@ export default function AgentPage() {
     const text = (landingInput || '').trim()
     const hasImages = selectedImages.length > 0
     if (!text && !hasImages) return
-    // 发送前清除所有 pending 信息元提取，message 任务将替代它们（中文注释）
-    try { clearAllPendingInfons?.() } catch (_) {}
     setLandingInput('')
     if (hasImages) {
       const imgs = [...selectedImages]
       setSelectedImages([])
       const userId = await useStore.getState().sendMessageWithImages(text, imgs)
-      try { startMessageInfons?.(userId) } catch (_) {}
+      try {
+        const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
+        if (!adopted) startMessageInfons?.(userId)
+      } catch (_) {}
     } else {
       const userId = await sendMessage(text)
-      try { startMessageInfons?.(userId) } catch (_) {}
+      try {
+        const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
+        if (!adopted) startMessageInfons?.(userId)
+      } catch (_) {}
     }
   }
 
@@ -487,6 +496,8 @@ export default function AgentPage() {
                   <div className={styles.rightPaneTitle}>Privacy inference</div>
                 </div>
                 <div className={styles.rightPaneBody}>
+                  {/* 鱼骨图置顶（中文注释） */}
+                  <FishboneInfons />
                   <div className={styles.infonRuns}>
                     {(() => {
                       const runs = (infonSessions?.[currentSession?.id]?.runs) || []

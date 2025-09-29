@@ -352,6 +352,28 @@ export const useStore = create((set, get) => ({
     })
   },
 
+  // 采纳当前会话的所有 pending 结果为指定 message 的结果（中文注释）
+  // 将 targetType: 'pending' 的 run 改写为 targetType: 'message'，targetKey=messageId
+  // 返回被采纳的数量
+  adoptPendingInfonsToMessage(messageId) {
+    const session = get().getCurrentSession()
+    if (!session || !messageId) return 0
+    let adopted = 0
+    set((state) => {
+      const box = state.infonSessions?.[session.id]
+      if (!box) return {}
+      const runs = box.runs.map((r) => {
+        if (r.targetType === 'pending') {
+          adopted++
+          return { ...r, targetType: 'message', targetKey: messageId }
+        }
+        return r
+      })
+      return { infonSessions: { ...state.infonSessions, [session.id]: { runs } }, lastPendingTextHash: null, lastPendingImageHashes: [] }
+    })
+    return adopted
+  },
+
   // 创建会话（中文注释）：并切换为当前
   createSession() {
     const newSession = createEmptySession()
@@ -936,6 +958,8 @@ export const useStore = create((set, get) => ({
 
         if (finish) {
           get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, phase: 'done' }))
+          // 助手回复完成后，启动对助手消息的信息元提取（中文注释）
+          try { get().startMessageInfons(assistantMsgId) } catch (_) {}
         }
       })
 
@@ -947,7 +971,7 @@ export const useStore = create((set, get) => ({
       set({ isGenerating: false, abortController: null })
     }
 
-    // 返回用户消息 ID（中文注释）：用于后续启动信息元提取
+    // 返回用户消息 ID（中文注释）：用于后续处理
     return userMsgId
   },
 
@@ -1059,6 +1083,8 @@ export const useStore = create((set, get) => ({
         }
         if (finish) {
           get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, phase: 'done' }))
+          // 助手回复完成后，启动对助手消息的信息元提取（中文注释）
+          try { get().startMessageInfons(assistantMsgId) } catch (_) {}
         }
       })
 
