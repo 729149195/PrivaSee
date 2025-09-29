@@ -44,6 +44,9 @@ Situation Theory distinguishes these fundamental infon types, each with specific
 6. **Type Infons (TYP)**: Categories, classes, types
    - Structure: {"iid": "typ:...", "infon_type": "TYP", "type_name": "...", "category": "..."}
 
+7. **Situation Infons (SIT)**: Specific contexts, scenes, events, and situational frames where information occurs
+   - Structure: {"iid": "sit:...", "infon_type": "SIT", "situation_type": "discourse|scene|event|frame", "description": "brief_description", "context_span": {"text":{"char_start":0,"char_end":42},"image":{"bbox":[x,y,w,h]}}}
+
 【Output Principle】
 Extract each distinct information primitive as a separate infon. For "我叫王小明，今年27岁了":
 - Individual infon for "我" (user)
@@ -66,7 +69,7 @@ Each infon type serves specific representational purposes:
 - **LOC**: Describe spatial information (places, coordinates, visual regions with bbox)
 - **REL**: Define relationships/predicates connecting other infons
 - **TYP**: Classify entities into categories/types
-- **SIT**: Represent discourse contexts, scenes, events, or situational frames
+- **SIT**: Represent specific contexts, scenes, events, or situational frames where information occurs
 `;
 
 export const OUTPUT_CONSTRAINTS = String.raw`
@@ -121,7 +124,7 @@ export const OUTPUT_FORMAT = String.raw`
     },
     {
       "iid": "sit:...", "infon_type": "SIT",
-      "modality": "text|image|audio", "context_span": {"text":{"char_start":0,"char_end":42},"image":{"bbox":[x,y,w,h]}},
+      "situation_type": "discourse|scene|event|frame", "description": "brief_description", "context_span": {"text":{"char_start":0,"char_end":42},"image":{"bbox":[x,y,w,h]}},
       "record_time": "ISO8601", "occur_time": "ISO8601",
       "confidence": 1.0, "support": {"sid":"sit:self","justification":"direct_observation"}
     }
@@ -133,7 +136,7 @@ export const TEXT_EXTRACTION = String.raw`
 【Text Extraction Rules】
 For each text input, extract separate infons for each distinct information primitive:
 
-1. **Situation Infons (SIT)**: Create for discourse context (sentence/paragraph boundaries)
+1. **Situation Infons (SIT)**: Create for specific discourse contexts, scenes, or events (sentence/paragraph boundaries)
 2. **Individual Infons (IND)**: Extract for people, objects, organizations mentioned
 3. **Parameter Infons (PAR)**: Extract literal values, numbers, measurements, quantities  
 4. **Temporal Location Infons (TIM)**: Extract time references ("今年", "2024年", "昨天", specific dates)
@@ -155,12 +158,12 @@ export const IMAGE_EXTRACTION = String.raw`
 【Image Extraction Rules】
 For each image input, extract separate infons for each distinct visual information primitive:
 
-1. **Situation Infons (SIT)**: Create for overall image context with image modality
+1. **Situation Infons (SIT)**: Create for overall image context representing specific scenes or events captured in the image
 2. **Individual Infons (IND)**: Extract for detected objects, people, items in the image
 3. **Spatial Location Infons (LOC)**: Extract for each object's bounding box coordinates [x,y,w,h] and any geographical location if identifiable
 4. **Relation Infons (REL)**: Extract spatial and action relationships (holding, left_of, standing_on, wearing)
 5. **Type Infons (TYP)**: Extract object categories/classes from visual detection (Person, Car, Building)
-6. **Parameter Infons (PAR)**: Extract OCR text, numerical values visible in image
+6. **Parameter Infons (PAR)**: Extract OCR text, numerical values visible in the image, and observable attribute values of subjects. For example, a Person's gender, age, height, weight, skin color, hair style, clothing, expression, and actions. These attribute values must be concrete and directly visible, not abstract (e.g., 'white skin color' instead of 'cheerful personality', '180cm height' instead of 'tall', 'short hair' instead of 'good looking', 'suit' instead of 'fashionable', 'smiling' instead of 'happy', 'running' instead of 'active').
 7. **Temporal Location Infons (TIM)**: Extract from EXIF metadata if available
 
 Critical: Each detected object gets both IND infon (for the entity) and LOC infon (for its bounding box position).
@@ -170,7 +173,7 @@ export const AUDIO_EXTRACTION = String.raw`
 【Audio Extraction Rules】
 For each audio input, extract separate infons for each distinct auditory information primitive:
 
-1. **Situation Infons (SIT)**: Create for audio segments/speaker turns with audio modality and time spans
+1. **Situation Infons (SIT)**: Create for audio segments/speaker turns representing specific events or conversational contexts with time spans
 2. **Individual Infons (IND)**: Extract for speakers, people, entities mentioned in speech
 3. **Parameter Infons (PAR)**: Extract literal values, numbers from ASR transcription
 4. **Temporal Location Infons (TIM)**: Extract time references mentioned in speech plus audio segment timestamps
@@ -189,6 +192,7 @@ export const SELF_CHECKLIST = String.raw`
 - Each information primitive extracted as separate infon? (IND/PAR/TIM/LOC/REL/TYP/SIT)
 - Appropriate infon_type assigned for each? Correct ID prefixes used?
 - All bbox coordinates included in LOC infons for visual content?
+- Situation infons describe specific contexts/events, not just modalities?
 - Confidence scores realistic? High only for explicitly observed information?
 - record_time and occur_time properly assigned? No fabricated temporal data?
 - All infons have required fields: iid, infon_type, record_time, confidence, support?
@@ -196,6 +200,7 @@ export const SELF_CHECKLIST = String.raw`
 
 export const EXAMPLES_SNIPPET = String.raw`
 【Example】Text "我叫王小明，今年27岁了" extracts:
+- SIT infon: {"iid":"sit:self_introduction", "infon_type":"SIT", "situation_type":"discourse", "description":"personal introduction statement"}
 - IND infon: {"iid":"ind:user", "infon_type":"IND", "names":["我"], "references":["first_person"]}
 - REL infon: {"iid":"rel:name_relation", "infon_type":"REL", "relation_name":"name", "arg_refs":["ind:user","par:name"]}
 - PAR infon: {"iid":"par:name", "infon_type":"PAR", "value":"王小明", "data_type":"string"}

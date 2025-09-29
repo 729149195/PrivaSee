@@ -750,8 +750,6 @@
 
 .fishboneNodeText { font-size: 11px; fill: var(--color-text-secondary); paint-order: stroke; stroke: var(--color-bg-primary); stroke-width: 3px; }
 
-.fishboneProgressBg { fill: rgba(0,0,0,0.15); }
-.fishboneProgressFill { fill: var(--color-accent-primary); }
 
 /* SIT 圆形节点（中文注释） */
 .fishboneSITCircle { fill: #ffb020; stroke: #ffffff; stroke-width: 1; }

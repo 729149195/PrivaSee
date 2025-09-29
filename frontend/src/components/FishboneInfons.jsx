@@ -143,7 +143,7 @@ export default function FishboneInfons() {
   const bottomPad = 10
   const diagOffset = Math.max(90, Math.min(220, Math.floor(width * 0.28))) // 主分叉在 x/y 各偏移
   const mainDiagLen = diagOffset // 45° 对角线，dx=dy
-  const rowGap = Math.max(100, Math.floor(diagOffset * 0.4)) // 轴上相邻锚点间距
+  const rowGap = Math.max(100, Math.floor(diagOffset * 1)) // 轴上相邻锚点间距
   const subSlantLen = 16 // 小分叉短斜长度
   const maxNodesPerRun = Infinity
   const nodeSize = 12 // 节点方块尺寸（中文注释）
@@ -152,7 +152,7 @@ export default function FishboneInfons() {
   const leafDiagStep = 16 // 叶子沿主分叉的最小间距（像素，按对角线方向）（中文注释）
   const subTrunkStart = 40 // 次级主分支起始到第一叶子的距离（px）（中文注释）
   const subTrunkStep = Math.max(18, Math.min(32, Math.floor(width * 0.03))) // 自适应密度（中文注释）
-  const leafLen = Math.max(18, Math.min(34, Math.floor(width * 0.02) + 4)) // 自适应叶子长度（中文注释）
+  const leafLen = Math.max(18, Math.min(34, Math.floor(width * 0.03) + 8)) // 自适应叶子长度（中文注释）
 
   // 预先计算整体高度（中文注释）：扫描所有分叉端点 y 范围
   const axisX = Math.round(width / 2)
@@ -207,6 +207,32 @@ export default function FishboneInfons() {
           // 45 度直线参数化（中文注释）
           const dx = endX - anchorX
           const dy = endY - anchorY
+
+          // 自适应：根据该轮所有 run 的标签宽度，放大“次主分支”之间的间距，避免文本遮盖（中文注释）
+          const maxLabelAcrossRuns = (() => {
+            let maxW = 0
+            for (const run of runsInRound) {
+              const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
+              for (const infon of infons) {
+                const t = String(infon?.infon_type || '').toUpperCase()
+                if (t === 'SIT') continue
+                const label = getInfonKeyword(infon)
+                const maxLabelPx = Math.max(40, leafLen - (nodeSize / 2 + 4 + labelGap))
+                const textShown = truncateToPx(label, maxLabelPx)
+                const w = measureText(textShown)
+                if (w > maxW) maxW = w
+              }
+            }
+            return maxW
+          })()
+
+          // 将像素级最小步长投影到主分叉对角线的参数 t（中文注释）
+          const minRunStepPx = Math.max(leafDiagStep, Math.floor(maxLabelAcrossRuns + labelGap))
+          const minRunStepT = minRunStepPx / Math.max(1, mainDiagLen)
+          const uniformDeltaT = countRuns > 0 ? (1 / (countRuns + 1)) : 1
+          const requiredT = minRunStepT * countRuns
+          // 如果空间允许，采用更大的步长；否则回退到均匀分布（中文注释）
+          const deltaTRun = requiredT < 1 ? Math.max(minRunStepT, uniformDeltaT) : uniformDeltaT
 
           return (
             <g key={`round-${ri}`}>
@@ -297,7 +323,7 @@ export default function FishboneInfons() {
 
               {/* 小分叉：每个信息元独立叶子分支（中文注释） */}
               {countRuns > 0 ? runsInRound.map((run, i) => {
-                const tRun = (i + 1) / (countRuns + 1)
+                const tRun = deltaTRun * (i + 1)
                 const baseX = Math.round(anchorX + dx * tRun)
                 const baseY = Math.round(anchorY + dy * tRun)
                 const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
@@ -338,9 +364,9 @@ export default function FishboneInfons() {
                   return { trunkX: attachX, trunkY: attachY, nx, ny, textShown, confidence, infon, textX, textY, textWidth, textHeight, boxLeft, boxRight, boxTop, boxBottom, isRel: !!item.isRel }
                 })
 
-                // SIT 情景：在交界点绘制圆形与 modality 文本（中文注释）
+                // SIT 情景：在交界点绘制圆形与 description 文本（中文注释）
                 const sitLabels = sits.map((infon) => {
-                  const label = String(infon?.modality ?? 'SIT')
+                  const label = String(infon?.description ?? 'SIT')
                   const textShown = truncateToPx(label, Math.max(60, Math.floor(leafLen * 2)))
                   const textWidth = measureText(textShown)
                   const textHeight = 12
@@ -378,12 +404,10 @@ export default function FishboneInfons() {
                         ) : (
                           <rect x={leaf.nx - nodeSize / 2} y={leaf.ny - nodeSize / 2} width={nodeSize} height={nodeSize} rx={2} ry={2} className={`${styles.fishboneNodeSquare} ${styles.fishboneClickable}`} onClick={() => setSelectedInfon(leaf.infon)} />
                         )}
-                        <rect x={leaf.nx - nodeSize * 0.8} y={leaf.ny + nodeSize / 2 + 2} width={nodeSize * 1.6} height={2} rx={1} ry={1} className={styles.fishboneProgressBg} />
-                        <rect x={leaf.nx - nodeSize * 0.8} y={leaf.ny + nodeSize / 2 + 2} width={nodeSize * 1.6 * leaf.confidence} height={2} rx={1} ry={1} className={styles.fishboneProgressFill} />
                         <text x={leaf.textX} y={leaf.textY} dominantBaseline="middle" className={styles.fishboneNodeText} textAnchor={sideLeft ? 'end' : 'start'}>{leaf.textShown}</text>
                       </g>
                     ))}
-                    {/* SIT 情景节点：交界点圆形 + modality 文本（中文注释） */}
+                    {/* SIT 情景节点：交界点圆形 + description 文本（中文注释） */}
                     {sitLabels.map((s, si) => (
                       <g key={`${run.id}-sit-${si}`} className={styles.fishboneClickable} onClick={() => setSelectedInfon(s.infon)}>
                         <circle cx={baseX} cy={baseY} r={nodeSize / 2} className={styles.fishboneSITCircle} />
@@ -411,7 +435,7 @@ export default function FishboneInfons() {
                 const preferred = [
                   'iid','infon_type','record_time','occur_time','confidence','support',
                   'names','value','data_type','temporal_value','granularity','spatial_value','bbox',
-                  'relation_name','arity','arg_refs','arg_types','type_name','category','modality','context_span'
+                  'relation_name','arity','arg_refs','arg_types','type_name','category','description','context_span'
                 ]
                 const keys = Array.from(new Set([...preferred, ...Object.keys(selectedInfon || {})]))
                 return keys.map((k) => {
