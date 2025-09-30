@@ -1,10 +1,110 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react'
+import React, { useEffect, useRef, useState, useMemo, useLayoutEffect } from 'react'
 import { useStore } from '../store'
 import styles from './AgentPage.module.css'
 import MarkdownMessage from './MarkdownMessage'
 import { Splitter, Select, Button, Upload, Progress, Spin, Input, Modal } from 'antd'
-import { SendOutlined, StopOutlined, CameraOutlined } from '@ant-design/icons'
+import { SendOutlined, StopOutlined, CameraOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import FishboneInfons from './FishboneInfons'
+import HighlightInput from './HighlightInput'
+
+// 连线组件（中文注释）：根据关系信息元画连线连接标签和高亮文本
+const RelationConnections = ({ messageId, relations, infonIndex }) => {
+  const [connections, setConnections] = useState([])
+  const containerRef = useRef(null)
+
+  useLayoutEffect(() => {
+    if (!containerRef.current || !relations.length) return
+
+    const container = containerRef.current.parentElement
+    if (!container) return
+
+    const newConnections = []
+    const containerRect = container.getBoundingClientRect()
+
+    relations.forEach(({ infon }, relIdx) => {
+      const relatedInfons = infon.arg_refs || []
+      
+      // 找到关系标签的位置（中文注释）
+      const tagSelector = `.${styles.relationTag}`
+      const allTags = container.querySelectorAll(tagSelector)
+      const tagEl = allTags[relIdx]
+      if (!tagEl) return
+
+      const tagRect = tagEl.getBoundingClientRect()
+      const tagX = tagRect.left - containerRect.left + tagRect.width / 2
+      const tagY = tagRect.bottom - containerRect.top
+
+      relatedInfons.forEach((argRef) => {
+        // 查找对应的高亮元素（中文注释）
+        const highlightEl = container.querySelector(`[data-infon-id="${argRef}"][data-relation-id="${infon.iid}"]`)
+        if (!highlightEl) return
+
+        const highlightRect = highlightEl.getBoundingClientRect()
+        const highlightX = highlightRect.left - containerRect.left + highlightRect.width / 2
+        const highlightY = highlightRect.top - containerRect.top
+
+        // 计算贝塞尔曲线控制点（中文注释）
+        const dx = highlightX - tagX
+        const dy = highlightY - tagY
+        const controlY = tagY + dy * 0.5
+
+        newConnections.push({
+          relationId: infon.iid,
+          argRef: argRef,
+          startX: tagX,
+          startY: tagY,
+          endX: highlightX,
+          endY: highlightY,
+          controlY: controlY,
+        })
+      })
+    })
+
+    setConnections(newConnections)
+  }, [relations, infonIndex, messageId])
+
+  if (!connections.length) return null
+
+  return (
+    <svg 
+      ref={containerRef}
+      className={styles.relationConnections} 
+      style={{ 
+        position: 'absolute', 
+        top: 0, 
+        left: 0, 
+        width: '100%', 
+        height: '100%', 
+        pointerEvents: 'none',
+        zIndex: 1,
+        overflow: 'visible'
+      }}
+    >
+      {connections.map((conn, i) => {
+        const path = `M ${conn.startX} ${conn.startY} Q ${conn.startX} ${conn.controlY}, ${conn.endX} ${conn.endY}`
+        return (
+          <g key={i}>
+            <path 
+              d={path}
+              fill="none"
+              stroke="rgba(91, 141, 239, 0.3)"
+              strokeWidth="1.5"
+              strokeDasharray="3,3"
+            />
+            <circle 
+              cx={conn.endX} 
+              cy={conn.endY} 
+              r={3}
+              fill="rgba(91, 141, 239, 0.4)"
+              stroke="rgba(91, 141, 239, 0.6)"
+              strokeWidth="1"
+            />
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
 
 
 export default function AgentPage() {
@@ -79,6 +179,8 @@ export default function AgentPage() {
   const [apiKey, setApiKey] = useState('')
   // 500ms 防抖计时器（中文注释）
   const pendingTimerRef = useRef(null)
+  // 图片预览 Modal（中文注释）
+  const [previewImage, setPreviewImage] = useState(null)
 
 
 
@@ -217,18 +319,204 @@ export default function AgentPage() {
     return `${contextTokensUsed} est.`
   }, [contextTokensUsed, maxContextTokens])
 
+  // 信息元类型对应的高亮颜色（中文注释）
+  const getInfonColor = (infonType) => {
+    const colors = {
+      IND: '#3b82f6',   // 个体：明亮蓝色
+      PAR: '#10b981',   // 参数：翠绿色
+      TIM: '#8b5cf6',   // 时间：柔和紫色
+      LOC: '#f59e0b',   // 位置：琥珀色
+      REL: '#0ea5e9',   // 关系：天空蓝（主题色）
+      TYP: '#06b6d4',   // 类型：青色
+      SIT: '#f97316',   // 情景：橙色
+    }
+    return colors[String(infonType).toUpperCase()] || '#64748b'
+  }
+
+  // 从信息元中提取用于匹配的关键词（中文注释）
+  const getMatchKeywords = (infon) => {
+    if (!infon || typeof infon !== 'object') return []
+    const keywords = []
+    const t = String(infon.infon_type || '').toUpperCase()
+    
+    if (t === 'IND' && Array.isArray(infon.names)) {
+      keywords.push(...infon.names.filter(Boolean))
+    } else if (t === 'PAR' && infon.value != null) {
+      keywords.push(String(infon.value))
+    } else if (t === 'TIM' && infon.temporal_value) {
+      keywords.push(String(infon.temporal_value))
+    } else if (t === 'LOC' && infon.spatial_value) {
+      keywords.push(String(infon.spatial_value))
+    } else if (t === 'REL' && infon.relation_name) {
+      keywords.push(String(infon.relation_name))
+    } else if (t === 'TYP' && infon.type_name) {
+      keywords.push(String(infon.type_name))
+    }
+    
+    return keywords.filter(k => k && k.trim())
+  }
+
+  // 获取消息的所有信息元（中文注释）：包括该消息对应的所有 run 的所有 infons
+  const getMessageInfons = (messageId) => {
+    if (!currentSession?.id) return []
+    const runs = (infonSessions?.[currentSession.id]?.runs) || []
+    const messageRuns = runs.filter(r => r.targetType === 'message' && r.targetKey === messageId && r.modality === 'text')
+    const allInfons = messageRuns.flatMap(r => {
+      const infons = Array.isArray(r?.resultJson?.infons) ? r.resultJson.infons : []
+      return infons.map(infon => ({ infon, run: r }))
+    })
+    return allInfons
+  }
+
+  // 构建信息元索引（中文注释）：用于快速查找 iid 对应的信息元
+  const buildInfonIndex = (infonList) => {
+    const index = {}
+    infonList.forEach(({ infon }) => {
+      if (infon.iid) index[infon.iid] = infon
+    })
+    return index
+  }
+
+  // 收集关系信息元关联的所有信息元（中文注释）
+  const getRelatedInfons = (infon, infonIndex) => {
+    const related = []
+    if (String(infon.infon_type || '').toUpperCase() === 'REL' && Array.isArray(infon.arg_refs)) {
+      infon.arg_refs.forEach(ref => {
+        if (infonIndex[ref]) related.push(infonIndex[ref])
+      })
+    }
+    return related
+  }
+
+  // 渲染带高亮的文本（中文注释）：自动高亮所有信息元
+  const renderHighlightedText = (text, messageId) => {
+    const textStr = String(text || '')
+    const infonList = getMessageInfons(messageId)
+    if (!infonList.length) return textStr
+    
+    const infonIndex = buildInfonIndex(infonList)
+    
+    // 收集所有需要高亮的关键词及其颜色（中文注释）
+    const highlights = []
+    infonList.forEach(({ infon }) => {
+      const keywords = getMatchKeywords(infon)
+      const color = getInfonColor(infon.infon_type)
+      keywords.forEach(kw => {
+        highlights.push({ keyword: kw, color, infon })
+      })
+      
+      // 如果是关系信息元，也高亮其关联的信息元（中文注释）
+      const related = getRelatedInfons(infon, infonIndex)
+      related.forEach(relInfon => {
+        const relKeywords = getMatchKeywords(relInfon)
+        const relColor = getInfonColor(relInfon.infon_type)
+        relKeywords.forEach(kw => {
+          highlights.push({ keyword: kw, color: relColor, infon: relInfon, fromRelation: infon.iid })
+        })
+      })
+    })
+    
+    if (!highlights.length) return textStr
+    
+    // 按关键词长度降序排序，优先匹配长关键词（中文注释）
+    highlights.sort((a, b) => b.keyword.length - a.keyword.length)
+    
+    // 构建正则表达式：匹配所有关键词（中文注释）
+    const uniqueKeywords = [...new Set(highlights.map(h => h.keyword))]
+    const pattern = uniqueKeywords.map(kw => kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
+    if (!pattern) return textStr
+    
+    const regex = new RegExp(`(${pattern})`, 'gi')
+    const parts = textStr.split(regex)
+    
+    return parts.map((part, i) => {
+      if (i % 2 === 1) {
+        // 匹配的部分：找到对应的颜色（中文注释）
+        const match = highlights.find(h => h.keyword.toLowerCase() === part.toLowerCase())
+        if (match) {
+          // 为关联的信息元添加 data 属性，用于连线（中文注释）
+          const dataAttrs = match.fromRelation ? { 'data-infon-id': match.infon.iid, 'data-relation-id': match.fromRelation } : { 'data-infon-id': match.infon.iid }
+          return <mark key={i} className={styles.infonHighlight} style={{ backgroundColor: match.color + '20', color: match.color }} {...dataAttrs}>{part}</mark>
+        }
+      }
+      return part
+    })
+  }
+
+  // 获取消息的关系信息元（中文注释）
+  const getMessageRelations = (messageId) => {
+    const infonList = getMessageInfons(messageId)
+    return infonList.filter(({ infon }) => String(infon.infon_type || '').toUpperCase() === 'REL')
+  }
+
+  // 获取 pending 状态的所有信息元（中文注释）：用于输入框实时高亮
+  const getPendingInfons = useMemo(() => {
+    if (!currentSession?.id) return []
+    const runs = (infonSessions?.[currentSession.id]?.runs) || []
+    const pendingRuns = runs.filter(r => r.targetType === 'pending' && r.modality === 'text')
+    const allInfons = pendingRuns.flatMap(r => {
+      const infons = Array.isArray(r?.resultJson?.infons) ? r.resultJson.infons : []
+      return infons.map(infon => ({ infon, run: r }))
+    })
+    return allInfons
+  }, [currentSession?.id, infonSessions])
+
+  // 构建 pending 高亮数据（中文注释）：转换为 HighlightInput 需要的格式
+  const pendingHighlights = useMemo(() => {
+    if (!getPendingInfons.length) return []
+    
+    const infonIndex = buildInfonIndex(getPendingInfons)
+    const highlights = []
+    
+    getPendingInfons.forEach(({ infon }) => {
+      const keywords = getMatchKeywords(infon)
+      const color = getInfonColor(infon.infon_type)
+      keywords.forEach(kw => {
+        highlights.push({ keyword: kw, color })
+      })
+      
+      // 关系信息元的关联高亮（中文注释）
+      const related = getRelatedInfons(infon, infonIndex)
+      related.forEach(relInfon => {
+        const relKeywords = getMatchKeywords(relInfon)
+        const relColor = getInfonColor(relInfon.infon_type)
+        relKeywords.forEach(kw => {
+          highlights.push({ keyword: kw, color: relColor })
+        })
+      })
+    })
+    
+    return highlights
+  }, [getPendingInfons])
+
+  // 获取 pending 的关系信息元（中文注释）
+  const pendingRelations = useMemo(() => {
+    return getPendingInfons.filter(({ infon }) => String(infon.infon_type || '').toUpperCase() === 'REL')
+  }, [getPendingInfons])
+
+  // 获取 pending 的 infon 索引（中文注释）
+  const pendingInfonIndex = useMemo(() => {
+    return buildInfonIndex(getPendingInfons)
+  }, [getPendingInfons])
+
   // 属性级展示（中文注释）：不需要默认选择
 
 
 
   const handleSend = async () => {
     const text = (input || '').trim()
-    const hasImages = selectedImages.length > 0
+    const imgs = [...selectedImages]
+    const hasImages = imgs.length > 0
     if (!text && !hasImages) return
+    
+    // 清空输入和图片（中文注释）
     setInput('')
+    setSelectedImages([])
+    
+    // 清空 pending 状态（中文注释）
+    try { clearAllPendingInfons?.() } catch (_) {}
+    
     if (hasImages) {
-      const imgs = [...selectedImages]
-      setSelectedImages([])
       const userId = await useStore.getState().sendMessageWithImages(text, imgs)
       try {
         const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
@@ -245,12 +533,18 @@ export default function AgentPage() {
 
   const handleLandingSend = async () => {
     const text = (landingInput || '').trim()
-    const hasImages = selectedImages.length > 0
+    const imgs = [...selectedImages]
+    const hasImages = imgs.length > 0
     if (!text && !hasImages) return
+    
+    // 清空输入和图片（中文注释）
     setLandingInput('')
+    setSelectedImages([])
+    
+    // 清空 pending 状态（中文注释）
+    try { clearAllPendingInfons?.() } catch (_) {}
+    
     if (hasImages) {
-      const imgs = [...selectedImages]
-      setSelectedImages([])
       const userId = await useStore.getState().sendMessageWithImages(text, imgs)
       try {
         const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
@@ -320,7 +614,10 @@ export default function AgentPage() {
       {/* 左侧：侧边栏 */}
       <aside className={styles.sidebar}>
         <div className={styles.sidebarTop}>
-          <button className={styles.newBtn} onClick={createSession}>New chat</button>
+          <button className={styles.newBtn} onClick={createSession}>
+            <PlusOutlined className={styles.newBtnIcon} />
+            <span>New chat</span>
+          </button>
         </div>
         <div className={styles.sidebarScroll}>
           {sessions.map((s) => (
@@ -330,11 +627,19 @@ export default function AgentPage() {
               onClick={() => switchSession(s.id)}
               title={s.title}
             >
-              <div className={styles.chatName}>{s.title}</div>
-              <div className={styles.chatMeta}>{new Date(s.updatedAt).toLocaleString()}</div>
-              <div className={styles.chatActions}>
-                <button className={styles.iconBtn} onClick={(e) => { e.stopPropagation(); const t = prompt('Rename'); if (t) renameSession(s.id, t) }}>✎</button>
-                <button className={styles.iconBtn} onClick={(e) => { e.stopPropagation(); if (confirm('Delete this chat?')) deleteSession(s.id) }}>🗑</button>
+              <div className={styles.chatItemHeader}>
+                <div className={styles.chatItemInfo}>
+                  <div className={styles.chatName}>{s.title}</div>
+                  <div className={styles.chatMeta}>{new Date(s.updatedAt).toLocaleString()}</div>
+                </div>
+                <div className={styles.chatActions}>
+                  <button className={styles.iconBtn} onClick={(e) => { e.stopPropagation(); const t = prompt('Rename'); if (t) renameSession(s.id, t) }} title="Rename">
+                    <EditOutlined />
+                  </button>
+                  <button className={styles.iconBtn} onClick={(e) => { e.stopPropagation(); if (confirm('Delete this chat?')) deleteSession(s.id) }} title="Delete">
+                    <DeleteOutlined />
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -354,7 +659,7 @@ export default function AgentPage() {
       {/* 右侧：主区域 */}
       <section className={styles.main}>
         <div className={styles.scroll} ref={listRef}>
-          {/* 顶部：左上角模型选择器，右侧保留空白对齐 */}
+          {/* 顶部：左上角模型选择器 */}
           <div className={styles.toolbar}>
             <div className={styles.modelPicker}>
               <Select
@@ -400,23 +705,93 @@ export default function AgentPage() {
             </div>
           </Modal>
           <Splitter className={styles.splitterRoot}>
-            <Splitter.Panel style={{ overflow: 'hidden' }}>
+            <Splitter.Panel style={{ overflow: 'hidden', position: 'relative' }}>
+              {/* 信息元类型图例（中文注释） */}
+              <div className={styles.infonLegend}>
+                <div className={styles.legendItem}>
+                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('IND') }}></span>
+                  <span className={styles.legendLabel}>Individual</span>
+                </div>
+                <div className={styles.legendItem}>
+                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('PAR') }}></span>
+                  <span className={styles.legendLabel}>Parameter</span>
+                </div>
+                <div className={styles.legendItem}>
+                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('TIM') }}></span>
+                  <span className={styles.legendLabel}>Time</span>
+                </div>
+                <div className={styles.legendItem}>
+                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('LOC') }}></span>
+                  <span className={styles.legendLabel}>Location</span>
+                </div>
+                <div className={styles.legendItem}>
+                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('REL') }}></span>
+                  <span className={styles.legendLabel}>Relation</span>
+                </div>
+                <div className={styles.legendItem}>
+                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('TYP') }}></span>
+                  <span className={styles.legendLabel}>Type</span>
+                </div>
+                <div className={styles.legendItem}>
+                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('SIT') }}></span>
+                  <span className={styles.legendLabel}>Situation</span>
+                </div>
+              </div>
               <div className={styles.leftPaneScroll} ref={listRef}>
                 {hasMessages ? (
                   <div className={styles.column}>
                     {(currentSession?.messages || []).map((m) => {
                       const isUser = m.role === 'user'
+                      const messageRelations = getMessageRelations(m.id)
+                      const infonList = getMessageInfons(m.id)
+                      const infonIndex = buildInfonIndex(infonList)
+                      
                       return (
                         <div key={m.id} className={`${styles.msgRow} ${isUser ? styles.rowUser : styles.rowAssistant}`}>
                           {isUser ? (
                             <>
-                              <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`}>
-                                <div className={styles.msgContent}>{m.content}</div>
+                              <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`} style={{ position: 'relative' }}>
+                                {messageRelations.length > 0 && (
+                                  <RelationConnections messageId={m.id} relations={messageRelations} infonIndex={infonIndex} />
+                                )}
+                                <div className={styles.msgContent} style={{ position: 'relative', zIndex: 2 }}>{renderHighlightedText(m.content, m.id)}</div>
                                 {Array.isArray(m.images) && m.images.length > 0 && (
                                   <div className={styles.msgImages}>
-                                    {m.images.map((src, i) => (
-                                      <img key={i} src={src} alt={`img-${i}`} className={styles.msgImage} />
+                                    {m.images.map((src, imgIdx) => (
+                                      <img key={imgIdx} src={src} alt={`img-${imgIdx}`} className={styles.msgImage} />
                                     ))}
+                                  </div>
+                                )}
+                                {/* 关系标签（中文注释） */}
+                                {messageRelations.length > 0 && (
+                                  <div className={styles.relationTags}>
+                                    {messageRelations.map(({ infon }, idx) => {
+                                      const relatedInfons = getRelatedInfons(infon, infonIndex)
+                                      const color = getInfonColor('REL')
+                                      
+                                      return (
+                                        <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
+                                          <span className={styles.relationTagName} style={{ color: color }}>
+                                            {infon.relation_name || 'Relation'}
+                                          </span>
+                                          <span className={styles.relationTagArgs}>
+                                            {relatedInfons.map((rel, ri) => {
+                                              const relColor = getInfonColor(rel.infon_type)
+                                              const keywords = getMatchKeywords(rel)
+                                              const label = keywords[0] || rel.iid
+                                              return (
+                                                <React.Fragment key={ri}>
+                                                  {ri > 0 && <span className={styles.relationTagSep}>→</span>}
+                                                  <span className={styles.relationTagArg} style={{ color: relColor }}>
+                                                    {label}
+                                                  </span>
+                                                </React.Fragment>
+                                              )
+                                            })}
+                                          </span>
+                                        </div>
+                                      )
+                                    })}
                                   </div>
                                 )}
                               </div>
@@ -425,7 +800,10 @@ export default function AgentPage() {
                           ) : (
                             <>
                               <div className={styles.avatar}>A</div>
-                              <div className={`${styles.msgBubble} ${styles.msgBubbleAssistant}`}>
+                              <div className={`${styles.msgBubble} ${styles.msgBubbleAssistant}`} style={{ position: 'relative' }}>
+                                {messageRelations.length > 0 && (
+                                  <RelationConnections messageId={m.id} relations={messageRelations} infonIndex={infonIndex} />
+                                )}
                                 {m.reasoning && (
                                   <div className={styles.reasoningBox}>
                                     <div className={styles.reasoningTitle}>Thinking</div>
@@ -435,8 +813,42 @@ export default function AgentPage() {
                                   </div>
                                 )}
                                 <div className={styles.msgContent}>
-                                  <MarkdownMessage content={m.content} />
+                                  <div className={styles.assistantTextHighlight} style={{ position: 'relative', zIndex: 2 }}>
+                                    {renderHighlightedText(m.content, m.id)}
+                                  </div>
                                 </div>
+                                {/* 关系标签（中文注释） */}
+                                {messageRelations.length > 0 && (
+                                  <div className={styles.relationTags}>
+                                    {messageRelations.map(({ infon }, idx) => {
+                                      const relatedInfons = getRelatedInfons(infon, infonIndex)
+                                      const color = getInfonColor('REL')
+                                      
+                                      return (
+                                        <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
+                                          <span className={styles.relationTagName} style={{ color: color }}>
+                                            {infon.relation_name || 'Relation'}
+                                          </span>
+                                          <span className={styles.relationTagArgs}>
+                                            {relatedInfons.map((rel, ri) => {
+                                              const relColor = getInfonColor(rel.infon_type)
+                                              const keywords = getMatchKeywords(rel)
+                                              const label = keywords[0] || rel.iid
+                                              return (
+                                                <React.Fragment key={ri}>
+                                                  {ri > 0 && <span className={styles.relationTagSep}>→</span>}
+                                                  <span className={styles.relationTagArg} style={{ color: relColor }}>
+                                                    {label}
+                                                  </span>
+                                                </React.Fragment>
+                                              )
+                                            })}
+                                          </span>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )}
                                 {m.streaming ? <div className={styles.cursor}>▍</div> : null}
                                 {m.error ? <div className={styles.error}>Error: {m.error}</div> : null}
                               </div>
@@ -454,36 +866,77 @@ export default function AgentPage() {
                         <div className={styles.composerPreviews}>
                           {selectedImages.map((src, i) => (
                             <div key={i} className={styles.composerPreviewItem}>
-                              <img src={src} alt={`preview-${i}`} className={styles.composerPreviewImg} />
-                              <button className={styles.composerPreviewRemove} onClick={() => removeSelectedImage(i)}>✕</button>
+                              <img 
+                                src={src} 
+                                alt={`preview-${i}`} 
+                                className={styles.composerPreviewImg} 
+                                onClick={() => setPreviewImage(src)}
+                                style={{ cursor: 'pointer' }}
+                              />
+                              <button className={styles.composerPreviewRemove} onClick={(e) => { e.stopPropagation(); removeSelectedImage(i); }}>✕</button>
                             </div>
                           ))}
                         </div>
                       )}
-                      <div className={styles.landingControls}>
-                        <Upload
-                          disabled={!currentModelIsMultimodal}
-                          multiple
-                          accept="image/*"
-                          showUploadList={false}
-                          beforeUpload={(file) => {
-                            const reader = new FileReader()
-                            reader.onload = () => setSelectedImages((prev) => [...prev, reader.result])
-                            reader.readAsDataURL(file)
-                            return Upload.LIST_IGNORE
-                          }}
-                        >
-                          <Button icon={<CameraOutlined />} disabled={!currentModelIsMultimodal} title={currentModelIsMultimodal ? '' : 'Current model does not support images'} />
-                        </Upload>
-                        <Input.TextArea
-                          className={styles.landingInput}
-                          placeholder="Type your question..."
-                          value={landingInput}
-                          onChange={(e) => setLandingInput(e.target.value)}
-                          onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); handleLandingSend() } }}
-                          autoSize={{ minRows: 1, maxRows: 6 }}
-                        />
-                        <Button type="primary" icon={<SendOutlined />} onClick={handleLandingSend} disabled={!landingInput.trim() && selectedImages.length === 0} />
+                      <div className={styles.landingInputArea}>
+                        <div className={styles.landingControls}>
+                          <Upload
+                            disabled={!currentModelIsMultimodal}
+                            multiple
+                            accept="image/*"
+                            showUploadList={false}
+                            beforeUpload={(file) => {
+                              const reader = new FileReader()
+                              reader.onload = () => setSelectedImages((prev) => [...prev, reader.result])
+                              reader.readAsDataURL(file)
+                              return Upload.LIST_IGNORE
+                            }}
+                          >
+                            <Button icon={<CameraOutlined />} disabled={!currentModelIsMultimodal} title={currentModelIsMultimodal ? '' : 'Current model does not support images'} />
+                          </Upload>
+                          <HighlightInput
+                            className={styles.landingInput}
+                            placeholder="Type your question..."
+                            value={landingInput}
+                            onChange={setLandingInput}
+                            onPressEnter={handleLandingSend}
+                            highlights={pendingHighlights}
+                            autoSize={{ minRows: 1, maxRows: 6 }}
+                          />
+                          <Button type="primary" icon={<SendOutlined />} onClick={handleLandingSend} disabled={!landingInput.trim() && selectedImages.length === 0} />
+                        </div>
+                        {/* Pending 关系标签（中文注释） */}
+                        {pendingRelations.length > 0 && (
+                          <div className={styles.relationTags} style={{ marginTop: '8px' }}>
+                            {pendingRelations.map(({ infon }, idx) => {
+                              const relatedInfons = getRelatedInfons(infon, pendingInfonIndex)
+                              const color = getInfonColor('REL')
+                              
+                              return (
+                                <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
+                                  <span className={styles.relationTagName} style={{ color: color }}>
+                                    {infon.relation_name || 'Relation'}
+                                  </span>
+                                  <span className={styles.relationTagArgs}>
+                                    {relatedInfons.map((rel, ri) => {
+                                      const relColor = getInfonColor(rel.infon_type)
+                                      const keywords = getMatchKeywords(rel)
+                                      const label = keywords[0] || rel.iid
+                                      return (
+                                        <React.Fragment key={ri}>
+                                          {ri > 0 && <span className={styles.relationTagSep}>→</span>}
+                                          <span className={styles.relationTagArg} style={{ color: relColor }}>
+                                            {label}
+                                          </span>
+                                        </React.Fragment>
+                                      )
+                                    })}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -569,19 +1022,26 @@ export default function AgentPage() {
                 <div className={styles.composerPreviews}>
                   {selectedImages.map((src, i) => (
                     <div key={i} className={styles.composerPreviewItem}>
-                      <img src={src} alt={`preview-${i}`} className={styles.composerPreviewImg} />
-                      <button className={styles.composerPreviewRemove} onClick={() => removeSelectedImage(i)}>✕</button>
+                      <img 
+                        src={src} 
+                        alt={`preview-${i}`} 
+                        className={styles.composerPreviewImg} 
+                        onClick={() => setPreviewImage(src)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <button className={styles.composerPreviewRemove} onClick={(e) => { e.stopPropagation(); removeSelectedImage(i); }}>✕</button>
                     </div>
                   ))}
                 </div>
               )}
               <div className={styles.composerRow}>
-                <Input.TextArea
+                <HighlightInput
                   className={styles.composerInput}
                   placeholder="Message ChatGPT"
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); handleSend() } }}
+                  onChange={setInput}
+                  onPressEnter={handleSend}
+                  highlights={pendingHighlights}
                   autoSize={{ minRows: 1, maxRows: 6 }}
                 />
                 <div className={styles.composerButtons}>
@@ -606,11 +1066,59 @@ export default function AgentPage() {
                   )}
                 </div>
               </div>
+              {/* Pending 关系标签（中文注释） */}
+              {pendingRelations.length > 0 && (
+                <div className={styles.relationTags} style={{ marginTop: '8px' }}>
+                  {pendingRelations.map(({ infon }, idx) => {
+                    const relatedInfons = getRelatedInfons(infon, pendingInfonIndex)
+                    const color = getInfonColor('REL')
+                    
+                    return (
+                      <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
+                        <span className={styles.relationTagName} style={{ color: color }}>
+                          {infon.relation_name || 'Relation'}
+                        </span>
+                        <span className={styles.relationTagArgs}>
+                          {relatedInfons.map((rel, ri) => {
+                            const relColor = getInfonColor(rel.infon_type)
+                            const keywords = getMatchKeywords(rel)
+                            const label = keywords[0] || rel.iid
+                            return (
+                              <React.Fragment key={ri}>
+                                {ri > 0 && <span className={styles.relationTagSep}>→</span>}
+                                <span className={styles.relationTagArg} style={{ color: relColor }}>
+                                  {label}
+                                </span>
+                              </React.Fragment>
+                            )
+                          })}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
             <div className={styles.disclaimer}>Model streams responses. Context comes from this chat history.</div>
           </div>
         )}
       </section>
+
+      {/* 图片预览 Modal（中文注释） */}
+      <Modal
+        open={!!previewImage}
+        onCancel={() => setPreviewImage(null)}
+        footer={null}
+        width="90vw"
+        centered
+        className={styles.imagePreviewModal}
+      >
+        {previewImage && (
+          <div className={styles.imagePreviewContainer}>
+            <img src={previewImage} alt="Preview" className={styles.imagePreviewImg} />
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

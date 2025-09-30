@@ -244,9 +244,12 @@ export default function FishboneInfons() {
               {/* 模型回复（assistantRuns）的信息元：绘制在圆形内部（中文注释） */}
               {(() => {
                 const asRuns = [...round.assistantRuns]
-                const infons = asRuns.flatMap((r) => Array.isArray(r?.resultJson?.infons) ? r.resultJson.infons : [])
+                // 保留 infon 和对应 run 的映射（中文注释）
+                const infonWithRuns = asRuns.flatMap((r) => 
+                  (Array.isArray(r?.resultJson?.infons) ? r.resultJson.infons : []).map(infon => ({ infon, run: r }))
+                )
                 const maxN = 24
-                const shown = infons.slice(0, maxN)
+                const shown = infonWithRuns.slice(0, maxN)
                 if (!shown.length) return null
                 const rPad = 3
                 const rLarge = Math.max(12, clusterR - 1)
@@ -306,13 +309,13 @@ export default function FishboneInfons() {
                 return (
                   <g>
                     <circle cx={anchorX} cy={anchorY} r={rLarge} className={styles.fishboneBubbleLargeRing} />
-                    {shown.map((infon, idx) => {
+                    {shown.map((item, idx) => {
                       const nx = Math.round(pts[idx].x)
                       const ny = Math.round(pts[idx].y)
-                      const label = getInfonKeyword(infon)
+                      const label = getInfonKeyword(item.infon)
                       return (
                         <g key={`as-${ri}-${idx}`}>
-                          <circle cx={nx} cy={ny} r={rSmall} className={`${styles.fishboneBubbleSmall} ${styles.fishboneClickable}`} onClick={() => setSelectedInfon(infon)} />
+                          <circle cx={nx} cy={ny} r={rSmall} className={`${styles.fishboneBubbleSmall} ${styles.fishboneClickable}`} onClick={() => setSelectedInfon(item.infon)} />
                           <title>{label}</title>
                         </g>
                       )

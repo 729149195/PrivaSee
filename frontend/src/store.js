@@ -291,6 +291,15 @@ export const useStore = create((set, get) => ({
   // 流式增量解析器状态：按 runId 维护（中文注释）
   infonParsers: {},
 
+  // 高亮信息元：用于在聊天界面中高亮显示选中的信息元（中文注释）
+  // { infon: object, run: object } 或 null
+  highlightedInfon: null,
+
+  // 设置高亮信息元（中文注释）
+  setHighlightedInfon(infon, run) {
+    set({ highlightedInfon: infon ? { infon, run } : null })
+  },
+
   // 初始化当前会话（中文注释）：第一次使用时指向首个会话
   _ensureCurrentSession() {
     const { sessions, currentSessionId } = get()
