@@ -143,7 +143,7 @@ export default function FishboneInfons() {
   const bottomPad = 10
   const diagOffset = Math.max(90, Math.min(220, Math.floor(width * 0.28))) // 主分叉在 x/y 各偏移
   const mainDiagLen = diagOffset // 45° 对角线，dx=dy
-  const rowGap = Math.max(100, Math.floor(diagOffset * 1)) // 轴上相邻锚点间距
+  const rowGap = Math.max(100, Math.floor(diagOffset)) // 轴上相邻锚点间距
   const subSlantLen = 16 // 小分叉短斜长度
   const maxNodesPerRun = Infinity
   const nodeSize = 12 // 节点方块尺寸（中文注释）
@@ -338,7 +338,7 @@ export default function FishboneInfons() {
                   else leavesInput.push({ infon, isRel: t === 'REL' })
                 }
                 // 构建竖直次级主分支，并沿其布置 45° 叶子（中文注释）
-                const trunkLen = subTrunkStart + subTrunkStep * Math.max(0, Math.max(0, leavesInput.length - 1))
+                const trunkLen = subTrunkStart + subTrunkStep * Math.max(0, leavesInput.length - 1)
                 const trunkTopX = baseX
                 const trunkTopY = baseY - trunkLen
                 // 叶子：记录文本包围盒（中文注释）
