@@ -1,13 +1,13 @@
 import { create } from 'zustand'
 import { buildSystemPrompt } from './templates/infons.js'
 
-// 说明（中文注释）：
+// 说明：
 // 1) 本 store 管理 ChatGPT 风格的多会话、消息流与流式生成状态；
 // 2) 采用 OpenAI Chat Completions 协议与本地 Ollama(OpenAI 兼容)接口对接；
 // 3) 所有 UI 文本在代码中使用英文，注释使用中文；
 // 4) 每次对话上下文从当前会话的全部消息构建，以实现连续对话记忆。
 
-// 生成唯一 ID（中文注释）：优先使用浏览器 crypto.randomUUID，降级到时间戳
+// 生成唯一 ID：优先使用浏览器 crypto.randomUUID，降级到时间戳
 const generateId = () => {
   try {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
@@ -15,7 +15,7 @@ const generateId = () => {
   return 'id_' + Date.now() + '_' + Math.random().toString(16).slice(2)
 }
 
-// 安全 JSON 解析（中文注释）
+// 安全 JSON 解析
 function tryParseJSON(text) {
   try {
     return { ok: true, value: JSON.parse(text) }
@@ -24,7 +24,7 @@ function tryParseJSON(text) {
   }
 }
 
-// 从文本中提取首个完整 JSON 对象（中文注释）：忽略 JSON 内部字符串中的大括号
+// 从文本中提取首个完整 JSON 对象：忽略 JSON 内部字符串中的大括号
 function extractFirstJSONObject(text) {
   if (typeof text !== 'string' || !text) return null
   const start = text.indexOf('{')
@@ -52,7 +52,7 @@ function extractFirstJSONObject(text) {
   return null
 }
 
-// 简单稳定哈希（中文注释）：用于文本/图片去重
+// 简单稳定哈希：用于文本/图片去重
 function computeHashId(input) {
   const s = String(input || '')
   let h = 5381
@@ -63,7 +63,7 @@ function computeHashId(input) {
   return 'h' + h.toString(16)
 }
 
-// 规范化模型输出：确保符合 OUTPUT_FORMAT，并填充 record_time（中文注释）
+// 规范化模型输出：确保符合 OUTPUT_FORMAT，并填充 record_time
 function normalizeInfonOutput(obj, { recordTimeISO, defaultModality, sessionId, messageRound, infonIndex, infonType }) {
   const out = (obj && typeof obj === 'object') ? obj : {}
   const now = recordTimeISO || new Date().toISOString()
@@ -75,7 +75,7 @@ function normalizeInfonOutput(obj, { recordTimeISO, defaultModality, sessionId, 
   out.entities = Array.isArray(out.entities) ? out.entities : []
   out.infons = Array.isArray(out.infons) ? out.infons : []
   out.quality_report = out.quality_report && typeof out.quality_report === 'object' ? out.quality_report : { stats: {} }
-  // 填充每个 situation/infons 的 record_time 与 modality 缺省（中文注释）
+  // 填充每个 situation/infons 的 record_time 与 modality 缺省
   out.situations = out.situations.map((s) => {
     const t = { ...(typeof s === 'object' ? s : {}) }
     if (!t.record_time) t.record_time = now
@@ -85,7 +85,7 @@ function normalizeInfonOutput(obj, { recordTimeISO, defaultModality, sessionId, 
   out.infons = out.infons.map((i, index) => {
     const t = { ...(typeof i === 'object' ? i : {}) }
     if (!t.record_time) t.record_time = now
-    // 生成基于对话轮次和信息元次序的iid（中文注释）
+    // 生成基于对话轮次和信息元次序的iid
     if (!t.iid && infonType) {
       const typePrefix = infonType.toLowerCase().slice(0, 3) // 取前三个字母作为前缀
       const round = messageRound || 1
@@ -105,7 +105,7 @@ function buildInfonSystemPrompt(modalities, nowISO) {
   })
 }
 
-// 在流中增量解析 infons 数组，逐个对象产出（中文注释）
+// 在流中增量解析 infons 数组，逐个对象产出
 function incrementalExtractInfons(streamText, parser) {
   const state = parser || { foundArray: false, arrayStart: -1, scanPos: 0, inString: false, escape: false, objStart: -1, braceDepth: 0, closed: false, yieldedHashes: [] }
   const yielded = []
@@ -177,7 +177,7 @@ function incrementalExtractInfons(streamText, parser) {
   return { state, yielded }
 }
 
-// 新建会话（中文注释）：创建一个空消息会话，标题默认 "New chat"
+// 新建会话：创建一个空消息会话，标题默认 "New chat"
 const createEmptySession = () => ({
   id: generateId(),
   title: 'New chat',
@@ -186,7 +186,7 @@ const createEmptySession = () => ({
   messages: [], // {id, role: 'user'|'assistant'|'system', content, createdAt, streaming?, error?}
 })
 
-// 解析 OpenAI SSE 流（中文注释）：将 response.body 按行解析 data: 片段
+// 解析 OpenAI SSE 流：将 response.body 按行解析 data: 片段
 async function streamOpenAIResponse(reader, onDelta) {
   const decoder = new TextDecoder('utf-8')
   let buffer = ''
@@ -226,7 +226,7 @@ async function streamOpenAIResponse(reader, onDelta) {
   }
 }
 
-// 解析 Ollama /api/chat 流（中文注释）：逐行解析 JSON，并处理“全量快照”或“增量 token”两种格式
+// 解析 Ollama /api/chat 流：逐行解析 JSON，并处理“全量快照”或“增量 token”两种格式
 async function streamOllamaChatResponse(reader, onDelta) {
   const decoder = new TextDecoder('utf-8')
   let buffer = ''
@@ -265,14 +265,14 @@ async function streamOllamaChatResponse(reader, onDelta) {
 }
 
 export const useStore = create((set, get) => ({
-  // 基础配置（中文注释）：指向本地 Ollama OpenAI 兼容接口
+  // 基础配置：指向本地 Ollama OpenAI 兼容接口
   baseUrl: '/v1',
   model: 'gemma3:12b',
-  models: [], // 可选模型列表（中文注释）
-  customModels: [], // 通过 API key 添加的自定义模型（中文注释）
-  customProviders: {}, // { [modelId]: { baseUrl, apiKey } }（中文注释）
+  models: [], // 可选模型列表
+  customModels: [], // 通过 API key 添加的自定义模型
+  customProviders: {}, // { [modelId]: { baseUrl, apiKey } }
 
-  // 多会话与状态（中文注释）：初始化一个空会话
+  // 多会话与状态：初始化一个空会话
   sessions: (() => {
     const s = createEmptySession()
     return [s]
@@ -281,26 +281,26 @@ export const useStore = create((set, get) => ({
   isGenerating: false,
   abortController: null,
 
-  // 信息元提取：按会话维护运行列表（中文注释）
+  // 信息元提取：按会话维护运行列表
   // infonSessions: { [sessionId]: { runs: Array<Run> } }
   // Run: { id, targetType: 'pending'|'message', targetKey: string, modality: 'text'|'image', imageIndex?, status: 'running'|'done'|'aborted'|'error', progress: number, buffer: string, resultJson: any|null, error?: string, createdAt }
   infonSessions: {},
-  // 缓存：上次提取的文本与每张图片的哈希（中文注释）
+  // 缓存：上次提取的文本与每张图片的哈希
   lastPendingTextHash: null,
   lastPendingImageHashes: [],
-  // 流式增量解析器状态：按 runId 维护（中文注释）
+  // 流式增量解析器状态：按 runId 维护
   infonParsers: {},
 
-  // 高亮信息元：用于在聊天界面中高亮显示选中的信息元（中文注释）
+  // 高亮信息元：用于在聊天界面中高亮显示选中的信息元
   // { infon: object, run: object } 或 null
   highlightedInfon: null,
 
-  // 设置高亮信息元（中文注释）
+  // 设置高亮信息元
   setHighlightedInfon(infon, run) {
     set({ highlightedInfon: infon ? { infon, run } : null })
   },
 
-  // 初始化当前会话（中文注释）：第一次使用时指向首个会话
+  // 初始化当前会话：第一次使用时指向首个会话
   _ensureCurrentSession() {
     const { sessions, currentSessionId } = get()
     if (!currentSessionId && sessions.length > 0) {
@@ -308,13 +308,13 @@ export const useStore = create((set, get) => ({
     }
   },
 
-  // 读取当前会话（中文注释）：找不到则返回 null
+  // 读取当前会话：找不到则返回 null
   getCurrentSession() {
     const { sessions, currentSessionId } = get()
     return sessions.find(s => s.id === currentSessionId) || null
   },
 
-  // 内部：获取或创建当前会话的信息元会话容器（中文注释）
+  // 内部：获取或创建当前会话的信息元会话容器
   _getOrCreateInfonSession(sessionId) {
     let box = get().infonSessions?.[sessionId]
     if (!box) {
@@ -324,7 +324,7 @@ export const useStore = create((set, get) => ({
     return box
   },
 
-  // 内部：追加信息元运行（中文注释）
+  // 内部：追加信息元运行
   _appendInfonRun(sessionId, run) {
     set((state) => {
       const current = state.infonSessions?.[sessionId] || { runs: [] }
@@ -333,7 +333,7 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  // 内部：更新信息元运行（中文注释）
+  // 内部：更新信息元运行
   _updateInfonRun(sessionId, runId, updater) {
     set((state) => {
       const box = state.infonSessions?.[sessionId]
@@ -343,14 +343,14 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  // 读取当前会话的所有信息元运行（中文注释）
+  // 读取当前会话的所有信息元运行
   getCurrentInfonRuns() {
     const session = get().getCurrentSession()
     if (!session) return []
     return (get().infonSessions?.[session.id]?.runs) || []
   },
 
-  // 清空所有 pending 信息元（中文注释）：供组件发送前调用
+  // 清空所有 pending 信息元：供组件发送前调用
   clearAllPendingInfons() {
     const session = get().getCurrentSession()
     if (!session) return
@@ -369,7 +369,7 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  // 采纳当前会话的所有 pending 结果为指定 message 的结果（中文注释）
+  // 采纳当前会话的所有 pending 结果为指定 message 的结果
   // 将 targetType: 'pending' 的 run 改写为 targetType: 'message'，targetKey=messageId
   // 返回被采纳的数量
   adoptPendingInfonsToMessage(messageId) {
@@ -391,7 +391,7 @@ export const useStore = create((set, get) => ({
     return adopted
   },
 
-  // 创建会话（中文注释）：并切换为当前
+  // 创建会话：并切换为当前
   createSession() {
     const newSession = createEmptySession()
     set((state) => ({
@@ -400,12 +400,12 @@ export const useStore = create((set, get) => ({
     }))
   },
 
-  // 设置模型（中文注释）
+  // 设置模型
   setModel(modelId) {
     set({ model: modelId })
   },
 
-  // 拉取模型列表（中文注释）：兼容 OpenAI / Ollama 响应结构
+  // 拉取模型列表：兼容 OpenAI / Ollama 响应结构
   async fetchModels() {
     try {
       const res = await fetch(`${get().baseUrl}/models`, { method: 'GET' })
@@ -429,7 +429,7 @@ export const useStore = create((set, get) => ({
     }
   },
 
-  // 添加自定义 API 模型（中文注释）：提供 modelId/baseUrl/apiKey，合并到选择列表
+  // 添加自定义 API 模型：提供 modelId/baseUrl/apiKey，合并到选择列表
   addApiModel({ id, baseUrl, apiKey }) {
     if (!id || !baseUrl || !apiKey) return
     set((state) => ({
@@ -439,12 +439,12 @@ export const useStore = create((set, get) => ({
     }))
   },
 
-  // 切换会话（中文注释）
+  // 切换会话
   switchSession(id) {
     set({ currentSessionId: id })
   },
 
-  // 删除会话（中文注释）：如果删除当前会话，则自动切换到剩余第一个
+  // 删除会话：如果删除当前会话，则自动切换到剩余第一个
   deleteSession(id) {
     set((state) => {
       const nextSessions = state.sessions.filter(s => s.id !== id)
@@ -456,14 +456,14 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  // 重命名会话（中文注释）
+  // 重命名会话
   renameSession(id, title) {
     set((state) => ({
       sessions: state.sessions.map(s => s.id === id ? { ...s, title, updatedAt: Date.now() } : s),
     }))
   },
 
-  // 追加消息（中文注释）：用于用户或助手消息写入
+  // 追加消息：用于用户或助手消息写入
   _appendMessage(sessionId, message) {
     set((state) => ({
       sessions: state.sessions.map(s => {
@@ -477,7 +477,7 @@ export const useStore = create((set, get) => ({
     }))
   },
 
-  // 更新某条消息（中文注释）：按消息 id 定位并更新（用于流式增量）
+  // 更新某条消息：按消息 id 定位并更新（用于流式增量）
   _updateMessage(sessionId, messageId, updater) {
     set((state) => ({
       sessions: state.sessions.map(s => {
@@ -488,7 +488,7 @@ export const useStore = create((set, get) => ({
     }))
   },
 
-  // ---------- 信息元提取：启动/中止（中文注释） ----------
+  // ---------- 信息元提取：启动/中止 ----------
   // 停止所有 pending 目标的提取；clear=true 时同时清除结果
   abortPendingInfons(clear = false) {
     const session = get().getCurrentSession()
@@ -507,7 +507,7 @@ export const useStore = create((set, get) => ({
         return { infonSessions: { ...state.infonSessions, [session.id]: { runs: nextRuns } } }
       })
     } else {
-      // 直接移除被中止的 pending 运行（中文注释）
+      // 直接移除被中止的 pending 运行
       const toAbort = new Set(runs.filter(r => r.targetType === 'pending' && r.status === 'running').map(r => r.id))
       set((state) => {
         const box = state.infonSessions?.[session.id]
@@ -518,7 +518,7 @@ export const useStore = create((set, get) => ({
     }
   },
 
-  // 单独中止某个 run（中文注释）
+  // 单独中止某个 run
   abortInfonRun(runId) {
     const session = get().getCurrentSession()
     if (!session) return
@@ -526,7 +526,7 @@ export const useStore = create((set, get) => ({
     const r = runs.find(x => x.id === runId)
     if (!r) return
     try { r.controller?.abort?.() } catch (_) {}
-    // 移除该 run（中文注释）
+    // 移除该 run
     set((state) => {
       const box = state.infonSessions?.[session.id]
       if (!box) return {}
@@ -535,7 +535,7 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  // 发送消息时处理 pending 信息元：清除所有 pending 任务，因为 message 任务将替代它们（中文注释）
+  // 发送消息时处理 pending 信息元：清除所有 pending 任务，因为 message 任务将替代它们
   clearAllPendingInfons() {
     const session = get().getCurrentSession()
     if (!session) return
@@ -558,20 +558,20 @@ export const useStore = create((set, get) => ({
     }
   },
 
-  // 启动基于 pending 输入的信息元提取（中文注释）
+  // 启动基于 pending 输入的信息元提取
   startPendingInfons(text, imageDataUrls) {
     const session = get().getCurrentSession()
     if (!session) return
-    // 输入为空不启动（中文注释）
+    // 输入为空不启动
     const t = (text || '').trim()
     const imgs = Array.isArray(imageDataUrls) ? imageDataUrls.filter(Boolean) : []
     if (!t && imgs.length === 0) return
 
-    // 计算哈希（中文注释）
+    // 计算哈希
     const textHash = t ? computeHashId(t) : null
     const imageHashes = imgs.map((u) => computeHashId(u))
 
-    // 文本：只有 hash 改变才重提；若改变则移除旧文本 pending 结果（中文注释）
+    // 文本：只有 hash 改变才重提；若改变则移除旧文本 pending 结果
     if (t) {
       if (textHash !== get().lastPendingTextHash) {
         // 先中止旧的 pending 文本 run，再移除
@@ -608,7 +608,7 @@ export const useStore = create((set, get) => ({
       })
     }
 
-    // 图片：新增只为新 hash 启动；移除消失的 hash 的 run（中文注释）
+    // 图片：新增只为新 hash 启动；移除消失的 hash 的 run
     // 中止并移除不再存在的图片 pending runs
     try {
       const box = get().infonSessions?.[session.id] || { runs: [] }
@@ -631,7 +631,7 @@ export const useStore = create((set, get) => ({
       return { infonSessions: { ...(state.infonSessions || {}), [session.id]: { runs: nextRuns } }, lastPendingImageHashes: imageHashes }
     })
 
-    // 启动新增图片的 run（中文注释）
+    // 启动新增图片的 run
     const existingHashes = new Set(((get().infonSessions?.[session.id]?.runs) || []).filter(r => r.targetType === 'pending' && r.modality === 'image').map(r => r._hash))
     imageHashes.forEach((h, idx) => {
       if (!existingHashes.has(h)) {
@@ -640,7 +640,7 @@ export const useStore = create((set, get) => ({
     })
   },
 
-  // 发送后基于消息 ID 启动信息元提取（中文注释）
+  // 发送后基于消息 ID 启动信息元提取
   startMessageInfons(messageId) {
     const session = get().getCurrentSession()
     if (!session) return
@@ -648,7 +648,7 @@ export const useStore = create((set, get) => ({
     if (!m) return
     const t = (m.content || '').trim()
     const imgs = Array.isArray(m.images) ? m.images.filter(Boolean) : []
-    // 先中止旧的该 message 的运行，再清理（中文注释）
+    // 先中止旧的该 message 的运行，再清理
     try {
       const runs = (get().infonSessions?.[session.id]?.runs) || []
       runs.forEach((r) => {
@@ -657,7 +657,7 @@ export const useStore = create((set, get) => ({
         }
       })
     } catch (_) {}
-    // 清理旧的该 message 的 runs（中文注释）
+    // 清理旧的该 message 的 runs
     set((state) => {
       const box = state.infonSessions?.[session.id] || { runs: [] }
       const nextRuns = box.runs.filter(r => r.targetType !== 'message' || r.targetKey !== messageId)
@@ -667,7 +667,7 @@ export const useStore = create((set, get) => ({
     if (imgs.length) imgs.forEach((dataUrl, idx) => get()._startImageInfonRun({ targetType: 'message', targetKey: messageId, dataUrl, imageIndex: idx }))
   },
 
-  // 内部：文本信息元提取（/v1/chat/completions）（中文注释）
+  // 内部：文本信息元提取（/v1/chat/completions）
   async _startTextInfonRun({ targetType, targetKey, text }) {
     const session = get().getCurrentSession()
     if (!session) return
@@ -743,7 +743,7 @@ export const useStore = create((set, get) => ({
           const sliced = extractFirstJSONObject(raw) || raw
           const { ok, value } = tryParseJSON(sliced)
           if (ok) {
-            // 计算当前对话轮次和信息元次序（中文注释）
+            // 计算当前对话轮次和信息元次序
             const sessionObj = get().getCurrentSession()
             const messageCount = (sessionObj?.messages || []).length
             const messageRound = Math.floor(messageCount / 2) + 1 // 每轮对话包含用户和助手消息
@@ -771,7 +771,7 @@ export const useStore = create((set, get) => ({
     }
   },
 
-  // 内部：图像信息元提取（/api/chat）（中文注释）
+  // 内部：图像信息元提取（/api/chat）
   async _startImageInfonRun({ targetType, targetKey, dataUrl, imageIndex, _hash }) {
     const session = get().getCurrentSession()
     if (!session) return
@@ -793,7 +793,7 @@ export const useStore = create((set, get) => ({
     }
     get()._appendInfonRun(session.id, run)
 
-    // 自定义提供商通常不支持图片（中文注释）
+    // 自定义提供商通常不支持图片
     const provider = get().customProviders?.[get().model]
     if (provider) {
       get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'error', error: 'Image messages are not supported for this model' }))
@@ -859,7 +859,7 @@ export const useStore = create((set, get) => ({
           const sliced = extractFirstJSONObject(raw) || raw
           const { ok, value } = tryParseJSON(sliced)
           if (ok) {
-            // 计算当前对话轮次和信息元次序（中文注释）
+            // 计算当前对话轮次和信息元次序
             const sessionObj = get().getCurrentSession()
             const messageCount = (sessionObj?.messages || []).length
             const messageRound = Math.floor(messageCount / 2) + 1 // 每轮对话包含用户和助手消息
@@ -887,14 +887,14 @@ export const useStore = create((set, get) => ({
     }
   },
 
-  // 发送消息（中文注释）：整合上下文，调用本地 OpenAI 兼容接口并流式追加助手回复
+  // 发送消息：整合上下文，调用本地 OpenAI 兼容接口并流式追加助手回复
   async sendMessage(text) {
     const state = get()
     state._ensureCurrentSession()
     const session = get().getCurrentSession()
     if (!session) return
 
-    // 如历史对话包含图片，则改走多模态 /api/chat，并将图片并入上下文（中文注释）
+    // 如历史对话包含图片，则改走多模态 /api/chat，并将图片并入上下文
     const hasHistoricalImages = (session.messages || []).some(m => Array.isArray(m.images) && m.images.length > 0)
     const provider = get().customProviders?.[get().model]
     if (hasHistoricalImages && !provider) {
@@ -916,24 +916,24 @@ export const useStore = create((set, get) => ({
       id: assistantMsgId,
       role: 'assistant',
       content: '',
-      reasoning: '', // 思考过程（中文注释）：与最终回复分开存储
+      reasoning: '', // 思考过程：与最终回复分开存储
       phase: 'thinking', // thinking -> answering -> done
       streaming: true,
       createdAt: Date.now(),
     })
 
-    // 组装上下文（中文注释）：将当前会话全部消息转换为 OpenAI Chat messages
+    // 组装上下文：将当前会话全部消息转换为 OpenAI Chat messages
     const payloadMessages = get().getCurrentSession().messages.map(m => ({
       role: m.role,
       content: m.content,
     }))
 
-    // 发起请求（中文注释）：使用 AbortController 以支持停止
+    // 发起请求：使用 AbortController 以支持停止
     const controller = new AbortController()
     set({ isGenerating: true, abortController: controller })
 
     try {
-      // 依据当前模型选择不同的基址与鉴权（中文注释）
+      // 依据当前模型选择不同的基址与鉴权
       const provider = get().customProviders?.[get().model]
       const baseUrl = provider ? provider.baseUrl : get().baseUrl
       const headers = { 'Content-Type': 'application/json' }
@@ -1015,7 +1015,7 @@ export const useStore = create((set, get) => ({
 
         if (finish) {
           get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, phase: 'done' }))
-          // 助手回复完成后，启动对助手消息的信息元提取（中文注释）
+          // 助手回复完成后，启动对助手消息的信息元提取
           try { get().startMessageInfons(assistantMsgId) } catch (_) {}
         }
       })
@@ -1028,18 +1028,18 @@ export const useStore = create((set, get) => ({
       set({ isGenerating: false, abortController: null })
     }
 
-    // 返回用户消息 ID（中文注释）：用于后续处理
+    // 返回用户消息 ID：用于后续处理
     return userMsgId
   },
 
-  // 发送带图片的多模态消息（中文注释）：调用 Ollama 原生 /api/chat，携带 images(base64) 并流式读取
+  // 发送带图片的多模态消息：调用 Ollama 原生 /api/chat，携带 images(base64) 并流式读取
   async sendMessageWithImages(text, imageDataUrls) {
     const state = get()
     state._ensureCurrentSession()
     const session = get().getCurrentSession()
     if (!session) return
 
-    // 写入用户消息（中文注释）：包含图片预览（data URL）
+    // 写入用户消息：包含图片预览（data URL）
     const userMsgId = generateId()
     const imgs = Array.isArray(imageDataUrls) ? imageDataUrls.filter(Boolean) : []
     get()._appendMessage(session.id, {
@@ -1050,7 +1050,7 @@ export const useStore = create((set, get) => ({
       createdAt: Date.now(),
     })
 
-    // 如果是自定义提供商，暂不支持图片（中文注释）：直接写入错误并返回
+    // 如果是自定义提供商，暂不支持图片：直接写入错误并返回
     const provider = get().customProviders?.[get().model]
     if (provider) {
       const assistantMsgId = generateId()
@@ -1079,7 +1079,7 @@ export const useStore = create((set, get) => ({
       createdAt: Date.now(),
     })
 
-    // 将历史消息转换为 Ollama /api/chat 的 messages（中文注释）：携带 images 时去掉 data: 前缀
+    // 将历史消息转换为 Ollama /api/chat 的 messages：携带 images 时去掉 data: 前缀
     const stripDataUrl = (s) => {
       if (typeof s !== 'string') return s
       const i = s.indexOf(',')
@@ -1101,7 +1101,7 @@ export const useStore = create((set, get) => ({
       return o
     })
 
-    // 计算 /api 基址（中文注释）：将 baseUrl 的 /v1 替换为 /api
+    // 计算 /api 基址：将 baseUrl 的 /v1 替换为 /api
     const apiBase = (get().baseUrl || '').replace(/\/?v1\/?$/, '/api')
 
     const controller = new AbortController()
@@ -1140,7 +1140,7 @@ export const useStore = create((set, get) => ({
         }
         if (finish) {
           get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, phase: 'done' }))
-          // 助手回复完成后，启动对助手消息的信息元提取（中文注释）
+          // 助手回复完成后，启动对助手消息的信息元提取
           try { get().startMessageInfons(assistantMsgId) } catch (_) {}
         }
       })
@@ -1152,18 +1152,18 @@ export const useStore = create((set, get) => ({
       set({ isGenerating: false, abortController: null })
     }
 
-    // 返回用户消息 ID（中文注释）
+    // 返回用户消息 ID
     return userMsgId
   },
 
-  // 停止生成（中文注释）：调用 AbortController 取消流
+  // 停止生成：调用 AbortController 取消流
   stopGenerating() {
     const { abortController } = get()
     try { abortController?.abort() } catch (_) { }
     set({ isGenerating: false, abortController: null })
   },
 
-  // 重新生成（中文注释）：删除最后一条助手消息并复用最后一条用户消息再次生成
+  // 重新生成：删除最后一条助手消息并复用最后一条用户消息再次生成
   async regenerateLast() {
     const session = get().getCurrentSession()
     if (!session) return
@@ -1174,7 +1174,7 @@ export const useStore = create((set, get) => ({
     const userIdx = session.messages.length - 1 - idxFromEnd
     const lastUser = session.messages[userIdx]
 
-    // 如果最后一条是助手，先移除（中文注释）：保持一问一答结构
+    // 如果最后一条是助手，先移除：保持一问一答结构
     set((state) => ({
       sessions: state.sessions.map(s => {
         if (s.id !== session.id) return s
