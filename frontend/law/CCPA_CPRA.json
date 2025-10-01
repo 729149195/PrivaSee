@@ -1,0 +1,202 @@
+{
+    "name": "美国《加州消费者隐私法》及《加州隐私权法》",
+    "value": 1,
+    "children": [
+      {
+        "name": "CCPA 第1798.140(v)(1)之11大类个人信息",
+        "value": 1,
+        "children": [
+          {
+            "name": "A 类：标识符（Identifiers）",
+            "value": 1,
+            "children": [
+              { "name": "真实姓名/别名", "value": 1 },
+              { "name": "邮政地址", "value": 1 },
+              { "name": "唯一个人标识符/在线标识符", "value": 1 },
+              { "name": "IP地址", "value": 1 },
+              { "name": "电子邮箱", "value": 1 },
+              { "name": "账户名/用户ID", "value": 1 },
+              { "name": "社会安全号（SSN）", "value": 1 },
+              { "name": "驾照号/州身份证号/护照号", "value": 1 }
+            ]
+          },
+          {
+            "name": "B 类：加州客户记录个人信息类别",
+            "value": 1,
+            "children": [
+              { "name": "姓名/签名", "value": 1 },
+              { "name": "SSN/驾驶证/州身份证/护照", "value": 1 },
+              { "name": "物理特征或描述（身高/体重等）", "value": 1 },
+              { "name": "地址/电话", "value": 1 },
+              { "name": "保险单号", "value": 1 },
+              { "name": "教育与就业信息（基本）", "value": 1 },
+              { "name": "银行账号/信用卡/借记卡号（不含安全码）", "value": 1 },
+              { "name": "其他财务信息/医疗信息/健康保险信息", "value": 1 }
+            ]
+          },
+          {
+            "name": "C 类：受保护分类特征（法律定义）",
+            "value": 1,
+            "children": [
+              { "name": "年龄（40岁及以上）", "value": 1 },
+              { "name": "种族/肤色/族裔/血统/国籍", "value": 1 },
+              { "name": "公民/移民身份", "value": 1 },
+              { "name": "宗教/信条", "value": 1 },
+              { "name": "婚姻状况", "value": 1 },
+              { "name": "医疗状况", "value": 1 },
+              { "name": "身体/精神残疾", "value": 1 },
+              { "name": "性别（性别认同/性别表达）", "value": 1 },
+              { "name": "性取向", "value": 1 },
+              { "name": "退伍军人/军人身份", "value": 1 },
+              { "name": "遗传信息", "value": 1 }
+            ]
+          },
+          {
+            "name": "D 类：商业信息（Commercial Information）",
+            "value": 1,
+            "children": [
+              { "name": "财产记录", "value": 1 },
+              { "name": "产品/服务购买或消费历史", "value": 1 },
+              { "name": "购买倾向/意向", "value": 1 }
+            ]
+          },
+          {
+            "name": "E 类：生物识别信息",
+            "value": 1,
+            "children": [
+              { "name": "指纹/掌纹/掌静脉", "value": 1 },
+              { "name": "面部识别模板", "value": 1 },
+              { "name": "声纹", "value": 1 },
+              { "name": "虹膜/视网膜", "value": 1 },
+              { "name": "DNA/遗传标识符", "value": 1 },
+              { "name": "打字节律/步态/脑电等模式", "value": 1 }
+            ]
+          },
+          {
+            "name": "F 类：互联网或其他电子网络活动信息",
+            "value": 1,
+            "children": [
+              { "name": "浏览历史/搜索历史", "value": 1 },
+              { "name": "与网站/应用/广告的交互", "value": 1 },
+              { "name": "日志/诊断/性能数据", "value": 1 }
+            ]
+          },
+          {
+            "name": "G 类：地理定位数据",
+            "value": 1,
+            "children": [
+              { "name": "精确地理位置", "value": 1 },
+              { "name": "移动轨迹", "value": 1 }
+            ]
+          },
+          {
+            "name": "H 类：感官数据",
+            "value": 1,
+            "children": [
+              { "name": "音频/语音记录", "value": 1 },
+              { "name": "电子/视觉/视频影像", "value": 1 },
+              { "name": "热成像/嗅觉/类似信息", "value": 1 }
+            ]
+          },
+          {
+            "name": "I 类：专业或就业相关信息",
+            "value": 1,
+            "children": [
+              { "name": "当前或过往就业历史", "value": 1 },
+              { "name": "职位/部门/工作地点", "value": 1 },
+              { "name": "绩效评估与记录", "value": 1 }
+            ]
+          },
+          {
+            "name": "J 类：非公开教育信息（FERPA）",
+            "value": 1,
+            "children": [
+              { "name": "学生记录/学籍", "value": 1 },
+              { "name": "成绩/成绩单/课程记录", "value": 1 },
+              { "name": "处分与出勤记录", "value": 1 }
+            ]
+          },
+          {
+            "name": "K 类：基于其他个人信息得出的推论",
+            "value": 1,
+            "children": [
+              { "name": "偏好/特征/心理趋势", "value": 1 },
+              { "name": "倾向/行为/态度/智能/能力", "value": 1 },
+              { "name": "画像与评分", "value": 1 }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "CPRA 定义的敏感个人信息（Sensitive PI）",
+        "value": 1,
+        "children": [
+          {
+            "name": "政府身份号码",
+            "value": 1,
+            "children": [
+              { "name": "社会安全号（SSN）", "value": 1 },
+              { "name": "驾照号/州身份证号", "value": 1 },
+              { "name": "护照号", "value": 1 }
+            ]
+          },
+          {
+            "name": "账户与凭证",
+            "value": 1,
+            "children": [
+              { "name": "账号/金融账号/银行卡号", "value": 1 },
+              { "name": "安全码/访问码/密码/凭证", "value": 1 }
+            ]
+          },
+          {
+            "name": "精确地理定位",
+            "value": 1,
+            "children": [
+              { "name": "精准坐标（通常≤1850英尺）", "value": 1 }
+            ]
+          },
+          {
+            "name": "受保护分类（敏感维度）",
+            "value": 1,
+            "children": [
+              { "name": "种族/族裔/出身", "value": 1 },
+              { "name": "公民/移民身份", "value": 1 },
+              { "name": "宗教或哲学信仰", "value": 1 },
+              { "name": "工会会员身份", "value": 1 }
+            ]
+          },
+          {
+            "name": "通信内容（企业非收件方）",
+            "value": 1,
+            "children": [
+              { "name": "邮件/电子邮件内容", "value": 1 },
+              { "name": "短信/聊天内容", "value": 1 }
+            ]
+          },
+          {
+            "name": "遗传与生物识别（用于识别）",
+            "value": 1,
+            "children": [
+              { "name": "遗传数据/DNA", "value": 1 },
+              { "name": "面部/指纹/虹膜/声纹等模板", "value": 1 }
+            ]
+          },
+          {
+            "name": "健康信息",
+            "value": 1,
+            "children": [
+              { "name": "身体或精神健康信息（非HIPAA覆盖也适用）", "value": 1 }
+            ]
+          },
+          {
+            "name": "性生活或性取向",
+            "value": 1,
+            "children": [
+              { "name": "性行为/取向相关信息", "value": 1 }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+  

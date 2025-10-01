@@ -1,0 +1,233 @@
+{
+    "name": "中国《个人信息保护法》",
+    "value": 1,
+    "children": [
+      {
+        "name": "一般个人信息",
+        "value": 1,
+        "children": [
+          {
+            "name": "身份标识与基础属性",
+            "value": 1,
+            "children": [
+              { "name": "姓名", "value": 1 },
+              { "name": "曾用名/别名", "value": 1 },
+              { "name": "性别", "value": 1 },
+              { "name": "出生日期/年龄", "value": 1 },
+              { "name": "国籍/地区", "value": 1 },
+              { "name": "民族", "value": 1 },
+              { "name": "头像/个人照片（非用于身份识别）", "value": 1 },
+              { "name": "户籍信息（省/市/区）", "value": 1 }
+            ]
+          },
+          {
+            "name": "联系方式与通信账号",
+            "value": 1,
+            "children": [
+              { "name": "手机号", "value": 1 },
+              { "name": "固定电话", "value": 1 },
+              { "name": "电子邮箱", "value": 1 },
+              { "name": "邮寄地址/邮编", "value": 1 },
+              { "name": "传真号", "value": 1 },
+              { "name": "即时通信账号（如微信/QQ/Skype）", "value": 1 },
+              { "name": "社交媒体账号/ID", "value": 1 },
+              { "name": "紧急联系人信息（姓名/关系/电话）", "value": 1 }
+            ]
+          },
+          {
+            "name": "设备与网络标识",
+            "value": 1,
+            "children": [
+              { "name": "设备型号/品牌", "value": 1 },
+              { "name": "操作系统/版本", "value": 1 },
+              { "name": "浏览器UA/版本", "value": 1 },
+              { "name": "屏幕分辨率/语言/时区", "value": 1 },
+              { "name": "IP地址（及粗略定位）", "value": 1 },
+              { "name": "Cookie/Session/ETag", "value": 1 },
+              { "name": "广告ID（IDFA/AAID）", "value": 1 },
+              { "name": "设备序列号/Android ID", "value": 1 },
+              { "name": "IMEI/IMSI/ICCID", "value": 1 },
+              { "name": "MAC地址", "value": 1 },
+              { "name": "运营商/网络类型", "value": 1 }
+            ]
+          },
+          {
+            "name": "网络行为与日志",
+            "value": 1,
+            "children": [
+              { "name": "浏览历史/页面停留时间", "value": 1 },
+              { "name": "搜索关键词", "value": 1 },
+              { "name": "点击流/引荐URL", "value": 1 },
+              { "name": "下载/上传记录", "value": 1 },
+              { "name": "App使用时长/功能使用记录", "value": 1 },
+              { "name": "崩溃/错误/诊断日志", "value": 1 },
+              { "name": "广告曝光/点击/转化记录", "value": 1 }
+            ]
+          },
+          {
+            "name": "内容与互动",
+            "value": 1,
+            "children": [
+              { "name": "文本内容（帖子/评论/私信摘要）", "value": 1 },
+              { "name": "图片/视频/音频（非生物识别用途）", "value": 1 },
+              { "name": "点赞/收藏/关注/转发记录", "value": 1 },
+              { "name": "群组/社区参与记录", "value": 1 }
+            ]
+          },
+          {
+            "name": "教育与职业",
+            "value": 1,
+            "children": [
+              { "name": "最高学历/学位", "value": 1 },
+              { "name": "毕业院校/专业/入学毕业时间", "value": 1 },
+              { "name": "资格证书/执业证书", "value": 1 },
+              { "name": "工作单位/部门/岗位/职级", "value": 1 },
+              { "name": "工作地点/工号", "value": 1 },
+              { "name": "简历/面试与测评结果（非心理健康）", "value": 1 }
+            ]
+          },
+          {
+            "name": "财产交易与订单",
+            "value": 1,
+            "children": [
+              { "name": "订单编号/商品服务信息", "value": 1 },
+              { "name": "交易金额/币种/时间", "value": 1 },
+              { "name": "支付方式（不含账号与密码）", "value": 1 },
+              { "name": "发票抬头/税票信息", "value": 1 },
+              { "name": "收货人姓名/电话/地址", "value": 1 },
+              { "name": "物流单号/配送记录", "value": 1 },
+              { "name": "售后/退款/维权记录", "value": 1 },
+              { "name": "会员等级/积分/优惠券", "value": 1 }
+            ]
+          },
+          {
+            "name": "资产与持有物",
+            "value": 1,
+            "children": [
+              { "name": "车辆信息（车牌号/VIN/车型）", "value": 1 },
+              { "name": "房产信息（地址/面积/用途）", "value": 1 },
+              { "name": "保险单（非健康/账户凭证）", "value": 1 }
+            ]
+          },
+          {
+            "name": "家庭与社会关系",
+            "value": 1,
+            "children": [
+              { "name": "婚姻/配偶信息", "value": 1 },
+              { "name": "子女/父母信息", "value": 1 },
+              { "name": "亲属/监护/紧急联系人关系", "value": 1 }
+            ]
+          },
+          {
+            "name": "政务与税务（一般项）",
+            "value": 1,
+            "children": [
+              { "name": "居住证/居住地备案信息", "value": 1 },
+              { "name": "一般纳税信息（不含账号凭证）", "value": 1 },
+              { "name": "社保参保类型与缴费区间（概况）", "value": 1 }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "敏感个人信息（PIPL第28条及外延）",
+        "value": 1,
+        "children": [
+          {
+            "name": "生物识别",
+            "value": 1,
+            "children": [
+              { "name": "人脸特征模板/3D人脸/活体检测数据", "value": 1 },
+              { "name": "指纹/掌纹/静脉", "value": 1 },
+              { "name": "虹膜/视网膜", "value": 1 },
+              { "name": "声纹", "value": 1 },
+              { "name": "步态/耳廓/手势等其他可识别模板", "value": 1 },
+              { "name": "DNA/遗传标识符", "value": 1 }
+            ]
+          },
+          {
+            "name": "医疗健康",
+            "value": 1,
+            "children": [
+              { "name": "病历/诊断/治疗记录/处方", "value": 1 },
+              { "name": "体检/检验/影像报告", "value": 1 },
+              { "name": "残疾信息/病史/手术史", "value": 1 },
+              { "name": "生理与生命体征（心率/血压/血糖/睡眠/步数）", "value": 1 },
+              { "name": "遗传/家族病史", "value": 1 },
+              { "name": "健康码/疫苗接种记录", "value": 1 }
+            ]
+          },
+          {
+            "name": "金融账户与支付凭证",
+            "value": 1,
+            "children": [
+              { "name": "银行账号/开户行", "value": 1 },
+              { "name": "支付账户（第三方支付ID）", "value": 1 },
+              { "name": "银行卡号/有效期/CVV", "value": 1 },
+              { "name": "交易认证要素（短信验证码/动态口令）", "value": 1 },
+              { "name": "支付密码/电子钱包密钥/令牌", "value": 1 },
+              { "name": "银行预留手机号", "value": 1 }
+            ]
+          },
+          {
+            "name": "行踪轨迹与精准定位",
+            "value": 1,
+            "children": [
+              { "name": "实时GPS坐标", "value": 1 },
+              { "name": "历史位置轨迹/出行行程", "value": 1 },
+              { "name": "通行记录（门禁/道闸/打卡）", "value": 1 },
+              { "name": "打车/乘机/乘车行程", "value": 1 },
+              { "name": "Wi-Fi/蓝牙扫描附近设备记录", "value": 1 }
+            ]
+          },
+          {
+            "name": "宗教信仰",
+            "value": 1,
+            "children": [
+              { "name": "宗教信仰类别", "value": 1 },
+              { "name": "宗教活动参与记录", "value": 1 }
+            ]
+          },
+          {
+            "name": "特定身份信息（易致歧视/严重影响权益）",
+            "value": 1,
+            "children": [
+              { "name": "政府签发身份号码（身份证/护照/军官证等）", "value": 1 },
+              { "name": "社会保障/医保/公积金账号", "value": 1 },
+              { "name": "纳税人识别号/个税账户", "value": 1 }
+            ]
+          },
+          {
+            "name": "未满14周岁未成年人信息（主体维度）",
+            "value": 1,
+            "children": [
+              { "name": "儿童身份标识（姓名/证件）", "value": 1 },
+              { "name": "监护人信息（姓名/关系/联系方式）", "value": 1 },
+              { "name": "在校信息（学校/班级/学籍）", "value": 1 },
+              { "name": "上网记录与设备信息", "value": 1 },
+              { "name": "位置安全与接送行程", "value": 1 },
+              { "name": "照片/视频/作品与测评", "value": 1 }
+            ]
+          },
+          {
+            "name": "违法犯罪与司法记录（高风险）",
+            "value": 1,
+            "children": [
+              { "name": "刑事定罪/嫌疑/侦查记录", "value": 1 },
+              { "name": "行政处罚/失信记录", "value": 1 },
+              { "name": "诉讼/仲裁/判决信息", "value": 1 }
+            ]
+          },
+          {
+            "name": "账户认证与通信内容（高风险）",
+            "value": 1,
+            "children": [
+              { "name": "账号密码/密保问题/密钥/令牌", "value": 1 },
+              { "name": "通话录音/聊天内容/邮件正文", "value": 1 }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+  

@@ -5,6 +5,7 @@ import MarkdownMessage from './MarkdownMessage'
 import { Splitter, Select, Button, Upload, Progress, Spin, Input, Modal } from 'antd'
 import { SendOutlined, StopOutlined, CameraOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import FishboneInfons from './FishboneInfons'
+import LawTree from './LawTree'
 import HighlightInput from './HighlightInput'
 
 // 连线组件（中文注释）：根据关系信息元画连线连接标签和高亮文本
@@ -949,6 +950,8 @@ export default function AgentPage() {
                   <div className={styles.rightPaneTitle}>Privacy inference</div>
                 </div>
                 <div className={styles.rightPaneBody}>
+                  {/* 法规 treemap 可视化（中文注释） */}
+                  <LawTree />
                   {/* 鱼骨图置顶（中文注释） */}
                   <FishboneInfons />
                   <div className={styles.infonRuns}>
