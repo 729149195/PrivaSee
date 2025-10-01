@@ -21,6 +21,8 @@
     white-space: pre-wrap;
     word-break: break-word;
     resize: none;
+    /* 强制左对齐，避免从父容器继承为居中（中文注释） */
+    text-align: left;
 }
 
 .editor:empty:before {
