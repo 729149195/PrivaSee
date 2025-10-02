@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import * as d3 from 'd3'
 
 const LAWS = [
-  { key: 'GDPR', label: 'GDPR', file: './law/GDPR.json' },
   { key: 'PIPL', label: 'PIPL', file: './law/PIPL.json' },
+  { key: 'GDPR', label: 'GDPR', file: './law/GDPR.json' },
   { key: 'CCPA_CPRA', label: 'CCPA/CPRA', file: './law/CCPA_CPRA.json' },
 ]
 

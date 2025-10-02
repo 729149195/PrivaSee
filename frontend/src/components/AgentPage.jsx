@@ -514,8 +514,7 @@ export default function AgentPage() {
     setInput('')
     setSelectedImages([])
     
-    // 清空 pending 状态（中文注释）
-    try { clearAllPendingInfons?.() } catch (_) {}
+    // 不再清空 pending：让已完成的提取被采纳到本条消息（中文注释）
     
     if (hasImages) {
       const userId = await useStore.getState().sendMessageWithImages(text, imgs)
@@ -542,8 +541,7 @@ export default function AgentPage() {
     setLandingInput('')
     setSelectedImages([])
     
-    // 清空 pending 状态（中文注释）
-    try { clearAllPendingInfons?.() } catch (_) {}
+    // 不再清空 pending：让已完成的提取被采纳到本条消息（中文注释）
     
     if (hasImages) {
       const userId = await useStore.getState().sendMessageWithImages(text, imgs)

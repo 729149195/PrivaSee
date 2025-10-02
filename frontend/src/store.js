@@ -687,7 +687,15 @@ export const useStore = create((set, get) => ({
     }
     get()._appendInfonRun(session.id, run)
 
-    const provider = get().customProviders?.[get().model]
+    // 文本信息元提取强制使用 DeepSeek 提供商（中文注释）：与 AgentPage 示例一致
+    const deepseekId = 'deepseek-chat'
+    let provider = get().customProviders?.[deepseekId]
+    if (!provider) {
+      try {
+        get().addApiModel?.({ id: deepseekId, baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
+      } catch (_) { }
+      provider = get().customProviders?.[deepseekId]
+    }
     const baseUrl = provider ? provider.baseUrl : get().baseUrl
     const headers = { 'Content-Type': 'application/json' }
     if (provider?.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`
@@ -706,7 +714,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ model: get().model, messages, temperature: 0, stream: true }),
+        body: JSON.stringify({ model: deepseekId, messages, temperature: 0, stream: true }),
         signal: controller.signal,
       })
       if (!res.ok) {
