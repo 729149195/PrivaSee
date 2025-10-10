@@ -154,7 +154,9 @@ export default function Timeline({ onTimeSelect }) {
     return (
       <div className={styles.timelineWrapper}>
         <div className={styles.timelineTitle}>Timeline</div>
-        <div className={styles.timelineEmpty}>No timeline data</div>
+        <div className={styles.timelineRoot}>
+          <div className={styles.timelineEmpty}>No timeline data</div>
+        </div>
       </div>
     )
   }
@@ -170,7 +172,6 @@ export default function Timeline({ onTimeSelect }) {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
-        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
       >
         <div className={styles.timelineContainer}>
           <div className={styles.timelineLine} />

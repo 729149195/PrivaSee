@@ -60,7 +60,7 @@ export default function PrivacyRiskAnalysis({
                 key={idx} 
                 className={styles.riskItem}
                 style={{ 
-                  marginBottom: 12, 
+                  marginTop: 6, 
                   padding: 12, 
                   borderRadius: 8, 
                   background: 'var(--color-bg-tertiary)',

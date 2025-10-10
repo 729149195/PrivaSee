@@ -16,10 +16,10 @@
 /* 时间线根容器 */
 .timelineRoot {
   width: 100%;
-  padding: 8px 12px;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.5), rgba(249, 250, 251, 0.8));
-  border-radius: 8px;
-  transition: background 0.2s ease;
+  padding: 8px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--border-radius-md);
+  border: 1px dashed var(--color-border-light);
   animation: timelineRootFadeIn 0.4s ease-out;
   overflow-x: auto;
   overflow-y: hidden;
@@ -55,16 +55,13 @@
   }
 }
 
-.timelineRoot:hover {
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.7), rgba(249, 250, 251, 0.9));
-}
 
 /* 时间线空状态 */
 .timelineEmpty {
   padding: 12px;
   text-align: center;
-  font-size: 12px;
-  color: #9ca3af;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
   font-style: italic;
 }
 
@@ -83,7 +80,8 @@
   position: absolute;
   left: 12px;
   right: 12px;
-  top: 18px;
+  top: 50%;
+  transform: translateY(-50%);
   height: 2px;
   background: linear-gradient(to right, #e5e7eb 0%, #9ca3af 50%, #e5e7eb 100%);
   border-radius: 1px;
@@ -116,7 +114,7 @@
 .timelineNodes {
   display: flex;
   justify-content: flex-start;
-  align-items: flex-start;
+  align-items: center;
   width: 100%;
   gap: 40px;
   z-index: 1;
@@ -157,9 +155,6 @@
   }
 }
 
-.timelineNode:hover {
-  background: rgba(59, 130, 246, 0.05);
-}
 
 .timelineNodeActive {
   background: transparent;
@@ -213,22 +208,12 @@
   }
 }
 
-.timelineNode:hover .timelineDot {
-  border-color: #3b82f6;
-  transform: scale(1.1);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-}
-
 /* 圆点中心显示的数量 */
 .timelineDotCount {
   font-size: 11px;
   font-weight: 600;
   color: #4b5563;
   transition: all 0.2s ease;
-}
-
-.timelineNode:hover .timelineDotCount {
-  color: #3b82f6;
 }
 
 /* 时间标签 */
