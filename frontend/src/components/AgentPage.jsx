@@ -1004,12 +1004,12 @@ export default function AgentPage() {
                   <WordCloud selectedTime={selectedTime} />
                   <div style={{ marginBottom: 16 }}>
                     <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 8, paddingLeft: 4 }}>
-                      Inference Results
+                      Infons Results
                     </div>
                     <div className={styles.infonRuns}>
                       {(() => {
                         const runs = (infonSessions?.[currentSession?.id]?.runs) || []
-                        if (!runs.length) return <div className={styles.infonEmpty}>No inference yet</div>
+                        if (!runs.length) return <div className={styles.infonEmpty}>No infons yet</div>
                       const sorted = [...runs].sort((a, b) => b.createdAt - a.createdAt)
                       return sorted.map((r) => {
                         const title = r.modality === 'text' ? 'Text' : `Image${Number.isFinite(r.imageIndex) ? ` #${r.imageIndex + 1}` : ''}`

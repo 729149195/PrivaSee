@@ -1039,7 +1039,8 @@ export const useStore = create((set, get) => ({
         if (finish) {
           get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, phase: 'done' }))
           // 助手回复完成后，启动对助手消息的信息元提取
-          try { get().startMessageInfons(assistantMsgId) } catch (_) {}
+          // 已禁用对模型回复的信息元提取
+          // try { get().startMessageInfons(assistantMsgId) } catch (_) {}
         }
       })
 
@@ -1164,7 +1165,8 @@ export const useStore = create((set, get) => ({
         if (finish) {
           get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, phase: 'done' }))
           // 助手回复完成后，启动对助手消息的信息元提取
-          try { get().startMessageInfons(assistantMsgId) } catch (_) {}
+          // 已禁用对模型回复的信息元提取
+          // try { get().startMessageInfons(assistantMsgId) } catch (_) {}
         }
       })
 

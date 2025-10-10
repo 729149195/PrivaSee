@@ -54,14 +54,13 @@ export default function PrivacyRiskAnalysis({
             Inference Results ({inference.risks.length} risk{inference.risks.length > 1 ? 's' : ''})
             {inference.status === 'running' && <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--color-accent-primary)' }}>● Analyzing...</span>}
           </summary>
-          <div className={styles.wordCloudDetailsContent} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <div className={styles.wordCloudDetailsContent} style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {inference.risks.map((risk, idx) => (
               <div 
                 key={idx} 
                 className={styles.riskItem}
                 style={{ 
-                  flex: '0 0 calc(50% - 4px)',
-                  marginTop: 6, 
+                  flex: '0 0 calc(50% - 3px)',
                   padding: 12, 
                   borderRadius: 8, 
                   background: 'var(--color-bg-tertiary)',
@@ -79,27 +78,12 @@ export default function PrivacyRiskAnalysis({
                   }}>
                     {risk.risk_level}
                   </span>
-                  {risk.inference_type && (
-                    <span style={{ 
-                      fontSize: 9, 
-                      fontWeight: 600, 
-                      padding: '2px 6px', 
-                      borderRadius: 4,
-                      background: risk.inference_type === 'IMPLICIT' ? '#8b5cf6' : risk.inference_type === 'CONTEXTUAL' ? '#06b6d4' : '#64748b',
-                      color: '#fff'
-                    }}>
-                      {risk.inference_type}
-                    </span>
-                  )}
                   <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
                     Confidence: {(risk.confidence * 100).toFixed(0)}%
                   </span>
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 4 }}>
                   {risk.law_node_name}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginBottom: 4 }}>
-                  Path: {risk.law_path}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--color-text-primary)', marginBottom: 6 }}>
                   {risk.privacy_exposure}
