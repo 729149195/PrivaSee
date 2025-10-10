@@ -221,9 +221,10 @@ export default function LawTree() {
     // 初始焦点
     let focus = root
 
-    // SVG 容器
+    // SVG 容器（增加边距以避免边框被裁剪）
+    const margin = 4 // 边框留白
     svg
-      .attr('viewBox', `0 0 ${width} ${height}`)
+      .attr('viewBox', `${-margin} ${-margin} ${width + margin * 2} ${height + margin * 2}`)
       .attr('width', '100%')
       .attr('height', height)
       .attr('preserveAspectRatio', 'none')
@@ -274,9 +275,10 @@ export default function LawTree() {
         // 有风险的节点边框加粗（中文注释）
         const nodeName = d.data.name
         const risk = riskMap.get(nodeName)
-        return risk ? 2 : 1.25
+        return risk ? 1.5 : 0.75
       })
-      .attr('shape-rendering', 'crispEdges')
+      .attr('shape-rendering', 'geometricPrecision')
+      .attr('vector-effect', 'non-scaling-stroke')
       .attr('cursor', 'pointer')
       .on('click', (event, d) => {
         event.stopPropagation()
