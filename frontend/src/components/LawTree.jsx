@@ -257,26 +257,13 @@ export default function LawTree() {
         const risk = riskMap.get(nodeName)
         if (risk) {
           const color = getRiskColor(risk.level)
-          return color ? `${color}20` : 'transparent' // 20% 透明度
+          return color ? `${color}cc` : 'transparent' // 80% 不透明度，更显眼的填充高亮
         }
         return 'transparent'
       })
       .style('pointer-events', 'all')    // ← 明确允许接收点击/hover
-      .attr('stroke', d => {
-        // 根据风险等级设置边框颜色（中文注释）
-        const nodeName = d.data.name
-        const risk = riskMap.get(nodeName)
-        if (risk) {
-          return getRiskColor(risk.level)
-        }
-        return strokeColor
-      })
-      .attr('stroke-width', d => {
-        // 有风险的节点边框加粗（中文注释）
-        const nodeName = d.data.name
-        const risk = riskMap.get(nodeName)
-        return risk ? 1.5 : 0.75
-      })
+      .attr('stroke', strokeColor)  // 统一使用默认边框颜色
+      .attr('stroke-width', 0.75)   // 统一边框宽度
       .attr('shape-rendering', 'geometricPrecision')
       .attr('vector-effect', 'non-scaling-stroke')
       .attr('cursor', 'pointer')

@@ -990,8 +990,6 @@ export default function AgentPage() {
                 <div className={styles.rightPaneBody}>
                   {/* 法规 treemap 可视化（中文注释） */}
                   <LawTree />
-                  {/* 时间线组件（中文注释）：用于按时间筛选信息元 */}
-                  <Timeline onTimeSelect={setSelectedTime} />
                   {/* 隐私风险分析组件（中文注释） */}
                   <PrivacyRiskAnalysis
                     inference={inference}
@@ -1000,6 +998,8 @@ export default function AgentPage() {
                     startPrivacyInference={startPrivacyInference}
                     abortPrivacyInference={abortPrivacyInference}
                   />
+                  {/* 时间线组件（中文注释）：用于按时间筛选信息元 */}
+                  <Timeline onTimeSelect={setSelectedTime} />
                   {/* 信息元词云可视化（中文注释） */}
                   <WordCloud selectedTime={selectedTime} />
                   <div style={{ marginBottom: 16 }}>
