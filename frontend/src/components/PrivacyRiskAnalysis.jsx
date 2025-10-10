@@ -54,12 +54,13 @@ export default function PrivacyRiskAnalysis({
             Inference Results ({inference.risks.length} risk{inference.risks.length > 1 ? 's' : ''})
             {inference.status === 'running' && <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--color-accent-primary)' }}>● Analyzing...</span>}
           </summary>
-          <div className={styles.wordCloudDetailsContent}>
+          <div className={styles.wordCloudDetailsContent} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {inference.risks.map((risk, idx) => (
               <div 
                 key={idx} 
                 className={styles.riskItem}
                 style={{ 
+                  flex: '0 0 calc(50% - 4px)',
                   marginTop: 6, 
                   padding: 12, 
                   borderRadius: 8, 
