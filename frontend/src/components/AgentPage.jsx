@@ -4,7 +4,7 @@ import styles from './AgentPage.module.css'
 import MarkdownMessage from './MarkdownMessage'
 import { Splitter, Select, Button, Upload, Progress, Spin, Input, Modal } from 'antd'
 import { SendOutlined, StopOutlined, CameraOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
-import FishboneInfons from './FishboneInfons'
+import WordCloud from './WordCloud'
 import LawTree from './LawTree'
 import HighlightInput from './HighlightInput'
 
@@ -514,8 +514,6 @@ export default function AgentPage() {
     setInput('')
     setSelectedImages([])
     
-    // 不再清空 pending：让已完成的提取被采纳到本条消息（中文注释）
-    
     if (hasImages) {
       const userId = await useStore.getState().sendMessageWithImages(text, imgs)
       try {
@@ -529,6 +527,11 @@ export default function AgentPage() {
         if (!adopted) startMessageInfons?.(userId)
       } catch (_) {}
     }
+    
+    // 发送后立即清空 pending 信息元，移除关系标签显示（中文注释）
+    try {
+      clearAllPendingInfons?.()
+    } catch (_) {}
   }
 
   const handleLandingSend = async () => {
@@ -541,8 +544,6 @@ export default function AgentPage() {
     setLandingInput('')
     setSelectedImages([])
     
-    // 不再清空 pending：让已完成的提取被采纳到本条消息（中文注释）
-    
     if (hasImages) {
       const userId = await useStore.getState().sendMessageWithImages(text, imgs)
       try {
@@ -556,6 +557,11 @@ export default function AgentPage() {
         if (!adopted) startMessageInfons?.(userId)
       } catch (_) {}
     }
+    
+    // 发送后立即清空 pending 信息元，移除关系标签显示（中文注释）
+    try {
+      clearAllPendingInfons?.()
+    } catch (_) {}
   }
 
   // 处理图片选择（中文注释）：将文件读取为 data URL 后加入队列
@@ -950,8 +956,8 @@ export default function AgentPage() {
                 <div className={styles.rightPaneBody}>
                   {/* 法规 treemap 可视化（中文注释） */}
                   <LawTree />
-                  {/* 鱼骨图置顶（中文注释） */}
-                  <FishboneInfons />
+                  {/* 信息元词云可视化（中文注释） */}
+                  <WordCloud />
                   <div className={styles.infonRuns}>
                     {(() => {
                       const runs = (infonSessions?.[currentSession?.id]?.runs) || []
@@ -980,14 +986,17 @@ export default function AgentPage() {
                               <div className={styles.infonError}>{r.error}</div>
                             ) : null}
                             {allInfons.length > 0 ? (
-                              <div className={styles.infonJsonList}>
-                                {allInfons.map((infon, idx) => (
-                                  <div key={idx} className={styles.infonItem}>
-                                    <div className={styles.infonType}>{infon.infon_type || 'Unknown'}</div>
-                                    <pre className={styles.infonJsonCode}>{JSON.stringify(infon, null, 2)}</pre>
-                                  </div>
-                                ))}
-                              </div>
+                              <details className={styles.infonDetails}>
+                                <summary className={styles.infonDetailsSummary}>Infons ({allInfons.length})</summary>
+                                <div className={styles.infonJsonList}>
+                                  {allInfons.map((infon, idx) => (
+                                    <div key={idx} className={styles.infonItem}>
+                                      <div className={styles.infonType}>{infon.infon_type || 'Unknown'}</div>
+                                      <pre className={styles.infonJsonCode}>{JSON.stringify(infon, null, 2)}</pre>
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
                             ) : null}
                             <details className={styles.infonDetails}>
                               <summary className={styles.infonDetailsSummary}>Raw stream</summary>
