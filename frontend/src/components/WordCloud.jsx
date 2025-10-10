@@ -721,7 +721,7 @@ export default function WordCloud({ selectedTime = null }) {
 
   return (
     <div ref={containerRef} style={{ marginBottom: '12px' }}>
-      <div className={styles.wordCloudTitle}>Information Element Word Cloud</div>
+      <div className={styles.wordCloudTitle}>infons Cloud</div>
       <div className={styles.wordCloudRoot}>
         {wordData.length === 0 ? (
           <div className={styles.infonEmpty} style={{ padding: '20px', textAlign: 'center' }}>No inference yet</div>
