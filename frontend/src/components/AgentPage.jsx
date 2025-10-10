@@ -6,6 +6,7 @@ import { Splitter, Select, Button, Upload, Progress, Spin, Input, Modal } from '
 import { SendOutlined, StopOutlined, CameraOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import WordCloud from './WordCloud'
 import LawTree from './LawTree'
+import Timeline from './Timeline'
 import HighlightInput from './HighlightInput'
 
 // 连线组件（中文注释）：根据关系信息元画连线连接标签和高亮文本
@@ -182,8 +183,13 @@ export default function AgentPage() {
   const pendingTimerRef = useRef(null)
   // 图片预览 Modal（中文注释）
   const [previewImage, setPreviewImage] = useState(null)
-
-
+  // 时间线选中的时间（中文注释）：用于筛选 WordCloud 中的信息元
+  const [selectedTime, setSelectedTime] = useState(null)
+  
+  // 会话切换时重置时间选择（中文注释）
+  useEffect(() => {
+    setSelectedTime(null)
+  }, [currentSessionId])
 
   // 默认注册 DeepSeek 示例（中文注释）：仅添加一次，已存在则跳过
   useEffect(() => {
@@ -956,8 +962,10 @@ export default function AgentPage() {
                 <div className={styles.rightPaneBody}>
                   {/* 法规 treemap 可视化（中文注释） */}
                   <LawTree />
+                  {/* 时间线组件（中文注释）：用于按时间筛选信息元 */}
+                  <Timeline onTimeSelect={setSelectedTime} />
                   {/* 信息元词云可视化（中文注释） */}
-                  <WordCloud />
+                  <WordCloud selectedTime={selectedTime} />
                   <div className={styles.infonRuns}>
                     {(() => {
                       const runs = (infonSessions?.[currentSession?.id]?.runs) || []

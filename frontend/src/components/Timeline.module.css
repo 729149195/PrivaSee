@@ -1,0 +1,263 @@
+/* 时间线根容器 */
+.timelineRoot {
+  width: 100%;
+  padding: 16px 20px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.5), rgba(249, 250, 251, 0.8));
+  border-radius: 8px;
+  margin-bottom: 16px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  animation: timelineRootFadeIn 0.4s ease-out;
+}
+
+@keyframes timelineRootFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.timelineRoot:hover {
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.7), rgba(249, 250, 251, 0.9));
+}
+
+/* 时间线头部 */
+.timelineHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  gap: 12px;
+}
+
+.timelineTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  letter-spacing: 0.02em;
+}
+
+.timelineHint {
+  font-size: 12px;
+  color: #6b7280;
+  font-style: italic;
+}
+
+/* 时间线容器 */
+.timelineContainer {
+  position: relative;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+}
+
+/* 时间线主线 */
+.timelineLine {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 2px;
+  background: linear-gradient(to right, #e5e7eb 0%, #9ca3af 50%, #e5e7eb 100%);
+  border-radius: 1px;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* 时间线流动效果 */
+.timelineLine::after {
+  content: '';
+  position: absolute;
+  left: -100%;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(to right, transparent, rgba(59, 130, 246, 0.4), transparent);
+  animation: timelineFlow 3s ease-in-out infinite;
+}
+
+@keyframes timelineFlow {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 200%;
+  }
+}
+
+/* 时间节点容器 */
+.timelineNodes {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
+  z-index: 1;
+}
+
+/* 时间节点 */
+.timelineNode {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 4px 8px;
+  border-radius: 6px;
+  min-width: 60px;
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* 新节点流式显示动画 */
+.timelineNodeNew {
+  animation: timelineNodeFadeIn 0.5s ease-out;
+}
+
+@keyframes timelineNodeFadeIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.5) translateY(-10px);
+  }
+  50% {
+    transform: scale(1.1) translateY(-2px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.timelineNode:hover {
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.timelineNodeActive {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.timelineNodeActive .timelineDot {
+  width: 20px;
+  height: 20px;
+  background: #3b82f6;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+}
+
+.timelineNodeActive .timelineDotInner {
+  background: white;
+}
+
+.timelineNodeActive .timelineLabelTime {
+  color: #3b82f6;
+  font-weight: 700;
+}
+
+/* 时间点圆点 */
+.timelineDot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid #9ca3af;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 新节点的圆点脉冲效果 */
+.timelineNodeNew .timelineDot {
+  animation: timelineDotPulse 0.6s ease-out;
+}
+
+@keyframes timelineDotPulse {
+  0%, 100% {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+}
+
+.timelineNode:hover .timelineDot {
+  border-color: #3b82f6;
+  transform: scale(1.2);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.timelineDotInner {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9ca3af;
+  transition: all 0.2s ease;
+}
+
+.timelineNode:hover .timelineDotInner {
+  background: #3b82f6;
+}
+
+/* 时间标签 */
+.timelineLabel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+  opacity: 1;
+}
+
+/* 新节点的标签延迟淡入 */
+.timelineNodeNew .timelineLabel {
+  animation: timelineLabelFadeIn 0.4s ease-out 0.2s both;
+}
+
+@keyframes timelineLabelFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.timelineLabelTime {
+  font-size: 11px;
+  color: #4b5563;
+  font-weight: 500;
+  white-space: nowrap;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.timelineLabelCount {
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: 600;
+  padding: 1px 6px;
+  background: rgba(156, 163, 175, 0.1);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.timelineNode:hover .timelineLabelCount {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.timelineNodeActive .timelineLabelCount {
+  background: rgba(59, 130, 246, 0.2);
+  color: #3b82f6;
+}
+

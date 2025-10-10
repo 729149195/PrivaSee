@@ -4,7 +4,7 @@ import styles from './AgentPage.module.css'
 import * as d3 from 'd3'
 
 // 信息元词云可视化（中文注释）：使用 D3 力导向布局 + 词云算法
-export default function WordCloud() {
+export default function WordCloud({ selectedTime = null }) {
   const { getCurrentSession, infonSessions } = useStore()
   const session = getCurrentSession()
   const runs = useMemo(() => (session ? (infonSessions?.[session.id]?.runs || []) : []), [session, infonSessions])
@@ -76,7 +76,7 @@ export default function WordCloud() {
     return t || 'Unknown'
   }
 
-  // 从所有 runs 中提取信息元数据（中文注释）：过滤 SIT，保留 REL 作为节点
+  // 从所有 runs 中提取信息元数据（中文注释）：过滤 SIT，保留 REL 作为节点，支持时间筛选
   const { wordData, relations, infonMap } = useMemo(() => {
     const allInfons = []
     const relationInfons = []
@@ -93,6 +93,11 @@ export default function WordCloud() {
         // 保存到 iid 映射表（中文注释）
         if (iid) {
           infonById.set(iid, infon)
+        }
+        
+        // 时间筛选（中文注释）：如果选择了时间，只显示该时间的信息元
+        if (selectedTime !== null && infon.record_time !== selectedTime) {
+          return
         }
         
         // 过滤掉 SIT（中文注释）
@@ -166,7 +171,7 @@ export default function WordCloud() {
       relations: relationInfons,
       infonMap: infonById
     }
-  }, [runs])
+  }, [runs, selectedTime])
 
   // D3 词云布局与渲染（中文注释）
   useEffect(() => {
