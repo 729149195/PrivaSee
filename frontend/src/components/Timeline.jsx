@@ -14,6 +14,12 @@ export default function Timeline({ onTimeSelect }) {
   // 保存已显示的时间节点（中文注释）：用于流式显示
   const displayedTimesRef = useRef(new Set())
   
+  // 拖拽状态（中文注释）
+  const [isDragging, setIsDragging] = useState(false)
+  const [scrollLeft, setScrollLeft] = useState(0)
+  const [startX, setStartX] = useState(0)
+  const containerRef = useRef(null)
+  
   // 会话切换时清空已显示的时间节点（中文注释）
   useEffect(() => {
     displayedTimesRef.current.clear()
@@ -99,58 +105,98 @@ export default function Timeline({ onTimeSelect }) {
     }
   }
   
-  // 格式化时间显示（中文注释）
+  // 拖拽事件处理（中文注释）
+  const handleMouseDown = (e) => {
+    if (!containerRef.current) return
+    setIsDragging(true)
+    setStartX(e.pageX - containerRef.current.offsetLeft)
+    setScrollLeft(containerRef.current.scrollLeft)
+  }
+
+  const handleMouseMove = (e) => {
+    if (!isDragging || !containerRef.current) return
+    e.preventDefault()
+    const x = e.pageX - containerRef.current.offsetLeft
+    const walk = (x - startX) * 2 // 拖拽速度倍数
+    containerRef.current.scrollLeft = scrollLeft - walk
+  }
+
+  const handleMouseUp = () => {
+    setIsDragging(false)
+  }
+
+  const handleMouseLeave = () => {
+    setIsDragging(false)
+  }
+  
+  // 格式化时间显示（中文注释）：返回 { date, time } 对象
   const formatTime = (time) => {
-    const date = new Date(time)
-    if (!isNaN(date.getTime())) {
-      // 是有效的日期，格式化为简洁形式
-      return date.toLocaleDateString('zh-CN', { 
+    const dateObj = new Date(time)
+    if (!isNaN(dateObj.getTime())) {
+      // 是有效的日期，分别格式化日期和时间
+      const date = dateObj.toLocaleDateString('zh-CN', { 
         month: 'short', 
-        day: 'numeric',
+        day: 'numeric'
+      })
+      const timeStr = dateObj.toLocaleTimeString('zh-CN', {
         hour: '2-digit',
         minute: '2-digit'
       })
+      return { date, time: timeStr }
     }
-    // 不是有效日期，直接显示原始字符串（截断过长的字符串）
+    // 不是有效日期，直接显示原始字符串
     const str = String(time)
-    return str.length > 20 ? str.substring(0, 20) + '...' : str
+    const truncated = str.length > 15 ? str.substring(0, 15) + '...' : str
+    return { date: truncated, time: '' }
   }
   
   if (timelineData.length === 0) {
-    return null // 没有时间数据时不显示
+    return (
+      <div className={styles.timelineWrapper}>
+        <div className={styles.timelineTitle}>Timeline</div>
+        <div className={styles.timelineEmpty}>No timeline data</div>
+      </div>
+    )
   }
   
   return (
     <div className={styles.timelineWrapper}>
       <div className={styles.timelineTitle}>Timeline</div>
-      <div className={styles.timelineRoot} onClick={handleBackgroundClick}>
-        <div className={styles.timelineHeader}>
-          <div className={styles.timelineHint}>
-            {selectedTime ? 'Click the same node or blank area to restore full display' : 'Click the node to filter the information elements at this time'}
-          </div>
-        </div>
+      <div 
+        className={styles.timelineRoot} 
+        onClick={handleBackgroundClick}
+        ref={containerRef}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
+        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+      >
         <div className={styles.timelineContainer}>
           <div className={styles.timelineLine} />
           <div className={styles.timelineNodes}>
             {timelineData.map((timeData) => {
               const isSelected = selectedTime === timeData.time
               const isNew = timeData.isNew
+              const { date, time } = formatTime(timeData.time)
               return (
                 <div
                   key={String(timeData.time)}
                   className={`${styles.timelineNode} ${isSelected ? styles.timelineNodeActive : ''} ${isNew ? styles.timelineNodeNew : ''}`}
                   onClick={(e) => {
                     e.stopPropagation()
-                    handleTimeClick(timeData)
+                    if (!isDragging) {
+                      handleTimeClick(timeData)
+                    }
                   }}
-                  title={`${timeData.time} (${timeData.count} infons`}
+                  title={`${timeData.time} (${timeData.count} infons)`}
                 >
                   <div className={styles.timelineDot}>
-                    <div className={styles.timelineDotInner} />
+                    <div className={styles.timelineDotCount}>{timeData.count}</div>
                   </div>
                   <div className={styles.timelineLabel}>
-                    <div className={styles.timelineLabelTime}>{formatTime(timeData.time)}</div>
-                    <div className={styles.timelineLabelCount}>{timeData.count}</div>
+                    <div className={styles.timelineLabelDate}>{date}</div>
+                    {time && <div className={styles.timelineLabelTime}>{time}</div>}
                   </div>
                 </div>
               )

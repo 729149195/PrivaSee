@@ -16,12 +16,32 @@
 /* 时间线根容器 */
 .timelineRoot {
   width: 100%;
-  padding: 16px 20px;
+  padding: 8px 12px;
   background: linear-gradient(to bottom, rgba(255, 255, 255, 0.5), rgba(249, 250, 251, 0.8));
   border-radius: 8px;
-  cursor: pointer;
   transition: background 0.2s ease;
   animation: timelineRootFadeIn 0.4s ease-out;
+  overflow-x: auto;
+  overflow-y: hidden;
+  user-select: none;
+}
+
+.timelineRoot::-webkit-scrollbar {
+  height: 4px;
+}
+
+.timelineRoot::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 2px;
+}
+
+.timelineRoot::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 2px;
+}
+
+.timelineRoot::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
 }
 
 @keyframes timelineRootFadeIn {
@@ -39,37 +59,31 @@
   background: linear-gradient(to bottom, rgba(255, 255, 255, 0.7), rgba(249, 250, 251, 0.9));
 }
 
-/* 时间线头部 */
-.timelineHeader {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 12px;
-  gap: 12px;
-}
-
-.timelineHint {
+/* 时间线空状态 */
+.timelineEmpty {
+  padding: 12px;
+  text-align: center;
   font-size: 12px;
-  color: #6b7280;
+  color: #9ca3af;
   font-style: italic;
 }
 
 /* 时间线容器 */
 .timelineContainer {
   position: relative;
-  height: 80px;
+  height: 60px;
   display: flex;
   align-items: center;
-  padding: 0 20px;
+  padding: 0 12px;
+  min-width: min-content;
 }
 
 /* 时间线主线 */
 .timelineLine {
   position: absolute;
-  left: 20px;
-  right: 20px;
-  top: 50%;
-  transform: translateY(-50%);
+  left: 12px;
+  right: 12px;
+  top: 18px;
   height: 2px;
   background: linear-gradient(to right, #e5e7eb 0%, #9ca3af 50%, #e5e7eb 100%);
   border-radius: 1px;
@@ -101,24 +115,25 @@
 /* 时间节点容器 */
 .timelineNodes {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  justify-content: flex-start;
+  align-items: flex-start;
   width: 100%;
-  gap: 12px;
+  gap: 40px;
   z-index: 1;
+  flex-wrap: nowrap;
 }
 
 /* 时间节点 */
 .timelineNode {
-  flex: 1;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   cursor: pointer;
   transition: all 0.2s ease;
-  padding: 4px 8px;
+  padding: 0;
   border-radius: 6px;
-  min-width: 60px;
+  min-width: fit-content;
   opacity: 1;
   transform: scale(1);
 }
@@ -147,38 +162,41 @@
 }
 
 .timelineNodeActive {
-  background: rgba(59, 130, 246, 0.1);
+  background: transparent;
 }
 
 .timelineNodeActive .timelineDot {
-  width: 20px;
-  height: 20px;
+  width: 32px;
+  height: 32px;
   background: #3b82f6;
+  border-color: #3b82f6;
   box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
 }
 
-.timelineNodeActive .timelineDotInner {
-  background: white;
+.timelineNodeActive .timelineDotCount {
+  color: white;
+  font-weight: 700;
 }
 
+.timelineNodeActive .timelineLabelDate,
 .timelineNodeActive .timelineLabelTime {
   color: #3b82f6;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 /* 时间点圆点 */
 .timelineDot {
-  width: 14px;
-  height: 14px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: white;
   border: 2px solid #9ca3af;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 8px;
   transition: all 0.2s ease;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  position: relative;
 }
 
 /* 新节点的圆点脉冲效果 */
@@ -197,20 +215,20 @@
 
 .timelineNode:hover .timelineDot {
   border-color: #3b82f6;
-  transform: scale(1.2);
+  transform: scale(1.1);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
 
-.timelineDotInner {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #9ca3af;
+/* 圆点中心显示的数量 */
+.timelineDotCount {
+  font-size: 11px;
+  font-weight: 600;
+  color: #4b5563;
   transition: all 0.2s ease;
 }
 
-.timelineNode:hover .timelineDotInner {
-  background: #3b82f6;
+.timelineNode:hover .timelineDotCount {
+  color: #3b82f6;
 }
 
 /* 时间标签 */
@@ -218,9 +236,10 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   pointer-events: none;
   opacity: 1;
+  margin-top: 6px;
 }
 
 /* 新节点的标签延迟淡入 */
@@ -239,7 +258,8 @@
   }
 }
 
-.timelineLabelTime {
+/* 日期显示 */
+.timelineLabelDate {
   font-size: 11px;
   color: #4b5563;
   font-weight: 500;
@@ -248,23 +268,13 @@
   transition: all 0.2s ease;
 }
 
-.timelineLabelCount {
+/* 时间显示 */
+.timelineLabelTime {
   font-size: 10px;
   color: #9ca3af;
-  font-weight: 600;
-  padding: 1px 6px;
-  background: rgba(156, 163, 175, 0.1);
-  border-radius: 8px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-align: center;
   transition: all 0.2s ease;
-}
-
-.timelineNode:hover .timelineLabelCount {
-  background: rgba(59, 130, 246, 0.15);
-  color: #3b82f6;
-}
-
-.timelineNodeActive .timelineLabelCount {
-  background: rgba(59, 130, 246, 0.2);
-  color: #3b82f6;
 }
 
