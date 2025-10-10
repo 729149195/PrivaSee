@@ -2,8 +2,10 @@ import React, { useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
+import remarkBreaks from 'remark-breaks'
 import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
+import rehypeRaw from 'rehype-raw'
 import copyToClipboard from 'copy-to-clipboard'
 import clsx from 'clsx'
 import 'katex/dist/katex.min.css'
@@ -16,6 +18,7 @@ import styles from './MarkdownMessage.module.css'
 // - 支持 KaTeX 数学公式
 // - 支持代码高亮与语言标题、复制按钮
 // - 链接新窗口打开
+// - 正确处理粗体、斜体等格式
 
 export default function MarkdownMessage({ content = '' }) {
   const [copiedId, setCopiedId] = useState('')
@@ -53,15 +56,24 @@ export default function MarkdownMessage({ content = '' }) {
     table({ children }) {
       return <div className={styles.tableWrap}><table>{children}</table></div>
     },
+    // 确保粗体正确渲染
+    strong({ children }) {
+      return <strong>{children}</strong>
+    },
+    // 确保斜体正确渲染
+    em({ children }) {
+      return <em>{children}</em>
+    },
   }), [])
 
   return (
     <div className={styles.root}>
       <div className={styles.markdown}>
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex, [rehypeHighlight, { detect: true }]]}
+          remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
+          rehypePlugins={[rehypeRaw, rehypeKatex, [rehypeHighlight, { detect: true }]]}
           components={components}
+          skipHtml={false}
         >
           {content}
         </ReactMarkdown>
