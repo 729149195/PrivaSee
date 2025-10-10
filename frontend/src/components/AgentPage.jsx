@@ -8,6 +8,7 @@ import WordCloud from './WordCloud'
 import LawTree from './LawTree'
 import Timeline from './Timeline'
 import HighlightInput from './HighlightInput'
+import PrivacyRiskAnalysis from './PrivacyRiskAnalysis'
 
 // 连线组件（中文注释）：根据关系信息元画连线连接标签和高亮文本
 const RelationConnections = ({ messageId, relations, infonIndex }) => {
@@ -136,6 +137,11 @@ export default function AgentPage() {
     startMessageInfons,
     clearAllPendingInfons,
     infonSessions,
+    // 隐私推理（中文注释）
+    privacyInferences,
+    startPrivacyInference,
+    abortPrivacyInference,
+    selectedLaw,
   } = useStore()
 
   // 当前会话对象（中文注释）：需在引用它的 useMemo 之前定义
@@ -190,6 +196,28 @@ export default function AgentPage() {
   useEffect(() => {
     setSelectedTime(null)
   }, [currentSessionId])
+
+  // 计算当前会话的信息元数据（用于PrivacyRiskAnalysis）（中文注释）
+  const wordData = useMemo(() => {
+    if (!currentSession?.id) return []
+    const runs = (infonSessions?.[currentSession.id]?.runs) || []
+    const allInfons = []
+    
+    for (const run of runs) {
+      if (!run || (run.status !== 'done' && run.status !== 'running')) continue
+      const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
+      infons.forEach((infon) => {
+        const type = String(infon.infon_type || '').toUpperCase()
+        if (type === 'SIT') return
+        allInfons.push(infon)
+      })
+    }
+    
+    return allInfons
+  }, [currentSession?.id, infonSessions])
+
+  // 获取当前会话的隐私推理结果（中文注释）
+  const inference = useMemo(() => (currentSession ? privacyInferences?.[currentSession.id] : null), [currentSession, privacyInferences])
 
   // 默认注册 DeepSeek 示例（中文注释）：仅添加一次，已存在则跳过
   useEffect(() => {
@@ -964,12 +992,24 @@ export default function AgentPage() {
                   <LawTree />
                   {/* 时间线组件（中文注释）：用于按时间筛选信息元 */}
                   <Timeline onTimeSelect={setSelectedTime} />
+                  {/* 隐私风险分析组件（中文注释） */}
+                  <PrivacyRiskAnalysis
+                    inference={inference}
+                    selectedLaw={selectedLaw}
+                    wordData={wordData}
+                    startPrivacyInference={startPrivacyInference}
+                    abortPrivacyInference={abortPrivacyInference}
+                  />
                   {/* 信息元词云可视化（中文注释） */}
                   <WordCloud selectedTime={selectedTime} />
-                  <div className={styles.infonRuns}>
-                    {(() => {
-                      const runs = (infonSessions?.[currentSession?.id]?.runs) || []
-                      if (!runs.length) return <div className={styles.infonEmpty}>No inference yet</div>
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 8, paddingLeft: 4 }}>
+                      Inference Results
+                    </div>
+                    <div className={styles.infonRuns}>
+                      {(() => {
+                        const runs = (infonSessions?.[currentSession?.id]?.runs) || []
+                        if (!runs.length) return <div className={styles.infonEmpty}>No inference yet</div>
                       const sorted = [...runs].sort((a, b) => b.createdAt - a.createdAt)
                       return sorted.map((r) => {
                         const title = r.modality === 'text' ? 'Text' : `Image${Number.isFinite(r.imageIndex) ? ` #${r.imageIndex + 1}` : ''}`
@@ -1012,8 +1052,9 @@ export default function AgentPage() {
                             </details>
                           </div>
                         )
-                      })
-                    })()}
+                        })
+                      })()}
+                    </div>
                   </div>
                 </div>
               </div>

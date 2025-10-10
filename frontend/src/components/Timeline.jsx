@@ -121,39 +121,41 @@ export default function Timeline({ onTimeSelect }) {
   }
   
   return (
-    <div className={styles.timelineRoot} onClick={handleBackgroundClick}>
-      <div className={styles.timelineHeader}>
-        <div className={styles.timelineTitle}>Timeline</div>
-        <div className={styles.timelineHint}>
-          {selectedTime ? 'Click the same node or blank area to restore full display' : 'Click the node to filter the information elements at this time'}
+    <div className={styles.timelineWrapper}>
+      <div className={styles.timelineTitle}>Timeline</div>
+      <div className={styles.timelineRoot} onClick={handleBackgroundClick}>
+        <div className={styles.timelineHeader}>
+          <div className={styles.timelineHint}>
+            {selectedTime ? 'Click the same node or blank area to restore full display' : 'Click the node to filter the information elements at this time'}
+          </div>
         </div>
-      </div>
-      <div className={styles.timelineContainer}>
-        <div className={styles.timelineLine} />
-        <div className={styles.timelineNodes}>
-          {timelineData.map((timeData) => {
-            const isSelected = selectedTime === timeData.time
-            const isNew = timeData.isNew
-            return (
-              <div
-                key={String(timeData.time)}
-                className={`${styles.timelineNode} ${isSelected ? styles.timelineNodeActive : ''} ${isNew ? styles.timelineNodeNew : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleTimeClick(timeData)
-                }}
-                title={`${timeData.time} (${timeData.count} infons`}
-              >
-                <div className={styles.timelineDot}>
-                  <div className={styles.timelineDotInner} />
+        <div className={styles.timelineContainer}>
+          <div className={styles.timelineLine} />
+          <div className={styles.timelineNodes}>
+            {timelineData.map((timeData) => {
+              const isSelected = selectedTime === timeData.time
+              const isNew = timeData.isNew
+              return (
+                <div
+                  key={String(timeData.time)}
+                  className={`${styles.timelineNode} ${isSelected ? styles.timelineNodeActive : ''} ${isNew ? styles.timelineNodeNew : ''}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleTimeClick(timeData)
+                  }}
+                  title={`${timeData.time} (${timeData.count} infons`}
+                >
+                  <div className={styles.timelineDot}>
+                    <div className={styles.timelineDotInner} />
+                  </div>
+                  <div className={styles.timelineLabel}>
+                    <div className={styles.timelineLabelTime}>{formatTime(timeData.time)}</div>
+                    <div className={styles.timelineLabelCount}>{timeData.count}</div>
+                  </div>
                 </div>
-                <div className={styles.timelineLabel}>
-                  <div className={styles.timelineLabelTime}>{formatTime(timeData.time)}</div>
-                  <div className={styles.timelineLabelCount}>{timeData.count}</div>
-                </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
       </div>
     </div>

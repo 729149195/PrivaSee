@@ -720,20 +720,22 @@ export default function WordCloud({ selectedTime = null }) {
   }, [wordData, relations, infonMap, containerWidth, containerHeight])
 
   return (
-    <div ref={containerRef} className={styles.wordCloudRoot}>
+    <div ref={containerRef} style={{ marginBottom: '12px' }}>
       <div className={styles.wordCloudTitle}>Information Element Word Cloud</div>
-      {wordData.length === 0 ? (
-        <div className={styles.infonEmpty} style={{ padding: '20px', textAlign: 'center' }}>No inference yet</div>
-      ) : (
-        <svg
-          ref={svgRef}
-          className={styles.wordCloudSvg}
-          width="100%"
-          height={containerHeight}
-          viewBox={`0 0 ${containerWidth} ${containerHeight}`}
-          preserveAspectRatio="xMidYMid meet"
-        />
-      )}
+      <div className={styles.wordCloudRoot}>
+        {wordData.length === 0 ? (
+          <div className={styles.infonEmpty} style={{ padding: '20px', textAlign: 'center' }}>No inference yet</div>
+        ) : (
+          <svg
+            ref={svgRef}
+            className={styles.wordCloudSvg}
+            width="100%"
+            height={containerHeight}
+            viewBox={`0 0 ${containerWidth} ${containerHeight}`}
+            preserveAspectRatio="xMidYMid meet"
+          />
+        )}
+      </div>
       
       {selectedInfon ? (
         <details className={styles.wordCloudDetails} open>

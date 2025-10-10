@@ -1171,7 +1171,6 @@
     border-radius: var(--border-radius-md);
     background: var(--color-bg-secondary);
     padding: 8px;
-    margin-bottom: 12px;
     position: relative;
     overflow: hidden;
 }
@@ -1181,8 +1180,7 @@
     font-weight: 600;
     color: var(--color-text-primary);
     margin-bottom: 8px;
-    padding: 4px 8px;
-    text-align: center;
+    padding-left: 4px;
 }
 
 .wordCloudSvg {
@@ -1263,9 +1261,24 @@
 }
 
 .wordCloudDetailsContent {
-    max-height: 200px;
     overflow-y: auto;
     padding: 4px;
+}
+
+/* 淡入动画（中文注释）：用于流式显示风险项 */
+@keyframes fadeInRisk {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.riskItem {
+    animation: fadeInRisk 0.3s ease-in;
 }
 
 .wordCloudTable {

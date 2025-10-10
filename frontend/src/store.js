@@ -300,6 +300,21 @@ export const useStore = create((set, get) => ({
     set({ highlightedInfon: infon ? { infon, run } : null })
   },
 
+  // 隐私推理：按会话维护推理结果
+  // privacyInferences: { [sessionId]: { status: 'idle'|'running'|'done'|'error', risks: Array, buffer: string, abortController: AbortController|null, createdAt, updatedAt } }
+  privacyInferences: {},
+  
+  // 隐私推理增量解析器状态：按会话维护
+  privacyParsers: {}, // { [sessionId]: parserState }
+  
+  // 选中的法律（用于推理）
+  selectedLaw: null, // { key: 'PIPL', data: {...} }
+  
+  // 设置选中的法律
+  setSelectedLaw(lawKey, lawData) {
+    set({ selectedLaw: { key: lawKey, data: lawData } })
+  },
+
   // 初始化当前会话：第一次使用时指向首个会话
   _ensureCurrentSession() {
     const { sessions, currentSessionId } = get()
@@ -1195,6 +1210,231 @@ export const useStore = create((set, get) => ({
     }))
 
     await get().sendMessage(lastUser.content)
+  },
+
+  // ========== 隐私推理相关方法 ==========
+  
+  // 启动隐私推理：基于当前会话的信息元和选中的法律
+  async startPrivacyInference() {
+    const session = get().getCurrentSession()
+    if (!session) return
+    
+    const { selectedLaw, infonSessions } = get()
+    if (!selectedLaw || !selectedLaw.data) {
+      console.warn('No law selected for inference')
+      return
+    }
+    
+    // 获取当前会话的所有信息元
+    const runs = infonSessions?.[session.id]?.runs || []
+    const allInfons = []
+    runs.forEach(run => {
+      if (run.status === 'done' || run.status === 'running') {
+        const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
+        allInfons.push(...infons)
+      }
+    })
+    
+    if (allInfons.length === 0) {
+      console.warn('No infons available for inference')
+      return
+    }
+    
+    // 初始化推理状态
+    const abortController = new AbortController()
+    set(state => ({
+      privacyInferences: {
+        ...state.privacyInferences,
+        [session.id]: {
+          status: 'running',
+          risks: [],
+          buffer: '',
+          abortController,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        }
+      }
+    }))
+    
+    try {
+      // 构建推理提示词
+      const { fillPromptTemplate } = await import('./templates/inference.js')
+      const prompt = fillPromptTemplate(allInfons, selectedLaw.data)
+      
+      // 隐私推理强制使用 DeepSeek API（中文注释）：与信息元提取保持一致
+      const deepseekId = 'deepseek-chat'
+      let provider = get().customProviders?.[deepseekId]
+      if (!provider) {
+        try {
+          get().addApiModel?.({ id: deepseekId, baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
+        } catch (_) { }
+        provider = get().customProviders?.[deepseekId]
+      }
+      const apiUrl = provider?.baseUrl || 'https://api.deepseek.com/v1'
+      const apiKey = provider?.apiKey || ''
+      
+      const response = await fetch(`${apiUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+        },
+        body: JSON.stringify({
+          model: deepseekId,
+          messages: [{ role: 'user', content: prompt }],
+          stream: true,
+          temperature: 0.5, // 适中温度以平衡创造性和准确性
+        }),
+        signal: abortController.signal
+      })
+      
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`)
+      }
+      
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder('utf-8')
+      let buffer = ''
+      
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        
+        const chunk = decoder.decode(value, { stream: true })
+        const lines = chunk.split('\n').filter(line => line.trim())
+        
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6).trim()
+          if (data === '[DONE]') continue
+          
+          try {
+            const parsed = JSON.parse(data)
+            const content = parsed?.choices?.[0]?.delta?.content || ''
+            if (content) {
+              buffer += content
+              
+              // 使用增量解析器逐个提取风险项（中文注释）
+              const { incrementalExtractRisks } = await import('./templates/inference.js')
+              const parserState = get().privacyParsers?.[session.id] || null
+              const { state: newState, yielded } = incrementalExtractRisks(buffer, parserState)
+              
+              // 更新解析器状态
+              set(state => ({
+                privacyParsers: {
+                  ...state.privacyParsers,
+                  [session.id]: newState
+                }
+              }))
+              
+              // 如果有新的风险项被解析出来，立即添加到结果中
+              if (yielded && yielded.length > 0) {
+                set(state => {
+                  const currentRisks = state.privacyInferences?.[session.id]?.risks || []
+                  return {
+                    privacyInferences: {
+                      ...state.privacyInferences,
+                      [session.id]: {
+                        ...state.privacyInferences[session.id],
+                        status: 'running',
+                        risks: [...currentRisks, ...yielded],
+                        buffer: buffer,
+                        updatedAt: Date.now()
+                      }
+                    }
+                  }
+                })
+              } else {
+                // 只更新 buffer，不更新 risks
+                set(state => ({
+                  privacyInferences: {
+                    ...state.privacyInferences,
+                    [session.id]: {
+                      ...state.privacyInferences[session.id],
+                      buffer: buffer,
+                      updatedAt: Date.now()
+                    }
+                  }
+                }))
+              }
+            }
+          } catch (err) {
+            // 解析错误，继续累积
+          }
+        }
+      }
+      
+      // 完成推理
+      set(state => ({
+        privacyInferences: {
+          ...state.privacyInferences,
+          [session.id]: {
+            ...state.privacyInferences[session.id],
+            status: 'done',
+            abortController: null,
+            updatedAt: Date.now()
+          }
+        }
+      }))
+      
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        set(state => ({
+          privacyInferences: {
+            ...state.privacyInferences,
+            [session.id]: {
+              ...state.privacyInferences[session.id],
+              status: 'aborted',
+              abortController: null,
+              updatedAt: Date.now()
+            }
+          }
+        }))
+      } else {
+        set(state => ({
+          privacyInferences: {
+            ...state.privacyInferences,
+            [session.id]: {
+              ...state.privacyInferences[session.id],
+              status: 'error',
+              error: err.message,
+              abortController: null,
+              updatedAt: Date.now()
+            }
+          }
+        }))
+      }
+    }
+  },
+  
+  // 停止隐私推理
+  abortPrivacyInference() {
+    const session = get().getCurrentSession()
+    if (!session) return
+    
+    const inference = get().privacyInferences?.[session.id]
+    if (inference?.abortController) {
+      try {
+        inference.abortController.abort()
+      } catch (_) {}
+    }
+  },
+  
+  // 清除推理结果
+  clearPrivacyInference() {
+    const session = get().getCurrentSession()
+    if (!session) return
+    
+    set(state => {
+      const newInferences = { ...state.privacyInferences }
+      const newParsers = { ...state.privacyParsers }
+      delete newInferences[session.id]
+      delete newParsers[session.id]
+      return { 
+        privacyInferences: newInferences,
+        privacyParsers: newParsers
+      }
+    })
   },
 
 }))

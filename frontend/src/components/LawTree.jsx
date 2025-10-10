@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useMemo } from 'react'
 import * as d3 from 'd3'
+import { useStore } from '../store'
 
 const LAWS = [
   { key: 'PIPL', label: 'PIPL', file: './law/PIPL.json' },
@@ -18,6 +19,11 @@ export default function LawTree() {
   const containerRef = useRef(null)
   const svgRef = useRef(null)
   const [size, setSize] = useState({ width: 928, height: 600 })
+  
+  // 从 store 获取推理结果和相关方法（中文注释）
+  const { getCurrentSession, privacyInferences, setSelectedLaw } = useStore()
+  const session = getCurrentSession()
+  const inference = useMemo(() => (session ? privacyInferences?.[session.id] : null), [session, privacyInferences])
 
   // 预加载三份数据
   useEffect(() => {
@@ -34,6 +40,13 @@ export default function LawTree() {
     })
     // eslint-disable-next-line
   }, [])
+  
+  // 当法律数据或索引变化时，更新 store 中的选中法律（中文注释）
+  useEffect(() => {
+    if (lawData[lawIdx]) {
+      setSelectedLaw(LAWS[lawIdx].key, lawData[lawIdx])
+    }
+  }, [lawIdx, lawData, setSelectedLaw])
 
   // 容器自适应
   useEffect(() => {
@@ -54,6 +67,109 @@ export default function LawTree() {
     }
   }, [])
 
+  // 构建风险映射：精确匹配到最小叶子节点（中文注释）
+  const riskMap = useMemo(() => {
+    const map = new Map() // key: 节点路径或名称, value: { level, confidence, risks, isLeaf }
+    
+    if (!inference || !inference.risks || !lawData[lawIdx]) return map
+    
+    // 构建法律树的所有节点路径映射
+    const nodePathMap = new Map() // key: 完整路径字符串, value: 节点对象
+    const nodeNameMap = new Map() // key: 节点名称, value: 节点对象数组（可能有重名）
+    
+    function traverseTree(node, path = []) {
+      const currentPath = [...path, node.name]
+      const pathKey = currentPath.join(' > ')
+      
+      nodePathMap.set(pathKey, { node, path: currentPath, isLeaf: !node.children || node.children.length === 0 })
+      
+      // 按名称索引（支持查找）
+      if (!nodeNameMap.has(node.name)) {
+        nodeNameMap.set(node.name, [])
+      }
+      nodeNameMap.get(node.name).push({ node, path: currentPath, isLeaf: !node.children || node.children.length === 0 })
+      
+      if (node.children) {
+        node.children.forEach(child => traverseTree(child, currentPath))
+      }
+    }
+    
+    traverseTree(lawData[lawIdx])
+    
+    // 匹配推理结果到法律节点
+    inference.risks.forEach(risk => {
+      const lawPath = risk.law_path || ''
+      const nodeName = risk.law_node_name || ''
+      
+      let matchedNode = null
+      
+      // 策略1：优先使用完整路径精确匹配
+      if (lawPath) {
+        // 尝试完全匹配
+        if (nodePathMap.has(lawPath)) {
+          matchedNode = nodePathMap.get(lawPath)
+        } else {
+          // 尝试模糊匹配（路径可能格式不同）
+          const normalizedPath = lawPath.replace(/\s*[>›→]\s*/g, ' > ').trim()
+          if (nodePathMap.has(normalizedPath)) {
+            matchedNode = nodePathMap.get(normalizedPath)
+          } else {
+            // 尝试部分路径匹配（从最后一级开始往上）
+            for (const [key, value] of nodePathMap.entries()) {
+              if (key.endsWith(nodeName) || normalizedPath.includes(key)) {
+                matchedNode = value
+                break
+              }
+            }
+          }
+        }
+      }
+      
+      // 策略2：使用节点名称匹配，优先匹配叶子节点
+      if (!matchedNode && nodeName) {
+        const candidates = nodeNameMap.get(nodeName) || []
+        if (candidates.length > 0) {
+          // 优先选择叶子节点
+          const leafNodes = candidates.filter(c => c.isLeaf)
+          matchedNode = leafNodes.length > 0 ? leafNodes[0] : candidates[0]
+        } else {
+          // 尝试部分匹配
+          for (const [name, nodes] of nodeNameMap.entries()) {
+            if (name.includes(nodeName) || nodeName.includes(name)) {
+              const leafNodes = nodes.filter(n => n.isLeaf)
+              matchedNode = leafNodes.length > 0 ? leafNodes[0] : nodes[0]
+              break
+            }
+          }
+        }
+      }
+      
+      if (matchedNode) {
+        const key = matchedNode.node.name
+        const levelPriority = { HIGH: 3, MEDIUM: 2, LOW: 1 }
+        
+        if (!map.has(key)) {
+          map.set(key, {
+            level: risk.risk_level,
+            confidence: risk.confidence,
+            risks: [risk],
+            isLeaf: matchedNode.isLeaf,
+            path: matchedNode.path
+          })
+        } else {
+          const existing = map.get(key)
+          if ((levelPriority[risk.risk_level] || 0) > (levelPriority[existing.level] || 0)) {
+            existing.level = risk.risk_level
+          }
+          existing.confidence = Math.max(existing.confidence, risk.confidence)
+          existing.risks.push(risk)
+        }
+      }
+    })
+    
+    return map
+  }, [inference, lawData, lawIdx])
+
   // 绘制
   useEffect(() => {
     const data = lawData[lawIdx]
@@ -69,6 +185,16 @@ export default function LawTree() {
       (getComputedStyle(document.documentElement).getPropertyValue('--color-border-strong') || '').trim() ||
       (getComputedStyle(document.documentElement).getPropertyValue('--color-border-light') || '').trim() ||
       '#334155' // slate-700
+    
+    // 风险颜色映射（中文注释）
+    const getRiskColor = (level) => {
+      switch (level) {
+        case 'HIGH': return '#ef4444'    // 红色
+        case 'MEDIUM': return '#f59e0b'  // 橙色
+        case 'LOW': return '#10b981'     // 绿色
+        default: return null
+      }
+    }
 
     // —— 层级 + “均分权重”（每个父节点把自己的 value 平均分给直接子节点）—— //
     const root = d3.hierarchy(data)
@@ -124,10 +250,32 @@ export default function LawTree() {
       const rect = cell.append('rect')
       .attr('width',  d => Math.max(1, px(d.y1) - px(d.y0)))
       .attr('height', d => Math.max(1, px(d.x1) - px(d.x0)))
-      .attr('fill', 'transparent')       // ← 使用透明填充，整块可点
+      .attr('fill', d => {
+        // 根据风险等级填充颜色（中文注释）
+        const nodeName = d.data.name
+        const risk = riskMap.get(nodeName)
+        if (risk) {
+          const color = getRiskColor(risk.level)
+          return color ? `${color}20` : 'transparent' // 20% 透明度
+        }
+        return 'transparent'
+      })
       .style('pointer-events', 'all')    // ← 明确允许接收点击/hover
-      .attr('stroke', strokeColor)
-      .attr('stroke-width', 1.25)        // ← 稍微加粗一点
+      .attr('stroke', d => {
+        // 根据风险等级设置边框颜色（中文注释）
+        const nodeName = d.data.name
+        const risk = riskMap.get(nodeName)
+        if (risk) {
+          return getRiskColor(risk.level)
+        }
+        return strokeColor
+      })
+      .attr('stroke-width', d => {
+        // 有风险的节点边框加粗（中文注释）
+        const nodeName = d.data.name
+        const risk = riskMap.get(nodeName)
+        return risk ? 2 : 1.25
+      })
       .attr('shape-rendering', 'crispEdges')
       .attr('cursor', 'pointer')
       .on('click', (event, d) => {
@@ -146,9 +294,16 @@ export default function LawTree() {
       .attr('fill-opacity', d => +labelVisible(d))
       .text(d => d.data.name)
 
-    // tooltip
+    // tooltip（中文注释）：如果有风险，显示风险信息
     cell.append('title')
-      .text(d => d.ancestors().map(d => d.data.name).reverse().join(' / '))
+      .text(d => {
+        const path = d.ancestors().map(d => d.data.name).reverse().join(' / ')
+        const risk = riskMap.get(d.data.name)
+        if (risk) {
+          return `${path}\n\nRisk Level: ${risk.level}\nConfidence: ${(risk.confidence * 100).toFixed(0)}%\nRisk Count: ${risk.risks.length}`
+        }
+        return path
+      })
 
     // —— 缩放：点击进入；再次点击同一节点→回父级；点击空白→回根 —— //
     function clicked(p) {
@@ -184,45 +339,49 @@ export default function LawTree() {
       const h = (d.x1 - d.x0)
       return w > 38 && h > 18
     }
-  }, [lawData, lawIdx, size])
+  }, [lawData, lawIdx, size, riskMap])
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        width: '100%',
-        minHeight: 200,
-        background: 'var(--color-bg-secondary)',
-        borderRadius: 16,
-        boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-        marginBottom: 16,
-        border: '1px solid var(--color-border-light)',
-        padding: 12
-      }}
-    >
-      <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
-        {LAWS.map((law, idx) => (
-          <div
-            key={law.key}
-            onClick={() => setLawIdx(idx)}
-            style={{
-              cursor: 'pointer',
-              padding: '6px 6px',
-              borderRadius: 12,
-              fontWeight: 600,
-              fontSize: 12,
-              color: lawIdx === idx ? 'var(--color-accent-primary)' : 'var(--color-text-secondary)',
-              background: lawIdx === idx ? 'var(--color-accent-light)' : 'transparent',
-              border: lawIdx === idx ? '1.5px solid var(--color-accent-primary)' : '1.5px solid transparent',
-              boxShadow: lawIdx === idx ? '0 2px 8px rgba(14,165,233,0.08)' : 'none',
-              transition: 'all 0.18s',
-            }}
-          >
-            {law.label}
-          </div>
-        ))}
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 8, paddingLeft: 4 }}>
+        Law Tree
       </div>
-      <svg ref={svgRef} style={{ width: '100%', height: size.height, display: 'block' }} />
+      <div
+        ref={containerRef}
+        style={{
+          width: '100%',
+          minHeight: 200,
+          background: 'var(--color-bg-secondary)',
+          borderRadius: 16,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+          border: '1px solid var(--color-border-light)',
+          padding: 12
+        }}
+      >
+        <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+          {LAWS.map((law, idx) => (
+            <div
+              key={law.key}
+              onClick={() => setLawIdx(idx)}
+              style={{
+                cursor: 'pointer',
+                padding: '6px 6px',
+                borderRadius: 12,
+                fontWeight: 600,
+                fontSize: 12,
+                color: lawIdx === idx ? 'var(--color-accent-primary)' : 'var(--color-text-secondary)',
+                background: lawIdx === idx ? 'var(--color-accent-light)' : 'transparent',
+                border: lawIdx === idx ? '1.5px solid var(--color-accent-primary)' : '1.5px solid transparent',
+                boxShadow: lawIdx === idx ? '0 2px 8px rgba(14,165,233,0.08)' : 'none',
+                transition: 'all 0.18s',
+              }}
+            >
+              {law.label}
+            </div>
+          ))}
+        </div>
+        <svg ref={svgRef} style={{ width: '100%', height: size.height, display: 'block' }} />
+      </div>
     </div>
   )
 }
