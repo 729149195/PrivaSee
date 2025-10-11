@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useMemo, useLayoutEffect } from 're
 import { useStore } from '../store'
 import styles from './AgentPage.module.css'
 import MarkdownMessage from './MarkdownMessage'
-import { Splitter, Select, Button, Upload, Progress, Spin, Input, Modal } from 'antd'
+import { Splitter, Select, Button, Upload, Progress, Spin, Input, Modal, Popconfirm } from 'antd'
 import { SendOutlined, StopOutlined, CameraOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import WordCloud from './WordCloud'
 import LawTree from './LawTree'
@@ -191,6 +191,9 @@ export default function AgentPage() {
   const [previewImage, setPreviewImage] = useState(null)
   // 时间线选中的时间（中文注释）：用于筛选 WordCloud 中的信息元
   const [selectedTime, setSelectedTime] = useState(null)
+  // 左侧栏编辑状态（中文注释）：用于追踪正在编辑的 session 和编辑的标题
+  const [editingSessionId, setEditingSessionId] = useState(null)
+  const [editingTitle, setEditingTitle] = useState('')
   
   // 会话切换时重置时间选择（中文注释）
   useEffect(() => {
@@ -685,21 +688,80 @@ export default function AgentPage() {
             <div
               key={s.id}
               className={`${styles.chatItem} ${s.id === currentSessionId ? styles.chatItemActive : ''}`}
-              onClick={() => switchSession(s.id)}
-              title={s.title}
+              onClick={() => {
+                if (editingSessionId !== s.id) {
+                  switchSession(s.id)
+                }
+              }}
+              title={editingSessionId === s.id ? '' : s.title}
             >
               <div className={styles.chatItemHeader}>
                 <div className={styles.chatItemInfo}>
-                  <div className={styles.chatName}>{s.title}</div>
-                  <div className={styles.chatMeta}>{new Date(s.updatedAt).toLocaleString()}</div>
+                  {editingSessionId === s.id ? (
+                    <Input
+                      className={styles.chatNameInput}
+                      value={editingTitle}
+                      onChange={(e) => setEditingTitle(e.target.value)}
+                      onPressEnter={(e) => {
+                        e.stopPropagation()
+                        const newTitle = editingTitle.trim()
+                        if (newTitle && newTitle !== s.title) {
+                          renameSession(s.id, newTitle)
+                        }
+                        setEditingSessionId(null)
+                        setEditingTitle('')
+                      }}
+                      onBlur={() => {
+                        const newTitle = editingTitle.trim()
+                        if (newTitle && newTitle !== s.title) {
+                          renameSession(s.id, newTitle)
+                        }
+                        setEditingSessionId(null)
+                        setEditingTitle('')
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      autoFocus
+                      size="small"
+                    />
+                  ) : (
+                    <div className={styles.chatName}>{s.title}</div>
+                  )}
+                  {editingSessionId !== s.id && (
+                    <div className={styles.chatMeta}>{new Date(s.updatedAt).toLocaleString()}</div>
+                  )}
                 </div>
                 <div className={styles.chatActions}>
-                  <button className={styles.iconBtn} onClick={(e) => { e.stopPropagation(); const t = prompt('Rename'); if (t) renameSession(s.id, t) }} title="Rename">
+                  <button 
+                    className={styles.iconBtn} 
+                    onClick={(e) => { 
+                      e.stopPropagation()
+                      setEditingSessionId(s.id)
+                      setEditingTitle(s.title)
+                    }} 
+                    title="Rename"
+                  >
                     <EditOutlined />
                   </button>
-                  <button className={styles.iconBtn} onClick={(e) => { e.stopPropagation(); if (confirm('Delete this chat?')) deleteSession(s.id) }} title="Delete">
-                    <DeleteOutlined />
-                  </button>
+                  <Popconfirm
+                    title="删除对话"
+                    description="确定要删除这个对话吗？"
+                    onConfirm={(e) => {
+                      e?.stopPropagation()
+                      deleteSession(s.id)
+                    }}
+                    onCancel={(e) => e?.stopPropagation()}
+                    okText="删除"
+                    cancelText="取消"
+                    placement="right"
+                  >
+                    <button 
+                      className={styles.iconBtn} 
+                      onClick={(e) => e.stopPropagation()} 
+                      title="Delete"
+                    >
+                      <DeleteOutlined />
+                    </button>
+                  </Popconfirm>
                 </div>
               </div>
             </div>
