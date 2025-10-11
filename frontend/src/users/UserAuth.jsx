@@ -4,8 +4,6 @@ import { UserOutlined, LoginOutlined, LogoutOutlined, SettingOutlined } from '@a
 import { useUserStore, validateLogin } from './userStore'
 import styles from './UserAuth.module.css'
 
-const { TabPane } = Tabs
-
 export default function UserAuth() {
   const { currentUser, isLoggedIn, login, logout, register } = useUserStore()
   const [modalOpen, setModalOpen] = useState(false)
@@ -195,93 +193,101 @@ export default function UserAuth() {
           onChange={setActiveTab}
           centered
           className={styles.authTabs}
-        >
-          <TabPane tab="登录" key="login">
-            <div className={styles.authForm}>
-              <div className={styles.formGroup}>
-                <label>用户名</label>
-                <Input
-                  size="large"
-                  placeholder="请输入用户名"
-                  value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
-                  onPressEnter={handleLogin}
-                  prefix={<UserOutlined />}
-                />
-              </div>
-              <div className={styles.formGroup}>
-                <label>密码</label>
-                <Input.Password
-                  size="large"
-                  placeholder="请输入密码"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  onPressEnter={handleLogin}
-                />
-              </div>
-              <Button 
-                type="primary" 
-                size="large" 
-                block
-                loading={loginLoading}
-                onClick={handleLogin}
-                className={styles.submitBtn}
-              >
-                登录
-              </Button>
-              <div className={styles.formHint}>
-                还没有账号？<a onClick={() => setActiveTab('register')}>立即注册</a>
-              </div>
-            </div>
-          </TabPane>
-          
-          <TabPane tab="注册" key="register">
-            <div className={styles.authForm}>
-              <div className={styles.formGroup}>
-                <label>用户名</label>
-                <Input
-                  size="large"
-                  placeholder="请输入用户名"
-                  value={registerUsername}
-                  onChange={(e) => setRegisterUsername(e.target.value)}
-                  prefix={<UserOutlined />}
-                />
-              </div>
-              <div className={styles.formGroup}>
-                <label>密码</label>
-                <Input.Password
-                  size="large"
-                  placeholder="请输入密码（至少6位）"
-                  value={registerPassword}
-                  onChange={(e) => setRegisterPassword(e.target.value)}
-                />
-              </div>
-              <div className={styles.formGroup}>
-                <label>确认密码</label>
-                <Input.Password
-                  size="large"
-                  placeholder="请再次输入密码"
-                  value={registerConfirmPassword}
-                  onChange={(e) => setRegisterConfirmPassword(e.target.value)}
-                  onPressEnter={handleRegister}
-                />
-              </div>
-              <Button 
-                type="primary" 
-                size="large" 
-                block
-                loading={registerLoading}
-                onClick={handleRegister}
-                className={styles.submitBtn}
-              >
-                注册
-              </Button>
-              <div className={styles.formHint}>
-                已有账号？<a onClick={() => setActiveTab('login')}>立即登录</a>
-              </div>
-            </div>
-          </TabPane>
-        </Tabs>
+          items={[
+            {
+              key: 'login',
+              label: '登录',
+              children: (
+                <div className={styles.authForm}>
+                  <div className={styles.formGroup}>
+                    <label>用户名</label>
+                    <Input
+                      size="large"
+                      placeholder="请输入用户名"
+                      value={loginUsername}
+                      onChange={(e) => setLoginUsername(e.target.value)}
+                      onPressEnter={handleLogin}
+                      prefix={<UserOutlined />}
+                    />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label>密码</label>
+                    <Input.Password
+                      size="large"
+                      placeholder="请输入密码"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      onPressEnter={handleLogin}
+                    />
+                  </div>
+                  <Button 
+                    type="primary" 
+                    size="large" 
+                    block
+                    loading={loginLoading}
+                    onClick={handleLogin}
+                    className={styles.submitBtn}
+                  >
+                    登录
+                  </Button>
+                  <div className={styles.formHint}>
+                    还没有账号？<a onClick={() => setActiveTab('register')}>立即注册</a>
+                  </div>
+                </div>
+              )
+            },
+            {
+              key: 'register',
+              label: '注册',
+              children: (
+                <div className={styles.authForm}>
+                  <div className={styles.formGroup}>
+                    <label>用户名</label>
+                    <Input
+                      size="large"
+                      placeholder="请输入用户名"
+                      value={registerUsername}
+                      onChange={(e) => setRegisterUsername(e.target.value)}
+                      prefix={<UserOutlined />}
+                    />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label>密码</label>
+                    <Input.Password
+                      size="large"
+                      placeholder="请输入密码（至少6位）"
+                      value={registerPassword}
+                      onChange={(e) => setRegisterPassword(e.target.value)}
+                    />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label>确认密码</label>
+                    <Input.Password
+                      size="large"
+                      placeholder="请再次输入密码"
+                      value={registerConfirmPassword}
+                      onChange={(e) => setRegisterConfirmPassword(e.target.value)}
+                      onPressEnter={handleRegister}
+                    />
+                  </div>
+                  <Button 
+                    type="primary" 
+                    size="large" 
+                    block
+                    loading={registerLoading}
+                    onClick={handleRegister}
+                    className={styles.submitBtn}
+                  >
+                    注册
+                  </Button>
+                  <div className={styles.formHint}>
+                    已有账号？<a onClick={() => setActiveTab('login')}>立即登录</a>
+                  </div>
+                </div>
+              )
+            }
+          ]}
+        />
       </Modal>
     </>
   )
