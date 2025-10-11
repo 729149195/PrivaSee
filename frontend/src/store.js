@@ -780,7 +780,7 @@ export const useStore = create((set, get) => ({
               sessionId: session.id,
               messageRound,
               infonIndex,
-              infonType: 'text'
+              infonType: 'desc'
             })
             get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'done', progress: 100, resultJson: normalized }))
           } else {
@@ -896,7 +896,7 @@ export const useStore = create((set, get) => ({
               sessionId: session.id,
               messageRound,
               infonIndex,
-              infonType: 'image'
+              infonType: 'desc'
             })
             get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'done', progress: 100, resultJson: normalized }))
           } else {
@@ -1236,7 +1236,7 @@ export const useStore = create((set, get) => ({
       return
     }
     
-    // 初始化推理状态
+    // 初始化推理状态（中文注释）：记录当前选中的法律key，用于匹配高亮
     const abortController = new AbortController()
     set(state => ({
       privacyInferences: {
@@ -1246,6 +1246,7 @@ export const useStore = create((set, get) => ({
           risks: [],
           buffer: '',
           abortController,
+          lawKey: selectedLaw.key, // 记录推理时使用的法律
           createdAt: Date.now(),
           updatedAt: Date.now()
         }

@@ -81,15 +81,20 @@ export default function FishboneInfons() {
   const getInfonKeyword = (infon) => {
     if (!infon || typeof infon !== 'object') return 'Unknown'
     const t = String(infon.infon_type || '').toUpperCase()
-    if (t === 'IND') {
-      if (Array.isArray(infon.names) && infon.names.length) return String(infon.names[0])
-      return 'IND'
+    if (t === 'DESC') {
+      // 描述：优先显示属性，其次实体
+      const attribute = infon.attribute ?? ''
+      const entity = infon.entity ?? ''
+      return attribute || entity || 'DESC'
     }
-    if (t === 'PAR') return String(infon.value ?? 'PAR')
-    if (t === 'TIM') return String(infon.temporal_value ?? 'TIM')
-    if (t === 'LOC') return String(infon.spatial_value ?? (Array.isArray(infon.bbox) ? 'bbox' : 'LOC'))
+    if (t === 'SCEN') {
+      // 场景：优先显示时间，其次空间
+      const temporal = infon.temporal ?? ''
+      const spatial = infon.spatial ?? ''
+      if (Array.isArray(infon.bbox)) return 'bbox'
+      return temporal || spatial || 'SCEN'
+    }
     if (t === 'REL') return String(infon.relation_name ?? 'REL')
-    if (t === 'TYP') return String(infon.type_name ?? 'TYP')
     if (t === 'SIT') return 'SIT'
     return t || 'Unknown'
   }

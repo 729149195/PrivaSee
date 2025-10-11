@@ -67,30 +67,46 @@ export default function LawTree() {
     }
   }, [])
 
-  // 构建风险映射：精确匹配到最小叶子节点（中文注释）
+  // 构建风险映射：精确匹配到最小叶子节点，并向上传播高亮（中文注释）
   const riskMap = useMemo(() => {
     const map = new Map() // key: 节点路径或名称, value: { level, confidence, risks, isLeaf }
     
     if (!inference || !inference.risks || !lawData[lawIdx]) return map
     
+    // 检查推理结果是否与当前选中的法律匹配（中文注释）
+    const currentLawKey = LAWS[lawIdx].key
+    if (inference.lawKey && inference.lawKey !== currentLawKey) {
+      // 推理结果是针对其他法律的，不显示高亮
+      return map
+    }
+    
     // 构建法律树的所有节点路径映射
     const nodePathMap = new Map() // key: 完整路径字符串, value: 节点对象
     const nodeNameMap = new Map() // key: 节点名称, value: 节点对象数组（可能有重名）
+    const nodeByName = new Map() // key: 节点名称, value: 节点对象（用于快速查找）
     
-    function traverseTree(node, path = []) {
+    function traverseTree(node, path = [], parent = null) {
       const currentPath = [...path, node.name]
       const pathKey = currentPath.join(' > ')
       
-      nodePathMap.set(pathKey, { node, path: currentPath, isLeaf: !node.children || node.children.length === 0 })
+      const nodeInfo = { 
+        node, 
+        path: currentPath, 
+        isLeaf: !node.children || node.children.length === 0,
+        parent: parent
+      }
+      
+      nodePathMap.set(pathKey, nodeInfo)
+      nodeByName.set(node.name, nodeInfo)
       
       // 按名称索引（支持查找）
       if (!nodeNameMap.has(node.name)) {
         nodeNameMap.set(node.name, [])
       }
-      nodeNameMap.get(node.name).push({ node, path: currentPath, isLeaf: !node.children || node.children.length === 0 })
+      nodeNameMap.get(node.name).push(nodeInfo)
       
       if (node.children) {
-        node.children.forEach(child => traverseTree(child, currentPath))
+        node.children.forEach(child => traverseTree(child, currentPath, node))
       }
     }
     
@@ -133,12 +149,70 @@ export default function LawTree() {
           const leafNodes = candidates.filter(c => c.isLeaf)
           matchedNode = leafNodes.length > 0 ? leafNodes[0] : candidates[0]
         } else {
-          // 尝试部分匹配
+          // 尝试简单的包含匹配
           for (const [name, nodes] of nodeNameMap.entries()) {
             if (name.includes(nodeName) || nodeName.includes(name)) {
               const leafNodes = nodes.filter(n => n.isLeaf)
               matchedNode = leafNodes.length > 0 ? leafNodes[0] : nodes[0]
               break
+            }
+          }
+          
+          // 如果还没匹配到，尝试智能分段匹配（针对斜杠分隔的名称）
+          if (!matchedNode && (nodeName.includes('/') || nodeName.includes('／'))) {
+            let bestMatch = null
+            let bestScore = 0
+            
+            // 将节点名称按斜杠分段
+            const nodeNameParts = nodeName.split(/[\/／]/).map(p => p.trim()).filter(p => p)
+            
+            for (const [name, nodes] of nodeNameMap.entries()) {
+              // 只对叶子节点进行模糊匹配
+              const leafNodes = nodes.filter(n => n.isLeaf)
+              if (leafNodes.length === 0) continue
+              
+              const nameParts = name.split(/[\/／]/).map(p => p.trim()).filter(p => p)
+              
+              // 计算匹配分数：每个段之间的相似度
+              let totalScore = 0
+              let matchedParts = 0
+              
+              for (const nodePart of nodeNameParts) {
+                let maxPartScore = 0
+                for (const namePart of nameParts) {
+                  // 计算编辑距离相似度或包含关系
+                  if (nodePart === namePart) {
+                    maxPartScore = 1.0  // 完全匹配
+                  } else if (nodePart.includes(namePart) || namePart.includes(nodePart)) {
+                    maxPartScore = Math.max(maxPartScore, 0.8)  // 包含关系
+                  } else {
+                    // 计算字符重叠度（简单相似度）
+                    const overlap = [...nodePart].filter(c => namePart.includes(c)).length
+                    const similarity = overlap / Math.max(nodePart.length, namePart.length)
+                    maxPartScore = Math.max(maxPartScore, similarity * 0.6)
+                  }
+                }
+                if (maxPartScore > 0.3) {  // 至少30%相似才计入
+                  totalScore += maxPartScore
+                  matchedParts++
+                }
+              }
+              
+              // 整体分数 = 平均相似度 * 匹配段数比例
+              const avgScore = matchedParts > 0 ? totalScore / nodeNameParts.length : 0
+              const coverageBonus = matchedParts / nodeNameParts.length
+              const finalScore = avgScore * coverageBonus
+              
+              // 如果匹配度超过50%，认为可能匹配
+              if (finalScore >= 0.5 && finalScore > bestScore) {
+                bestMatch = leafNodes[0]
+                bestScore = finalScore
+              }
+            }
+            
+            if (bestMatch) {
+              matchedNode = bestMatch
+              console.log(`Fuzzy matched "${nodeName}" to "${bestMatch.node.name}" (score: ${bestScore.toFixed(2)})`)
             }
           }
         }
@@ -154,7 +228,8 @@ export default function LawTree() {
             confidence: risk.confidence,
             risks: [risk],
             isLeaf: matchedNode.isLeaf,
-            path: matchedNode.path
+            path: matchedNode.path,
+            node: matchedNode.node
           })
         } else {
           const existing = map.get(key)
@@ -167,7 +242,45 @@ export default function LawTree() {
       }
     })
     
-    return map
+    // 向上传播高亮到父节点（中文注释）：第二级及以上的节点也要高亮
+    const propagatedMap = new Map(map)
+    const levelPriority = { HIGH: 3, MEDIUM: 2, LOW: 1 }
+    
+    for (const [nodeName, riskInfo] of map.entries()) {
+      // 获取该节点的路径，向上遍历所有父节点
+      const path = riskInfo.path
+      if (path && path.length > 1) {
+        // 从当前节点向上到根节点，逐级传播高亮
+        for (let i = path.length - 2; i >= 0; i--) {
+          const parentName = path[i]
+          const parentNode = nodeByName.get(parentName)
+          
+          if (!parentNode) continue
+          
+          if (!propagatedMap.has(parentName)) {
+            // 父节点还没有风险，创建一个继承自子节点的风险
+            propagatedMap.set(parentName, {
+              level: riskInfo.level,
+              confidence: riskInfo.confidence,
+              risks: [], // 父节点的risks为空，表示是从子节点继承的
+              isLeaf: false,
+              path: parentNode.path,
+              node: parentNode.node,
+              inherited: true // 标记为继承的高亮
+            })
+          } else {
+            // 父节点已有风险，更新为子节点中的最高级别
+            const existing = propagatedMap.get(parentName)
+            if ((levelPriority[riskInfo.level] || 0) > (levelPriority[existing.level] || 0)) {
+              existing.level = riskInfo.level
+              existing.confidence = Math.max(existing.confidence, riskInfo.confidence)
+            }
+          }
+        }
+      }
+    }
+    
+    return propagatedMap
   }, [inference, lawData, lawIdx])
 
   // 绘制
@@ -283,13 +396,15 @@ export default function LawTree() {
       .attr('fill-opacity', d => +labelVisible(d))
       .text(d => d.data.name)
 
-    // tooltip（中文注释）：如果有风险，显示风险信息
+    // tooltip（中文注释）：如果有风险，显示风险信息，区分直接风险和继承风险
     cell.append('title')
       .text(d => {
         const path = d.ancestors().map(d => d.data.name).reverse().join(' / ')
         const risk = riskMap.get(d.data.name)
         if (risk) {
-          return `${path}\n\nRisk Level: ${risk.level}\nConfidence: ${(risk.confidence * 100).toFixed(0)}%\nRisk Count: ${risk.risks.length}`
+          const riskType = risk.inherited ? '(Inherited from children)' : '(Direct match)'
+          const riskCount = risk.risks && risk.risks.length > 0 ? `\nDirect Risk Count: ${risk.risks.length}` : ''
+          return `${path}\n\nRisk Level: ${risk.level} ${riskType}\nConfidence: ${(risk.confidence * 100).toFixed(0)}%${riskCount}`
         }
         return path
       })
@@ -347,7 +462,7 @@ export default function LawTree() {
           padding: 12
         }}
       >
-        <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           {LAWS.map((law, idx) => (
             <div
               key={law.key}
@@ -368,6 +483,18 @@ export default function LawTree() {
               {law.label}
             </div>
           ))}
+          {inference && inference.lawKey && inference.lawKey !== LAWS[lawIdx].key && (
+            <div style={{ 
+              fontSize: 11, 
+              color: 'var(--color-text-tertiary)',
+              fontStyle: 'italic',
+              padding: '4px 8px',
+              background: 'var(--color-bg-tertiary)',
+              borderRadius: 6,
+            }}>
+              ⚠️ Inference results are for {inference.lawKey}
+            </div>
+          )}
         </div>
         <svg ref={svgRef} style={{ width: '100%', height: size.height, display: 'block' }} />
       </div>

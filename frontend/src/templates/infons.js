@@ -26,49 +26,46 @@ You are a multimodal infons extractor that parses input data into structured JSO
 【Infon Types】
 Situation Theory distinguishes these fundamental infon types, each with specific structure:
 
-1. **Individual Infons (IND)**: Concrete entities/objects
-   - Structure: {"iid": "ind:...", "infon_type": "IND", "names": [...], "references": [...]}
+1. **Description Infons (DESC)**: Entities and their attributes (combines entity and attribution information)
+   - Structure: {"iid": "desc:...", "infon_type": "DESC", "entity": "entity_category", "attribute": "concrete_value_from_text", "data_type": "string|number|boolean"}
+   - **KEY PRINCIPLE**: "attribute" MUST be the concrete, matchable word/phrase from the original text; "entity" is the abstract category or context
+   - Examples: 
+     * "27岁" → entity: "年龄", attribute: "27"
+     * "大麦芽醋" → entity: "成分", attribute: "大麦芽醋"
+     * "王小明" → entity: "姓名", attribute: "王小明"
    
-2. **Parameter Infons (PAR)**: Literal values, constants, measurements
-   - Structure: {"iid": "par:...", "infon_type": "PAR", "value": "...", "data_type": "string|number|boolean"}
+2. **Scenario Infons (SCEN)**: Temporal and spatial context (combines time and location information)
+   - Structure: {"iid": "scen:...", "infon_type": "SCEN", "temporal": "ISO8601|fuzzy_expression", "spatial": "place_name|coordinate", "granularity": "year|month|day|hour|...", "bbox": [x,y,w,h]}
+   - Examples: time references, locations, spatial regions, temporal-spatial combinations
    
-3. **Temporal Location Infons (TIM)**: Time references, temporal expressions
-   - Structure: {"iid": "tim:...", "infon_type": "TIM", "temporal_value": "ISO8601|fuzzy_expression", "granularity": "year|month|day|hour|..."}
-   
-4. **Spatial Location Infons (LOC)**: Places, coordinates, visual bounding boxes
-   - Structure: {"iid": "loc:...", "infon_type": "LOC", "spatial_value": "place_name|coordinate", "bbox": [x,y,w,h]}
-   
-5. **Relation Infons (REL)**: Predicates linking other infons
-   - Structure: {"iid": "rel:...", "infon_type": "REL", "relation_name": "...", "arity": N, "arg_types": [...]}
-   
-6. **Type Infons (TYP)**: Categories, classes, types
-   - Structure: {"iid": "typ:...", "infon_type": "TYP", "type_name": "...", "category": "..."}
+3. **Relation Infons (REL)**: Predicates linking other infons
+   - Structure: {"iid": "rel:...", "infon_type": "REL", "relation_name": "...", "arity": N, "arg_refs": [...], "arg_types": [...]}
+   - Examples: connections between entities, associations, dependencies
 
-7. **Situation Infons (SIT)**: Specific contexts, scenes, events, and situational frames where information occurs
+4. **Situation Infons (SIT)**: Specific contexts, scenes, events, and situational frames where information occurs
    - Structure: {"iid": "sit:...", "infon_type": "SIT", "situation_type": "discourse|scene|event|frame", "description": "brief_description", "context_span": {"text":{"char_start":0,"char_end":42},"image":{"bbox":[x,y,w,h]}}}
+   - Examples: discourse contexts, visual scenes, event frames
 
 【Output Principle】
 Extract each distinct information primitive as a separate infon. For "我叫王小明，今年27岁了":
-- Individual infon for "我" (user)
-- Relation infon for "名字" (name relation linking individual and parameter)
-- Parameter infon for "王小明" (name value)
-- Parameter infon for "27" (age value)
-- Temporal location infon for "今年" (current year)
-- Relation infon for "年龄关系" (age relation linking individual and parameter)
+- Description infon for "我" (entity: user)
+- Relation infon for "名字" (name relation)
+- Description infon for "王小明" (attribute: name value)
+- Scenario infon for "今年" (temporal: current year)
+- Description infon for "27" (attribute: age value)
+- Relation infon for "年龄关系" (age relation)
 
-For images with bounding boxes, spatial location infons include bbox coordinates.
+For images with bounding boxes, scenario infons include bbox coordinates for spatial information.
 `;
 
 export const ONTOLOGY = String.raw`
 【Infon Ontology】
 Each infon type serves specific representational purposes:
 
-- **IND**: Refer to entities mentioned/observed (people, objects, organizations)
-- **PAR**: Capture concrete values (numbers, strings, measurements, quantities)
-- **TIM**: Express temporal references (dates, relative time expressions, durations)  
-- **LOC**: Describe spatial information (places, coordinates, visual regions with bbox)
+- **DESC**: Capture entities and their attributes. CRITICAL: "attribute" field MUST contain the exact word/phrase from the input text that can be highlighted; "entity" field contains the abstract category. 
+  * Example: For "大麦芽醋" in text → entity: "成分", attribute: "大麦芽醋" (NOT entity: "大麦芽醋", attribute: "禁止成分")
+- **SCEN**: Express temporal and spatial context (dates, time expressions, places, coordinates, visual regions with bbox)
 - **REL**: Define relationships/predicates connecting other infons
-- **TYP**: Classify entities into categories/types
 - **SIT**: Represent specific contexts, scenes, events, or situational frames where information occurs
 `;
 
@@ -76,51 +73,35 @@ export const OUTPUT_CONSTRAINTS = String.raw`
 【Output Requirements】
 - Output only a single JSON object, no explanatory text or markdown fences
 - Each infon must have: iid, infon_type, record_time, confidence, support
-- Use stable IDs with appropriate prefixes: ind:, par:, tim:, loc:, rel:, typ:, sit:
+- Use stable IDs with appropriate prefixes: desc:, scen:, rel:, sit:
 - Confidence in [0,1]; only assign high confidence to explicitly observed information
 - Include occur_time when temporal context is available
-- For visual infons with bounding boxes, include bbox in spatial location infons
+- For visual infons with bounding boxes, include bbox in scenario infons
+- **CRITICAL: Extract entity, attribute, temporal, spatial, relation_name values in the SAME LANGUAGE as the input text. DO NOT translate. If input is Chinese, output Chinese values; if English, output English values.**
 `;
 
 export const OUTPUT_FORMAT = String.raw`
 {
   "infons": [
     {
-      "iid": "ind:...", "infon_type": "IND", 
-      "names": ["str"], "references": ["pronoun|mention"],
+      "iid": "desc:...", "infon_type": "DESC", 
+      "entity": "entity_name", "attribute": "attribute_value", "data_type": "string|number|boolean",
       "record_time": "ISO8601", "occur_time": "ISO8601", 
       "confidence": 0.95, "support": {"sid":"sit:...","justification":"str"}
     },
     {
-      "iid": "par:...", "infon_type": "PAR",
-      "value": "literal_value", "data_type": "string|number|boolean",
-      "record_time": "ISO8601", "occur_time": "ISO8601",
-      "confidence": 0.95, "support": {"sid":"sit:...","justification":"str"}
-    },
-    {
-      "iid": "tim:...", "infon_type": "TIM",
-      "temporal_value": "ISO8601|fuzzy_expression", "granularity": "year|month|day|hour",
+      "iid": "scen:...", "infon_type": "SCEN",
+      "temporal": "ISO8601|fuzzy_expression", "spatial": "place_name|coordinate", 
+      "granularity": "year|month|day|hour", "bbox": [x,y,w,h],
       "record_time": "ISO8601", "occur_time": "ISO8601",
       "confidence": 0.90, "support": {"sid":"sit:...","justification":"str"}
-    },
-    {
-      "iid": "loc:...", "infon_type": "LOC",
-      "spatial_value": "place_name|coordinate", "bbox": [x,y,w,h],
-      "record_time": "ISO8601", "occur_time": "ISO8601",
-      "confidence": 0.85, "support": {"sid":"sit:...","justification":"str"}
     },
     {
       "iid": "rel:...", "infon_type": "REL",
       "relation_name": "age_of|holding|located_at", "arity": 2,
-      "arg_refs": ["ind:...","par:..."], "arg_types": ["IND","PAR"],
+      "arg_refs": ["desc:...","scen:..."], "arg_types": ["DESC","SCEN"],
       "record_time": "ISO8601", "occur_time": "ISO8601",
       "confidence": 0.90, "support": {"sid":"sit:...","justification":"str"}
-    },
-    {
-      "iid": "typ:...", "infon_type": "TYP",
-      "type_name": "Person|Object|Place", "category": "entity_class",
-      "record_time": "ISO8601", "occur_time": "ISO8601",
-      "confidence": 0.95, "support": {"sid":"sit:...","justification":"str"}
     },
     {
       "iid": "sit:...", "infon_type": "SIT",
@@ -137,21 +118,27 @@ export const TEXT_EXTRACTION = String.raw`
 For each text input, extract separate infons for each distinct information primitive:
 
 1. **Situation Infons (SIT)**: Create for specific discourse contexts, scenes, or events (sentence/paragraph boundaries)
-2. **Individual Infons (IND)**: Extract for people, objects, organizations mentioned
-3. **Parameter Infons (PAR)**: Extract literal values, numbers, measurements, quantities  
-4. **Temporal Location Infons (TIM)**: Extract time references ("今年", "2024年", "昨天", specific dates)
-5. **Spatial Location Infons (LOC)**: Extract place names, addresses, geographic references
-6. **Relation Infons (REL)**: Extract predicates connecting other infons (age_of, lives_in, works_for)
-7. **Type Infons (TYP)**: Extract categories/classes when explicitly stated
+2. **Description Infons (DESC)**: Extract entities and their attributes. **CRITICAL RULE: The "attribute" field MUST contain the exact word/phrase from the input text (for text highlighting); the "entity" field contains the abstract category.**
+   * Correct: For "大麦芽醋" in text → {"entity": "成分", "attribute": "大麦芽醋"}
+   * Wrong: {"entity": "大麦芽醋", "attribute": "禁止成分"} ← This makes "禁止成分" unhighlightable
+   * Correct: For "27岁" → {"entity": "年龄", "attribute": "27"}
+   * Correct: For "王小明" → {"entity": "姓名", "attribute": "王小明"}
+3. **Scenario Infons (SCEN)**: Extract temporal and spatial context (time references like "今年", "2024年", "昨天"; place names, addresses, geographic references). **Use the EXACT words from the input text.**
+4. **Relation Infons (REL)**: Extract predicates connecting other infons. **Use words in the SAME LANGUAGE as the input.**
+
+**LANGUAGE CONSISTENCY RULE: If the input text is in Chinese, extract all values (entity, attribute, temporal, spatial, relation_name) in Chinese. If in English, extract in English. DO NOT translate.**
 
 Example for "我叫王小明，今年27岁了":
-- SIT infon: text context span
-- IND infon: "我" (speaker/first person)  
-- REL infon: "名字" (name relation linking individual and parameter)
-- PAR infon: "王小明" (name value)
-- TIM infon: "今年" (current year temporal reference)
-- REL infon: "年龄关系" (age relation linking individual and parameter)
-- PAR infon: "27" (numerical value)
+- SIT infon: text context span, description: "自我介绍"
+- DESC infon: entity "人称", attribute "我" (exact from text for highlighting)
+- REL infon: relation_name "名字"
+- DESC infon: entity "姓名", attribute "王小明" (exact from text for highlighting)
+- SCEN infon: temporal "今年" (exact from text for highlighting)
+- DESC infon: entity "年龄", attribute "27" (exact from text for highlighting)
+- REL infon: relation_name "年龄关系"
+
+Example for "别放大麦芽醋":
+- DESC infon: entity "成分", attribute "大麦芽醋" (exact from text for highlighting - NOT "禁止成分"!)
 `;
 
 export const IMAGE_EXTRACTION = String.raw`
@@ -159,14 +146,11 @@ export const IMAGE_EXTRACTION = String.raw`
 For each image input, extract separate infons for each distinct visual information primitive:
 
 1. **Situation Infons (SIT)**: Create for overall image context representing specific scenes or events captured in the image
-2. **Individual Infons (IND)**: Extract for detected objects, people, items in the image
-3. **Spatial Location Infons (LOC)**: Extract for each object's bounding box coordinates [x,y,w,h] and any geographical location if identifiable
-4. **Relation Infons (REL)**: Extract spatial and action relationships (holding, left_of, standing_on, wearing)
-5. **Type Infons (TYP)**: Extract object categories/classes from visual detection (Person, Car, Building)
-6. **Parameter Infons (PAR)**: Extract OCR text, numerical values visible in the image, and observable attribute values of subjects. For example, a Person's gender, age, height, weight, skin color, hair style, clothing, expression, and actions. These attribute values must be concrete and directly visible, not abstract (e.g., 'white skin color' instead of 'cheerful personality', '180cm height' instead of 'tall', 'short hair' instead of 'good looking', 'suit' instead of 'fashionable', 'smiling' instead of 'happy', 'running' instead of 'active').
-7. **Temporal Location Infons (TIM)**: Extract from EXIF metadata if available
+2. **Description Infons (DESC)**: Extract detected entities and their observable attributes. For objects, people, items: include visual properties like gender, age, height, weight, skin color, hair style, clothing, expression, actions, OCR text, numerical values. Attributes must be concrete and directly visible, not abstract (e.g., 'white skin color' instead of 'cheerful personality', '180cm height' instead of 'tall', 'short hair' instead of 'good looking', 'suit' instead of 'fashionable', 'smiling' instead of 'happy', 'running' instead of 'active').
+3. **Scenario Infons (SCEN)**: Extract spatial context with bounding box coordinates [x,y,w,h] for each object, geographical location if identifiable, and temporal information from EXIF metadata if available
+4. **Relation Infons (REL)**: Extract spatial and action relationships (holding, left_of, standing_on, wearing, located_at)
 
-Critical: Each detected object gets both IND infon (for the entity) and LOC infon (for its bounding box position).
+Critical: Each detected object should have DESC infon (for the entity and attributes) and SCEN infon (for spatial position/bbox).
 `;
 
 export const AUDIO_EXTRACTION = String.raw`
@@ -174,12 +158,9 @@ export const AUDIO_EXTRACTION = String.raw`
 For each audio input, extract separate infons for each distinct auditory information primitive:
 
 1. **Situation Infons (SIT)**: Create for audio segments/speaker turns representing specific events or conversational contexts with time spans
-2. **Individual Infons (IND)**: Extract for speakers, people, entities mentioned in speech
-3. **Parameter Infons (PAR)**: Extract literal values, numbers from ASR transcription
-4. **Temporal Location Infons (TIM)**: Extract time references mentioned in speech plus audio segment timestamps
-5. **Spatial Location Infons (LOC)**: Extract places mentioned in speech content
-6. **Relation Infons (REL)**: Extract speech acts (said, announced) and content relationships from spoken text
-7. **Type Infons (TYP)**: Extract categories mentioned in speech
+2. **Description Infons (DESC)**: Extract entities (speakers, people, entities mentioned in speech) and their attributes (literal values, numbers from ASR transcription)
+3. **Scenario Infons (SCEN)**: Extract temporal context (time references mentioned in speech, audio segment timestamps) and spatial context (places mentioned in speech content)
+4. **Relation Infons (REL)**: Extract speech acts (said, announced) and content relationships from spoken text
 
 Apply text extraction rules to ASR transcription content while maintaining audio-specific context.
 `;
@@ -189,24 +170,32 @@ Apply text extraction rules to ASR transcription content while maintaining audio
 export const SELF_CHECKLIST = String.raw`
 【Quality Check】Verify before output:
 - JSON object only? Format matches infon structure schema?
-- Each information primitive extracted as separate infon? (IND/PAR/TIM/LOC/REL/TYP/SIT)
-- Appropriate infon_type assigned for each? Correct ID prefixes used?
-- All bbox coordinates included in LOC infons for visual content?
+- Each information primitive extracted as separate infon? (DESC/SCEN/REL/SIT)
+- Appropriate infon_type assigned for each? Correct ID prefixes used (desc:, scen:, rel:, sit:)?
+- All bbox coordinates included in SCEN infons for visual content?
 - Situation infons describe specific contexts/events, not just modalities?
+- Description infons capture both entities and their attributes?
+- Scenario infons capture temporal and/or spatial context?
+- **LANGUAGE CHECK: Are entity, attribute, temporal, spatial, relation_name values in the SAME LANGUAGE as input? NO translation?**
+- **EXACT WORDS: Are values extracted using exact words from the original text where possible?**
 - Confidence scores realistic? High only for explicitly observed information?
 - record_time and occur_time properly assigned? No fabricated temporal data?
 - All infons have required fields: iid, infon_type, record_time, confidence, support?
 `;
 
 export const EXAMPLES_SNIPPET = String.raw`
-【Example】Text "我叫王小明，今年27岁了" extracts:
-- SIT infon: {"iid":"sit:self_introduction", "infon_type":"SIT", "situation_type":"discourse", "description":"personal introduction statement"}
-- IND infon: {"iid":"ind:user", "infon_type":"IND", "names":["我"], "references":["first_person"]}
-- REL infon: {"iid":"rel:name_relation", "infon_type":"REL", "relation_name":"name", "arg_refs":["ind:user","par:name"]}
-- PAR infon: {"iid":"par:name", "infon_type":"PAR", "value":"王小明", "data_type":"string"}
-- TIM infon: {"iid":"tim:current_year", "infon_type":"TIM", "temporal_value":"今年", "granularity":"year"}
-- PAR infon: {"iid":"par:27", "infon_type":"PAR", "value":"27", "data_type":"number"}
-- REL infon: {"iid":"rel:age_relation", "infon_type":"REL", "relation_name":"age_of", "arg_refs":["ind:user","par:27"]}
+【Example】Text "我叫王小明，今年27岁了" extracts (note: "attribute" contains exact text for highlighting):
+- SIT infon: {"iid":"sit:self_introduction", "infon_type":"SIT", "situation_type":"discourse", "description":"自我介绍"}
+- DESC infon: {"iid":"desc:speaker", "infon_type":"DESC", "entity":"人称", "attribute":"我", "data_type":"string"}
+- REL infon: {"iid":"rel:name_relation", "infon_type":"REL", "relation_name":"名字", "arg_refs":["desc:speaker","desc:name"]}
+- DESC infon: {"iid":"desc:name", "infon_type":"DESC", "entity":"姓名", "attribute":"王小明", "data_type":"string"}
+- SCEN infon: {"iid":"scen:current_year", "infon_type":"SCEN", "temporal":"今年", "granularity":"year"}
+- DESC infon: {"iid":"desc:age", "infon_type":"DESC", "entity":"年龄", "attribute":"27", "data_type":"number"}
+- REL infon: {"iid":"rel:age_relation", "infon_type":"REL", "relation_name":"年龄关系", "arg_refs":["desc:speaker","desc:age"]}
+
+【Counter-Example】For "别放大麦芽醋":
+- WRONG: {"entity":"大麦芽醋", "attribute":"禁止成分"} ← "禁止成分" is not in text, cannot highlight!
+- CORRECT: {"entity":"成分", "attribute":"大麦芽醋"} ← "大麦芽醋" is in text, can highlight!
 `;
 
 /* ---------- Combinator: Assemble final system prompt on demand ---------- */

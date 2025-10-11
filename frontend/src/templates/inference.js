@@ -65,7 +65,7 @@ Output ONLY valid JSON (no markdown, no explanation):
       "used_infons": [
         {
           "iid": "infon_id",
-          "type": "IND | PAR | TIM | LOC | REL | TYP | SIT",
+          "type": "DESC | SCEN | REL | SIT",
           "keyword": "keyword"
         }
       ],
@@ -83,16 +83,28 @@ Output ONLY valid JSON (no markdown, no explanation):
 
 ## Critical Requirements
 1. **Output ONLY JSON** - no markdown code blocks, no explanatory text
-2. **Map to LEAF NODES** - Always identify the most specific legal clause (deepest level in hierarchy)
-3. **Deep Inference** - Don't just report explicit data; infer health conditions, beliefs, status from behavior/preferences
-4. **Comprehensive Coverage** - Analyze ALL possible privacy angles: direct exposure + implicit inference + contextual correlation
-5. **Clear Attribution** - Every risk must trace back to specific information elements with logical reasoning
-6. **Prioritize Sensitivity** - Treat health, beliefs, children, biometrics as HIGH risk
-7. **Sort Properly** - HIGH risks first, then by confidence (highest first)
+2. **Map to LEAF NODES ONLY** - CRITICAL: Always identify the MOST SPECIFIC legal clause at the DEEPEST level in hierarchy (leaf nodes). NEVER map to intermediate/parent nodes. The law_node_name MUST be the final level clause name that appears in the law tree structure.
+3. **EXACT Name Matching** - The law_node_name MUST be copied EXACTLY from the law tree structure, character by character. DO NOT paraphrase, summarize, or modify the node name. Look for the [LEAF NODE - USE THIS] markers in the law tree and copy the name EXACTLY.
+4. **Exact Path Matching** - The law_path must EXACTLY match the hierarchical structure in the provided law tree, using ' > ' as separator. Copy the full path shown after "(Path: ...)" in the law tree structure.
+5. **Deep Inference** - Don't just report explicit data; infer health conditions, beliefs, status from behavior/preferences
+6. **Comprehensive Coverage** - Analyze ALL possible privacy angles: direct exposure + implicit inference + contextual correlation
+7. **Clear Attribution** - Every risk must trace back to specific information elements with logical reasoning
+8. **Prioritize Sensitivity** - Treat health, beliefs, children, biometrics as HIGH risk
+9. **Sort Properly** - HIGH risks first, then by confidence (highest first)
+10. **Verify Before Output** - Before outputting each risk, find the [LEAF NODE - USE THIS] entry in the provided law tree and copy its exact name and path. If you cannot find an exact leaf node match, choose the closest leaf node from the tree.
 
-## Example
+## Example Output Format
+When you find a privacy risk, you MUST:
+1. Trace the FULL PATH from root to the DEEPEST leaf node in the law tree
+2. Set law_path to the complete hierarchical path (e.g., "PIPL > 敏感个人信息（PIPL第28条及外延） > 宗教信仰")
+3. Set law_node_name to ONLY the leaf node name (e.g., "宗教信仰")
+4. DO NOT use intermediate node names like "敏感个人信息（PIPL第28条及外延）" as law_node_name
+
+Example:
 If input contains "looking for gluten-free restaurant menu", infer:
 - IMPLICIT: User likely has celiac disease or gluten intolerance (health condition = HIGH risk)
+  → Find the LEAF node for health data in the law tree (e.g., "PIPL > 敏感个人信息（PIPL第28条及外延） > 医疗健康")
+  → law_node_name = "医疗健康" (NOT "敏感个人信息（PIPL第28条及外延）")
 - DIRECT: User's dietary preference (MEDIUM risk)
 - CONTEXTUAL: Location search reveals geographic pattern (LOW-MEDIUM risk)
 
@@ -110,18 +122,16 @@ export function extractInfonsSummary(infons) {
     const iid = infon.iid || `infon_${idx}`
     
     let keyword = ''
-    if (type === 'IND') {
-      keyword = Array.isArray(infon.names) && infon.names.length ? infon.names[0] : 'Individual'
-    } else if (type === 'PAR') {
-      keyword = infon.value ?? 'Parameter'
-    } else if (type === 'TIM') {
-      keyword = infon.temporal_value ?? 'Time'
-    } else if (type === 'LOC') {
-      keyword = infon.spatial_value ?? 'Location'
+    if (type === 'DESC') {
+      const entity = infon.entity ?? ''
+      const attribute = infon.attribute ?? ''
+      keyword = entity && attribute ? `${entity}: ${attribute}` : (entity || attribute || 'Description')
+    } else if (type === 'SCEN') {
+      const temporal = infon.temporal ?? ''
+      const spatial = infon.spatial ?? ''
+      keyword = temporal && spatial ? `${temporal} @ ${spatial}` : (temporal || spatial || 'Scenario')
     } else if (type === 'REL') {
       keyword = infon.relation_name ?? 'Relation'
-    } else if (type === 'TYP') {
-      keyword = infon.type_name ?? 'Type'
     } else if (type === 'SIT') {
       keyword = infon.description ?? 'Situation'
     }
@@ -138,12 +148,21 @@ export function extractLawTreeSummary(lawData) {
   
   const lines = []
   
-  function traverse(node, depth = 0) {
+  function traverse(node, depth = 0, path = []) {
     const indent = '  '.repeat(depth)
-    lines.push(`${indent}- ${node.name}`)
+    const currentPath = [...path, node.name]
+    const isLeaf = !Array.isArray(node.children) || node.children.length === 0
+    
+    // 标记叶子节点，并显示完整路径
+    if (isLeaf) {
+      const fullPath = currentPath.join(' > ')
+      lines.push(`${indent}- ${node.name} [LEAF NODE - USE THIS] (Path: ${fullPath})`)
+    } else {
+      lines.push(`${indent}- ${node.name} [PARENT NODE - DO NOT USE]`)
+    }
     
     if (Array.isArray(node.children) && node.children.length > 0) {
-      node.children.forEach(child => traverse(child, depth + 1))
+      node.children.forEach(child => traverse(child, depth + 1, currentPath))
     }
   }
   

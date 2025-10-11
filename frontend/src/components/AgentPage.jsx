@@ -197,6 +197,32 @@ export default function AgentPage() {
     setSelectedTime(null)
   }, [currentSessionId])
 
+  // 监听信息元提取结果，当首次出现 SIT 类型时自动更新对话标题（中文注释）
+  useEffect(() => {
+    if (!currentSession?.id) return
+    
+    const runs = (infonSessions?.[currentSession.id]?.runs) || []
+    // 只检查已完成的 run
+    const doneRuns = runs.filter(r => r.status === 'done')
+    
+    for (const run of doneRuns) {
+      const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
+      for (const infon of infons) {
+        const type = String(infon.infon_type || '').toUpperCase()
+        if (type === 'SIT' && infon.description) {
+          // 获取当前会话标题
+          const currentTitle = currentSession.title || ''
+          // 如果标题是默认的 "New chat"，则更新为 SIT 的 description
+          if (currentTitle === 'New chat') {
+            const newTitle = String(infon.description).slice(0, 50) // 限制长度
+            renameSession?.(currentSession.id, newTitle)
+            return // 只更新一次
+          }
+        }
+      }
+    }
+  }, [currentSession?.id, currentSession?.title, infonSessions, renameSession])
+
   // 计算当前会话的信息元数据（用于PrivacyRiskAnalysis）（中文注释）
   const wordData = useMemo(() => {
     if (!currentSession?.id) return []
@@ -357,13 +383,10 @@ export default function AgentPage() {
   // 信息元类型对应的高亮颜色（中文注释）
   const getInfonColor = (infonType) => {
     const colors = {
-      IND: '#3b82f6',   // 个体：明亮蓝色
-      PAR: '#10b981',   // 参数：翠绿色
-      TIM: '#8b5cf6',   // 时间：柔和紫色
-      LOC: '#f59e0b',   // 位置：琥珀色
-      REL: '#0ea5e9',   // 关系：天空蓝（主题色）
-      TYP: '#06b6d4',   // 类型：青色
-      SIT: '#f97316',   // 情景：橙色
+      DESC: '#3b82f6',  // 描述（实体+属性）：蓝色
+      SCEN: '#10b981',  // 场景（时间+位置）：翠绿色
+      REL: '#8b5cf6',   // 关系：紫色
+      SIT: '#f59e0b',   // 情景：琥珀色
     }
     return colors[String(infonType).toUpperCase()] || '#64748b'
   }
@@ -374,19 +397,18 @@ export default function AgentPage() {
     const keywords = []
     const t = String(infon.infon_type || '').toUpperCase()
     
-    if (t === 'IND' && Array.isArray(infon.names)) {
-      keywords.push(...infon.names.filter(Boolean))
-    } else if (t === 'PAR' && infon.value != null) {
-      keywords.push(String(infon.value))
-    } else if (t === 'TIM' && infon.temporal_value) {
-      keywords.push(String(infon.temporal_value))
-    } else if (t === 'LOC' && infon.spatial_value) {
-      keywords.push(String(infon.spatial_value))
+    if (t === 'DESC') {
+      // 描述：提取实体和属性作为关键词（优先属性，因为属性是实际值）
+      if (infon.attribute) keywords.push(String(infon.attribute))
+      if (infon.entity) keywords.push(String(infon.entity))
+    } else if (t === 'SCEN') {
+      // 场景：提取时间和空间作为关键词（优先时间）
+      if (infon.temporal) keywords.push(String(infon.temporal))
+      if (infon.spatial) keywords.push(String(infon.spatial))
     } else if (t === 'REL' && infon.relation_name) {
       keywords.push(String(infon.relation_name))
-    } else if (t === 'TYP' && infon.type_name) {
-      keywords.push(String(infon.type_name))
     }
+    // SIT 不提取关键词用于高亮
     
     return keywords.filter(k => k && k.trim())
   }
@@ -748,32 +770,16 @@ export default function AgentPage() {
               {/* 信息元类型图例（中文注释） */}
               <div className={styles.infonLegend}>
                 <div className={styles.legendItem}>
-                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('IND') }}></span>
-                  <span className={styles.legendLabel}>Individual</span>
+                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('DESC') }}></span>
+                  <span className={styles.legendLabel}>Description (DESC) : Entity + Attribute</span>
                 </div>
                 <div className={styles.legendItem}>
-                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('PAR') }}></span>
-                  <span className={styles.legendLabel}>Parameter</span>
-                </div>
-                <div className={styles.legendItem}>
-                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('TIM') }}></span>
-                  <span className={styles.legendLabel}>Time</span>
-                </div>
-                <div className={styles.legendItem}>
-                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('LOC') }}></span>
-                  <span className={styles.legendLabel}>Location</span>
+                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('SCEN') }}></span>
+                  <span className={styles.legendLabel}>Scenario (SCEN) : Time + Location</span>
                 </div>
                 <div className={styles.legendItem}>
                   <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('REL') }}></span>
-                  <span className={styles.legendLabel}>Relation</span>
-                </div>
-                <div className={styles.legendItem}>
-                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('TYP') }}></span>
-                  <span className={styles.legendLabel}>Type</span>
-                </div>
-                <div className={styles.legendItem}>
-                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('SIT') }}></span>
-                  <span className={styles.legendLabel}>Situation</span>
+                  <span className={styles.legendLabel}>Relation (REL)</span>
                 </div>
               </div>
               <div className={styles.leftPaneScroll} ref={listRef} style={{ flex: 1, overflow: 'auto' }}>

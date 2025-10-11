@@ -48,13 +48,10 @@ export default function WordCloud({ selectedTime = null }) {
   // 信息元类型颜色映射（中文注释）
   const getInfonColor = (infonType) => {
     const colors = {
-      IND: '#3b82f6',   // 个体：蓝色
-      PAR: '#10b981',   // 参数：绿色
-      TIM: '#8b5cf6',   // 时间：紫色
-      LOC: '#f59e0b',   // 位置：橙色
-      REL: '#0ea5e9',   // 关系：天蓝色
-      TYP: '#06b6d4',   // 类型：青色
-      SIT: '#f97316',   // 情景：橙红色
+      DESC: '#3b82f6',  // 描述（实体+属性）：蓝色
+      SCEN: '#10b981',  // 场景（时间+位置）：翠绿色
+      REL: '#8b5cf6',   // 关系：紫色
+      SIT: '#f59e0b',   // 情景：琥珀色
     }
     return colors[String(infonType).toUpperCase()] || '#64748b'
   }
@@ -63,15 +60,19 @@ export default function WordCloud({ selectedTime = null }) {
   const getInfonKeyword = (infon) => {
     if (!infon || typeof infon !== 'object') return 'Unknown'
     const t = String(infon.infon_type || '').toUpperCase()
-    if (t === 'IND') {
-      if (Array.isArray(infon.names) && infon.names.length) return String(infon.names[0])
-      return 'Individual'
+    if (t === 'DESC') {
+      // 描述：优先显示属性，其次实体
+      const attribute = infon.attribute ?? ''
+      const entity = infon.entity ?? ''
+      return attribute || entity || 'Description'
     }
-    if (t === 'PAR') return String(infon.value ?? 'Parameter')
-    if (t === 'TIM') return String(infon.temporal_value ?? 'Time')
-    if (t === 'LOC') return String(infon.spatial_value ?? 'Location')
+    if (t === 'SCEN') {
+      // 场景：优先显示时间，其次空间
+      const temporal = infon.temporal ?? ''
+      const spatial = infon.spatial ?? ''
+      return temporal || spatial || 'Scenario'
+    }
     if (t === 'REL') return String(infon.relation_name ?? 'Relation')
-    if (t === 'TYP') return String(infon.type_name ?? 'Type')
     if (t === 'SIT') return String(infon.description ?? 'Situation')
     return t || 'Unknown'
   }
