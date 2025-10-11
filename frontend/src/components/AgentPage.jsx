@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState, useMemo, useLayoutEffect } from 're
 import { useStore } from '../store'
 import styles from './AgentPage.module.css'
 import MarkdownMessage from './MarkdownMessage'
-import { Splitter, Select, Button, Upload, Progress, Spin, Input, Modal, Popconfirm } from 'antd'
-import { SendOutlined, StopOutlined, CameraOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
+import { Splitter, Select, Button, Upload, Progress, Spin, Input, Modal, Popconfirm, message as antdMessage, Tooltip } from 'antd'
+import { SendOutlined, StopOutlined, CameraOutlined, PlusOutlined, EditOutlined, DeleteOutlined, CopyOutlined, RedoOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons'
 import WordCloud from './WordCloud'
 import LawTree from './LawTree'
 import Timeline from './Timeline'
@@ -203,10 +203,21 @@ export default function AgentPage() {
   const [apiKey, setApiKey] = useState('')
   // 500ms 防抖计时器（中文注释）
   const pendingTimerRef = useRef(null)
+  // 记录上次推断时的信息元数量（中文注释）：防止重复推断
+  const lastInferenceRunCountRef = useRef(0)
   // 图片预览 Modal（中文注释）
   const [previewImage, setPreviewImage] = useState(null)
   // 时间线选中的时间（中文注释）：用于筛选 WordCloud 中的信息元
   const [selectedTime, setSelectedTime] = useState(null)
+  
+  // 消息编辑状态（中文注释）
+  const [editingMessageId, setEditingMessageId] = useState(null)
+  const [editingContent, setEditingContent] = useState('')
+  const [editingImages, setEditingImages] = useState([])
+  const [savedMessageInfons, setSavedMessageInfons] = useState(null) // 保存被编辑消息的信息元
+  
+  // Pending 信息元提取的状态（用于编辑时的实时提取）
+  const [editingPendingInfonIndex, setEditingPendingInfonIndex] = useState({})
   // 左侧栏编辑状态（中文注释）：用于追踪正在编辑的 session 和编辑的标题
   const [editingSessionId, setEditingSessionId] = useState(null)
   const [editingTitle, setEditingTitle] = useState('')
@@ -214,7 +225,45 @@ export default function AgentPage() {
   // 会话切换时重置时间选择（中文注释）
   useEffect(() => {
     setSelectedTime(null)
+    lastInferenceRunCountRef.current = 0 // 重置推断计数器
   }, [currentSessionId])
+
+  // 自动隐私推断（中文注释）：当没有正在提取的信息元时自动启动
+  useEffect(() => {
+    if (!currentSession || !selectedLaw) return
+    
+    // 检查是否有正在运行的信息元提取
+    const runs = infonSessions?.[currentSession.id]?.runs || []
+    const hasRunningInfons = runs.some(run => run.status === 'running')
+    
+    // 检查当前的推断状态
+    const currentInference = privacyInferences?.[currentSession.id]
+    const isInferenceRunning = currentInference?.status === 'running'
+    
+    // 如果有信息元正在提取，且推断正在运行，则中止推断
+    if (hasRunningInfons && isInferenceRunning) {
+      abortPrivacyInference?.()
+      return
+    }
+    
+    // 统计完成的信息元runs数量
+    const doneRuns = runs.filter(run => run.status === 'done' && run.resultJson?.infons?.length > 0)
+    const currentRunCount = doneRuns.length
+    
+    // 检查是否有新的信息元（与上次推断时相比）
+    const hasNewInfons = currentRunCount > lastInferenceRunCountRef.current
+    
+    // 如果没有信息元正在提取，有新的信息元数据，且推断未运行，则启动推断
+    if (!hasRunningInfons && hasNewInfons && !isInferenceRunning && currentRunCount > 0) {
+      // 使用延迟避免频繁触发
+      const timer = setTimeout(() => {
+        lastInferenceRunCountRef.current = currentRunCount // 更新记录
+        startPrivacyInference?.()
+      }, 1000)
+      return () => clearTimeout(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [infonSessions, currentSessionId, selectedLaw, privacyInferences])
 
   // 监听信息元提取结果，当首次出现 SIT 类型时自动更新对话标题（中文注释）
   useEffect(() => {
@@ -639,6 +688,279 @@ export default function AgentPage() {
     } catch (_) {}
   }
 
+  // 复制消息内容（中文注释）
+  const handleCopyMessage = (content) => {
+    navigator.clipboard.writeText(content).then(() => {
+      antdMessage.success('已复制到剪贴板')
+    }).catch(() => {
+      antdMessage.error('复制失败')
+    })
+  }
+
+  // 开始编辑消息（中文注释）：暂时移除该消息的信息元
+  const handleEditMessage = (messageId, content, images) => {
+    setEditingMessageId(messageId)
+    setEditingContent(content || '')
+    setEditingImages(images || [])
+    
+    // 保存并暂时移除该消息的信息元
+    const session = getCurrentSession()
+    if (session) {
+      const currentInfonSession = infonSessions?.[session.id]
+      if (currentInfonSession?.runs) {
+        // 找到该消息的所有信息元runs
+        const messageRuns = currentInfonSession.runs.filter(run => 
+          run.targetType === 'message' && run.targetKey === messageId
+        )
+        
+        if (messageRuns.length > 0) {
+          // 保存
+          setSavedMessageInfons({ messageId, runs: messageRuns })
+          
+          // 从infonSessions中移除
+          const filteredRuns = currentInfonSession.runs.filter(run => 
+            !(run.targetType === 'message' && run.targetKey === messageId)
+          )
+          
+          useStore.setState({
+            infonSessions: {
+              ...infonSessions,
+              [session.id]: { ...currentInfonSession, runs: filteredRuns }
+            }
+          })
+        }
+      }
+    }
+    
+    // 信息元提取会由useEffect自动触发
+  }
+
+  // 取消编辑（中文注释）：恢复原消息的信息元
+  const handleCancelEdit = () => {
+    // 恢复之前保存的信息元
+    if (savedMessageInfons) {
+      const session = getCurrentSession()
+      if (session) {
+        const currentInfonSession = infonSessions?.[session.id]
+        if (currentInfonSession) {
+          useStore.setState({
+            infonSessions: {
+              ...infonSessions,
+              [session.id]: {
+                ...currentInfonSession,
+                runs: [...currentInfonSession.runs, ...savedMessageInfons.runs]
+              }
+            }
+          })
+        }
+      }
+      setSavedMessageInfons(null)
+    }
+    
+    setEditingMessageId(null)
+    setEditingContent('')
+    setEditingImages([])
+    // 清除 pending 信息元
+    clearAllPendingInfons?.()
+  }
+
+  // 保存编辑（中文注释）
+  const handleSaveEdit = async () => {
+    if (!editingMessageId) return
+    
+    const text = editingContent.trim()
+    if (!text && editingImages.length === 0) {
+      antdMessage.warning('消息内容不能为空')
+      return
+    }
+
+    // 获取当前 session
+    const session = getCurrentSession()
+    if (!session) return
+
+    // 找到要编辑的消息及其后续消息
+    const messageIndex = session.messages.findIndex(m => m.id === editingMessageId)
+    if (messageIndex === -1) return
+
+    // 删除该消息及其后续的所有消息
+    const newMessages = session.messages.slice(0, messageIndex)
+    const deletedMessages = session.messages.slice(messageIndex) // 被删除的消息
+    const deletedMessageIds = new Set(deletedMessages.map(m => m.id))
+    
+    // 更新 session 的消息列表
+    const updatedSessions = sessions.map(s => {
+      if (s.id === session.id) {
+        return { ...s, messages: newMessages }
+      }
+      return s
+    })
+    
+    // 清理被删除消息的信息元（中文注释）
+    const currentInfonSession = infonSessions?.[session.id]
+    if (currentInfonSession?.runs) {
+      const filteredRuns = currentInfonSession.runs.filter(run => {
+        // 保留不属于被删除消息的 runs
+        if (run.targetType === 'message' && deletedMessageIds.has(run.targetKey)) {
+          return false // 删除这个 run
+        }
+        return true // 保留这个 run
+      })
+      
+      useStore.setState({
+        infonSessions: {
+          ...infonSessions,
+          [session.id]: { ...currentInfonSession, runs: filteredRuns }
+        }
+      })
+    }
+    
+    // 清空隐私推理结果（中文注释）：因为消息改变了，需要重新推理
+    const currentPrivacyInference = privacyInferences?.[session.id]
+    if (currentPrivacyInference) {
+      useStore.setState({
+        privacyInferences: {
+          ...privacyInferences,
+          [session.id]: {
+            status: 'idle',
+            risks: [],
+            buffer: '',
+            abortController: null,
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          }
+        }
+      })
+    }
+    
+    // 更新 store 的 sessions
+    useStore.setState({ sessions: updatedSessions })
+
+    // 采纳 pending 信息元
+    // 注意：这里我们将 pending 信息元转移到即将发送的新消息
+    
+    // 发送新消息
+    if (editingImages.length > 0) {
+      const userId = await useStore.getState().sendMessageWithImages(text, editingImages)
+      try {
+        const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
+        if (!adopted) startMessageInfons?.(userId)
+      } catch (_) {}
+    } else {
+      const userId = await sendMessage(text)
+      try {
+        const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
+        if (!adopted) startMessageInfons?.(userId)
+      } catch (_) {}
+    }
+
+    // 清理编辑状态
+    handleCancelEdit()
+    
+    antdMessage.success('消息已更新并重新生成')
+  }
+
+  // 重试生成（中文注释）：保存用户消息的信息元，删除用户和助手消息，重新发送，然后迁移信息元
+  const handleRetry = async () => {
+    const session = getCurrentSession()
+    if (!session || !session.messages || session.messages.length === 0) return
+
+    const messages = session.messages
+    const lastUserIndex = [...messages].reverse().findIndex(m => m.role === 'user')
+    if (lastUserIndex === -1) return
+
+    const actualIndex = messages.length - 1 - lastUserIndex
+    const lastUserMessage = messages[actualIndex]
+    const oldUserMessageId = lastUserMessage.id
+
+    // 保存该用户消息的信息元
+    const currentInfonSession = infonSessions?.[session.id]
+    let savedUserInfonRuns = []
+    if (currentInfonSession?.runs) {
+      savedUserInfonRuns = currentInfonSession.runs.filter(run => 
+        run.targetType === 'message' && run.targetKey === oldUserMessageId
+      )
+    }
+
+    // 删除从用户消息开始的所有消息（包括用户和助手消息）
+    const updatedMessages = messages.slice(0, actualIndex)
+    const deletedMessages = messages.slice(actualIndex)
+    const deletedMessageIds = deletedMessages.map(m => m.id)
+
+    // 清理被删除消息的信息元（暂时）
+    if (currentInfonSession?.runs) {
+      const filteredRuns = currentInfonSession.runs.filter(run => {
+        if (run.targetType === 'message' && deletedMessageIds.includes(run.targetKey)) {
+          return false
+        }
+        return true
+      })
+      
+      useStore.setState({
+        infonSessions: {
+          ...infonSessions,
+          [session.id]: { ...currentInfonSession, runs: filteredRuns }
+        }
+      })
+    }
+    
+    // 清空隐私推理结果
+    const currentPrivacyInference = privacyInferences?.[session.id]
+    if (currentPrivacyInference) {
+      useStore.setState({
+        privacyInferences: {
+          ...privacyInferences,
+          [session.id]: {
+            status: 'idle',
+            risks: [],
+            buffer: '',
+            abortController: null,
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          }
+        }
+      })
+    }
+
+    // 更新 session
+    const updatedSessions = sessions.map(s => {
+      if (s.id === session.id) {
+        return { ...s, messages: updatedMessages }
+      }
+      return s
+    })
+    useStore.setState({ sessions: updatedSessions })
+
+    // 重新发送用户消息
+    const hasImages = Array.isArray(lastUserMessage.images) && lastUserMessage.images.length > 0
+    let newUserMessageId
+    if (hasImages) {
+      newUserMessageId = await useStore.getState().sendMessageWithImages(lastUserMessage.content, lastUserMessage.images)
+    } else {
+      newUserMessageId = await sendMessage(lastUserMessage.content)
+    }
+
+    // 迁移信息元到新的用户消息（如果有保存的信息元）
+    if (savedUserInfonRuns.length > 0 && newUserMessageId) {
+      const updatedRuns = savedUserInfonRuns.map(run => ({
+        ...run,
+        targetKey: newUserMessageId // 更新到新的消息ID
+      }))
+      
+      const latestInfonSession = useStore.getState().infonSessions?.[session.id]
+      if (latestInfonSession) {
+        useStore.setState({
+          infonSessions: {
+            ...useStore.getState().infonSessions,
+            [session.id]: {
+              ...latestInfonSession,
+              runs: [...latestInfonSession.runs, ...updatedRuns]
+            }
+          }
+        })
+      }
+    }
+  }
+
   // 处理图片选择（中文注释）：将文件读取为 data URL 后加入队列
   const handlePickImages = async (e) => {
     const files = Array.from(e.target.files || [])
@@ -664,12 +986,18 @@ export default function AgentPage() {
   useEffect(() => {
     try { abortPendingInfons?.(false) } catch (_) {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, landingInput])
+  }, [input, landingInput, editingContent])
 
   // 500ms 防抖：在用户停止输入 500ms 后启动 pending 提取（中文注释）
+  // 支持主输入框和编辑框两种模式
   useEffect(() => {
-    const textToUse = hasMessages ? (input || '').trim() : (landingInput || '').trim()
-    const imgs = [...selectedImages]
+    // 优先使用编辑模式的内容（如果正在编辑）
+    const isEditing = editingMessageId !== null
+    const textToUse = isEditing 
+      ? (editingContent || '').trim()
+      : (hasMessages ? (input || '').trim() : (landingInput || '').trim())
+    const imgs = isEditing ? [...editingImages] : [...selectedImages]
+    
     if (pendingTimerRef.current) {
       clearTimeout(pendingTimerRef.current)
       pendingTimerRef.current = null
@@ -687,7 +1015,7 @@ export default function AgentPage() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, landingInput, selectedImages, hasMessages])
+  }, [input, landingInput, selectedImages, hasMessages, editingMessageId, editingContent, editingImages])
 
   return (
     <div className={styles.shell}>
@@ -857,11 +1185,11 @@ export default function AgentPage() {
               <div className={styles.infonLegend}>
                 <div className={styles.legendItem}>
                   <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('DESC') }}></span>
-                  <span className={styles.legendLabel}>Description (DESC) : Entity + Attribute</span>
+                  <span className={styles.legendLabel}>Description (DESC)</span>
                 </div>
                 <div className={styles.legendItem}>
                   <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('SCEN') }}></span>
-                  <span className={styles.legendLabel}>Scenario (SCEN) : Time + Location</span>
+                  <span className={styles.legendLabel}>Scenario (SCEN)</span>
                 </div>
                 <div className={styles.legendItem}>
                   <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('REL') }}></span>
@@ -881,49 +1209,144 @@ export default function AgentPage() {
                         <div key={m.id} className={`${styles.msgRow} ${isUser ? styles.rowUser : styles.rowAssistant}`}>
                           {isUser ? (
                             <>
-                              <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`} style={{ position: 'relative' }}>
-                                {messageRelations.length > 0 && (
-                                  <RelationConnections messageId={m.id} relations={messageRelations} infonIndex={infonIndex} />
-                                )}
-                                <div className={styles.msgContent} style={{ position: 'relative', zIndex: 2 }}>{renderHighlightedText(m.content, m.id)}</div>
-                                {Array.isArray(m.images) && m.images.length > 0 && (
-                                  <div className={styles.msgImages}>
-                                    {m.images.map((src, imgIdx) => (
-                                      <img key={imgIdx} src={src} alt={`img-${imgIdx}`} className={styles.msgImage} />
-                                    ))}
+                              <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                                {editingMessageId === m.id ? (
+                                  // 编辑模式（中文注释）：使用和主输入框相同的样式
+                                  <div className={styles.editingComposer}>
+                                    {/* 图片预览 */}
+                                    {editingImages.length > 0 && (
+                                      <div className={styles.composerPreviews}>
+                                        {editingImages.map((src, imgIdx) => (
+                                          <div key={imgIdx} className={styles.composerPreviewItem}>
+                                            <img src={src} alt={`img-${imgIdx}`} className={styles.composerPreviewImg} />
+                                            <button
+                                              className={styles.composerPreviewRemove}
+                                              onClick={() => setEditingImages(editingImages.filter((_, i) => i !== imgIdx))}
+                                            >✕</button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {/* 输入框 */}
+                                    <div className={styles.composerRow}>
+                                      <HighlightInput
+                                        className={styles.composerInput}
+                                        value={editingContent}
+                                        onChange={setEditingContent}
+                                        placeholder="编辑消息..."
+                                        highlights={pendingHighlights}
+                                        autoSize={{ minRows: 2, maxRows: 10 }}
+                                      />
+                                    </div>
+                                    {/* Pending关系标签显示 */}
+                                    {pendingRelations.length > 0 && (
+                                      <div className={styles.relationTags} style={{ marginTop: 8 }}>
+                                        {pendingRelations.map(({ infon }, idx) => {
+                                          const relatedInfons = getRelatedInfons(infon, pendingInfonIndex)
+                                          const color = getInfonColor('REL')
+                                          
+                                          return (
+                                            <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
+                                              <span className={styles.relationTagName} style={{ color: color }}>
+                                                {infon.relation_name || 'Relation'}
+                                              </span>
+                                              <span className={styles.relationTagArgs}>
+                                                {relatedInfons.map((rel, ri) => {
+                                                  const relColor = getInfonColor(rel.infon_type)
+                                                  const keywords = getMatchKeywords(rel)
+                                                  const label = keywords[0] || rel.iid
+                                                  return (
+                                                    <React.Fragment key={ri}>
+                                                      {ri > 0 && <span className={styles.relationTagSep}>→</span>}
+                                                      <span className={styles.relationTagArg} style={{ color: relColor }}>
+                                                        {label}
+                                                      </span>
+                                                    </React.Fragment>
+                                                  )
+                                                })}
+                                              </span>
+                                            </div>
+                                          )
+                                        })}
+                                      </div>
+                                    )}
+                                    {/* 操作按钮 */}
+                                    <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
+                                      <Button size="small" icon={<CheckOutlined />} onClick={handleSaveEdit} type="primary">保存并重新生成</Button>
+                                      <Button size="small" icon={<CloseOutlined />} onClick={handleCancelEdit}>取消</Button>
+                                    </div>
                                   </div>
-                                )}
-                                {/* 关系标签（中文注释） */}
-                                {messageRelations.length > 0 && (
-                                  <div className={styles.relationTags}>
-                                    {messageRelations.map(({ infon }, idx) => {
-                                      const relatedInfons = getRelatedInfons(infon, infonIndex)
-                                      const color = getInfonColor('REL')
-                                      
-                                      return (
-                                        <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
-                                          <span className={styles.relationTagName} style={{ color: color }}>
-                                            {infon.relation_name || 'Relation'}
-                                          </span>
-                                          <span className={styles.relationTagArgs}>
-                                            {relatedInfons.map((rel, ri) => {
-                                              const relColor = getInfonColor(rel.infon_type)
-                                              const keywords = getMatchKeywords(rel)
-                                              const label = keywords[0] || rel.iid
-                                              return (
-                                                <React.Fragment key={ri}>
-                                                  {ri > 0 && <span className={styles.relationTagSep}>→</span>}
-                                                  <span className={styles.relationTagArg} style={{ color: relColor }}>
-                                                    {label}
-                                                  </span>
-                                                </React.Fragment>
-                                              )
-                                            })}
-                                          </span>
+                                ) : (
+                                  // 正常显示模式（中文注释）
+                                  <>
+                                    <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`} style={{ position: 'relative' }}>
+                                      {messageRelations.length > 0 && (
+                                        <RelationConnections messageId={m.id} relations={messageRelations} infonIndex={infonIndex} />
+                                      )}
+                                      <div className={styles.msgContent} style={{ position: 'relative', zIndex: 2 }}>{renderHighlightedText(m.content, m.id)}</div>
+                                      {Array.isArray(m.images) && m.images.length > 0 && (
+                                        <div className={styles.msgImages}>
+                                          {m.images.map((src, imgIdx) => (
+                                            <img key={imgIdx} src={src} alt={`img-${imgIdx}`} className={styles.msgImage} />
+                                          ))}
                                         </div>
-                                      )
-                                    })}
-                                  </div>
+                                      )}
+                                      {/* 关系标签（中文注释） */}
+                                      {messageRelations.length > 0 && (
+                                        <div className={styles.relationTags}>
+                                          {messageRelations.map(({ infon }, idx) => {
+                                            const relatedInfons = getRelatedInfons(infon, infonIndex)
+                                            const color = getInfonColor('REL')
+                                            
+                                            return (
+                                              <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
+                                                <span className={styles.relationTagName} style={{ color: color }}>
+                                                  {infon.relation_name || 'Relation'}
+                                                </span>
+                                                <span className={styles.relationTagArgs}>
+                                                  {relatedInfons.map((rel, ri) => {
+                                                    const relColor = getInfonColor(rel.infon_type)
+                                                    const keywords = getMatchKeywords(rel)
+                                                    const label = keywords[0] || rel.iid
+                                                    return (
+                                                      <React.Fragment key={ri}>
+                                                        {ri > 0 && <span className={styles.relationTagSep}>→</span>}
+                                                        <span className={styles.relationTagArg} style={{ color: relColor }}>
+                                                          {label}
+                                                        </span>
+                                                      </React.Fragment>
+                                                    )
+                                                  })}
+                                                </span>
+                                              </div>
+                                            )
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                    {/* 用户消息操作按钮（中文注释） */}
+                                    <div className={styles.messageActions} style={{ justifyContent: 'flex-end' }}>
+                                      <Tooltip title="复制">
+                                        <Button 
+                                          type="text" 
+                                          size="small" 
+                                          icon={<CopyOutlined />}
+                                          onClick={() => handleCopyMessage(m.content)}
+                                          className={styles.messageActionBtn}
+                                        />
+                                      </Tooltip>
+                                      <Tooltip title="编辑">
+                                        <Button 
+                                          type="text" 
+                                          size="small" 
+                                          icon={<EditOutlined />}
+                                          onClick={() => handleEditMessage(m.id, m.content, m.images)}
+                                          className={styles.messageActionBtn}
+                                          disabled={isGenerating}
+                                        />
+                                      </Tooltip>
+                                    </div>
+                                  </>
                                 )}
                               </div>
                               <div className={styles.avatar}>U</div>
@@ -931,57 +1354,83 @@ export default function AgentPage() {
                           ) : (
                             <>
                               <div className={styles.avatar}>A</div>
-                              <div className={`${styles.msgBubble} ${styles.msgBubbleAssistant}`} style={{ position: 'relative' }}>
-                                {messageRelations.length > 0 && (
-                                  <RelationConnections messageId={m.id} relations={messageRelations} infonIndex={infonIndex} />
-                                )}
-                                {m.reasoning && (
-                                  <div className={styles.reasoningBox}>
-                                    <div className={styles.reasoningTitle}>Thinking</div>
-                                    <div className={styles.reasoningBody}>
-                                      <MarkdownMessage content={m.reasoning} />
+                              <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                                <div className={`${styles.msgBubble} ${styles.msgBubbleAssistant}`} style={{ position: 'relative' }}>
+                                  {messageRelations.length > 0 && (
+                                    <RelationConnections messageId={m.id} relations={messageRelations} infonIndex={infonIndex} />
+                                  )}
+                                  {m.reasoning && (
+                                    <div className={styles.reasoningBox}>
+                                      <div className={styles.reasoningTitle}>Thinking</div>
+                                      <div className={styles.reasoningBody}>
+                                        <MarkdownMessage content={m.reasoning} />
+                                      </div>
+                                    </div>
+                                  )}
+                                  <div className={styles.msgContent}>
+                                    <div className={styles.assistantTextHighlight} style={{ position: 'relative', zIndex: 2 }}>
+                                      {renderHighlightedText(m.content, m.id)}
                                     </div>
                                   </div>
-                                )}
-                                <div className={styles.msgContent}>
-                                  <div className={styles.assistantTextHighlight} style={{ position: 'relative', zIndex: 2 }}>
-                                    {renderHighlightedText(m.content, m.id)}
-                                  </div>
+                                  {/* 关系标签（中文注释） */}
+                                  {messageRelations.length > 0 && (
+                                    <div className={styles.relationTags}>
+                                      {messageRelations.map(({ infon }, idx) => {
+                                        const relatedInfons = getRelatedInfons(infon, infonIndex)
+                                        const color = getInfonColor('REL')
+                                        
+                                        return (
+                                          <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
+                                            <span className={styles.relationTagName} style={{ color: color }}>
+                                              {infon.relation_name || 'Relation'}
+                                            </span>
+                                            <span className={styles.relationTagArgs}>
+                                              {relatedInfons.map((rel, ri) => {
+                                                const relColor = getInfonColor(rel.infon_type)
+                                                const keywords = getMatchKeywords(rel)
+                                                const label = keywords[0] || rel.iid
+                                                return (
+                                                  <React.Fragment key={ri}>
+                                                    {ri > 0 && <span className={styles.relationTagSep}>→</span>}
+                                                    <span className={styles.relationTagArg} style={{ color: relColor }}>
+                                                      {label}
+                                                    </span>
+                                                  </React.Fragment>
+                                                )
+                                              })}
+                                            </span>
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  )}
+                                  {m.streaming ? <div className={styles.cursor}>▍</div> : null}
+                                  {m.error ? <div className={styles.error}>Error: {m.error}</div> : null}
                                 </div>
-                                {/* 关系标签（中文注释） */}
-                                {messageRelations.length > 0 && (
-                                  <div className={styles.relationTags}>
-                                    {messageRelations.map(({ infon }, idx) => {
-                                      const relatedInfons = getRelatedInfons(infon, infonIndex)
-                                      const color = getInfonColor('REL')
-                                      
-                                      return (
-                                        <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
-                                          <span className={styles.relationTagName} style={{ color: color }}>
-                                            {infon.relation_name || 'Relation'}
-                                          </span>
-                                          <span className={styles.relationTagArgs}>
-                                            {relatedInfons.map((rel, ri) => {
-                                              const relColor = getInfonColor(rel.infon_type)
-                                              const keywords = getMatchKeywords(rel)
-                                              const label = keywords[0] || rel.iid
-                                              return (
-                                                <React.Fragment key={ri}>
-                                                  {ri > 0 && <span className={styles.relationTagSep}>→</span>}
-                                                  <span className={styles.relationTagArg} style={{ color: relColor }}>
-                                                    {label}
-                                                  </span>
-                                                </React.Fragment>
-                                              )
-                                            })}
-                                          </span>
-                                        </div>
-                                      )
-                                    })}
+                                {/* 助手消息操作按钮（中文注释） */}
+                                {!m.streaming && (
+                                  <div className={styles.messageActions}>
+                                    <Tooltip title="复制">
+                                      <Button 
+                                        type="text" 
+                                        size="small" 
+                                        icon={<CopyOutlined />}
+                                        onClick={() => handleCopyMessage(m.content)}
+                                        className={styles.messageActionBtn}
+                                      />
+                                    </Tooltip>
+                                    <Tooltip title="重新生成">
+                                      <Button 
+                                        type="text" 
+                                        size="small" 
+                                        icon={<RedoOutlined />}
+                                        onClick={handleRetry}
+                                        className={styles.messageActionBtn}
+                                        disabled={isGenerating}
+                                      />
+                                    </Tooltip>
                                   </div>
                                 )}
-                                {m.streaming ? <div className={styles.cursor}>▍</div> : null}
-                                {m.error ? <div className={styles.error}>Error: {m.error}</div> : null}
                               </div>
                             </>
                           )}
@@ -1185,9 +1634,6 @@ export default function AgentPage() {
                   <PrivacyRiskAnalysis
                     inference={inference}
                     selectedLaw={selectedLaw}
-                    wordData={wordData}
-                    startPrivacyInference={startPrivacyInference}
-                    abortPrivacyInference={abortPrivacyInference}
                   />
                   {/* 时间线组件（中文注释）：用于按时间筛选信息元 */}
                   <Timeline onTimeSelect={setSelectedTime} />

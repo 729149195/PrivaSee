@@ -1,49 +1,31 @@
 import React from 'react'
 import styles from './AgentPage.module.css'
 
-// Privacy Risk Analysis组件：用于显示隐私风险分析结果
+// Privacy Risk Analysis组件：用于显示隐私风险分析结果（自动推断版本）
 export default function PrivacyRiskAnalysis({ 
   inference, 
-  selectedLaw, 
-  wordData, 
-  startPrivacyInference, 
-  abortPrivacyInference 
+  selectedLaw
 }) {
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)' }}>
-          Privacy Risk Analysis
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)' }}>
+            Privacy Risk Analysis
+          </span>
+          {inference?.status === 'running' && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className={styles.analyzingDot}></span>
+              <span style={{ fontSize: 11, color: 'var(--color-accent-primary)', fontWeight: 500 }}>
+                Analyzing...
+              </span>
+            </span>
+          )}
         </div>
         {!selectedLaw && (
           <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>
             (Please select a law in the Law Tree first)
           </div>
-        )}
-        {selectedLaw && wordData.length > 0 && (
-          <button
-            onClick={() => {
-              if (inference?.status === 'running') {
-                abortPrivacyInference()
-              } else {
-                startPrivacyInference()
-              }
-            }}
-            disabled={!selectedLaw || wordData.length === 0}
-            style={{
-              padding: '4px 12px',
-              fontSize: 11,
-              fontWeight: 600,
-              borderRadius: 6,
-              border: 'none',
-              cursor: 'pointer',
-              background: inference?.status === 'running' ? '#ef4444' : 'var(--color-accent-primary)',
-              color: '#fff',
-              transition: 'all 0.2s',
-            }}
-          >
-            {inference?.status === 'running' ? 'Stop Inference' : 'Start Inference'}
-          </button>
         )}
       </div>
       <div className={styles.wordCloudRoot}>
@@ -52,7 +34,6 @@ export default function PrivacyRiskAnalysis({
         <details className={styles.wordCloudDetails} open={inference.status === 'running' || inference.status === 'done'}>
           <summary className={styles.wordCloudDetailsSummary}>
             Inference Results ({inference.risks.length} risk{inference.risks.length > 1 ? 's' : ''})
-            {inference.status === 'running' && <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--color-accent-primary)' }}>● Analyzing...</span>}
           </summary>
           <div className={styles.wordCloudDetailsContent} style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {inference.risks.map((risk, idx) => (

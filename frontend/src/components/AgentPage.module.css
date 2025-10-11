@@ -458,6 +458,48 @@
     margin-right: auto;
 }
 
+/* 消息操作按钮（中文注释） */
+.messageActions {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.msgRow:hover .messageActions {
+    opacity: 1;
+}
+
+.messageActionBtn {
+    color: var(--color-text-tertiary);
+    padding: 4px 8px;
+    height: 28px;
+    border-radius: 6px;
+}
+
+.messageActionBtn:hover {
+    color: var(--color-text-primary);
+    background: var(--color-bg-secondary);
+}
+
+/* 编辑框样式（中文注释）：和主输入框一致 */
+.editingComposer {
+    max-width: 100%;
+    display: block;
+    background: var(--color-bg-secondary);
+    border: 2px solid var(--color-border-light);
+    border-radius: var(--border-radius-xl);
+    padding: 12px 16px;
+    transition: all 0.2s ease-in-out;
+    box-shadow: var(--color-shadow-light);
+}
+
+.editingComposer:focus-within {
+    border-color: var(--color-accent-primary);
+    box-shadow: 0 0 0 4px rgba(16, 163, 127, 0.1);
+}
+
 .msgContent {
     word-break: break-word;
     padding-left: 4px;
@@ -1275,6 +1317,26 @@
         opacity: 1;
         transform: translateY(0);
     }
+}
+
+/* Analyzing 动画效果（中文注释） */
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.5);
+        opacity: 0.6;
+    }
+}
+
+.analyzingDot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--color-accent-primary);
+    animation: pulse 1.5s ease-in-out infinite;
 }
 
 .riskItem {
