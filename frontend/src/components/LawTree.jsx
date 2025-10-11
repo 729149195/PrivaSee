@@ -459,10 +459,10 @@ export default function LawTree() {
           borderRadius: 16,
           boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
           border: '1px solid var(--color-border-light)',
-          padding: 12
+          padding: 6
         }}
       >
-        <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center' }}>
           {LAWS.map((law, idx) => (
             <div
               key={law.key}
@@ -470,14 +470,16 @@ export default function LawTree() {
               style={{
                 cursor: 'pointer',
                 padding: '6px 6px',
-                borderRadius: 12,
+                borderRadius: 10,
                 fontWeight: 600,
                 fontSize: 12,
-                color: lawIdx === idx ? 'var(--color-accent-primary)' : 'var(--color-text-secondary)',
-                background: lawIdx === idx ? 'var(--color-accent-light)' : 'transparent',
-                border: lawIdx === idx ? '1.5px solid var(--color-accent-primary)' : '1.5px solid transparent',
-                boxShadow: lawIdx === idx ? '0 2px 8px rgba(14,165,233,0.08)' : 'none',
-                transition: 'all 0.18s',
+                color: lawIdx === idx ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                background: lawIdx === idx ? 'var(--color-bg-tertiary)' : 'transparent',
+                borderWidth: 0.5,
+                borderStyle: 'solid',
+                borderColor: 'var(--color-border-light)',
+                boxShadow: lawIdx === idx ? '0 0 0 1px #334155' : 'none',
+                transition: 'background-color 0.18s, color 0.18s',
               }}
             >
               {law.label}
