@@ -744,7 +744,7 @@ export default function AgentPage() {
             </div>
           </Modal>
           <Splitter className={styles.splitterRoot}>
-            <Splitter.Panel style={{ overflow: 'hidden', position: 'relative' }}>
+            <Splitter.Panel style={{ overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
               {/* 信息元类型图例（中文注释） */}
               <div className={styles.infonLegend}>
                 <div className={styles.legendItem}>
@@ -776,7 +776,7 @@ export default function AgentPage() {
                   <span className={styles.legendLabel}>Situation</span>
                 </div>
               </div>
-              <div className={styles.leftPaneScroll} ref={listRef}>
+              <div className={styles.leftPaneScroll} ref={listRef} style={{ flex: 1, overflow: 'auto' }}>
                 {hasMessages ? (
                   <div className={styles.column}>
                     {(currentSession?.messages || []).map((m) => {
@@ -981,6 +981,105 @@ export default function AgentPage() {
                   </div>
                 )}
               </div>
+
+              {/* 底部输入条（中文注释）：固定于左侧面板底部 */}
+              {(currentSession && (currentSession.messages || []).length > 0) && (
+                <div className={styles.composerDock}>
+                  <div className={styles.composer}>
+                    {/* 隐藏的图片选择器（中文注释）：通过按钮触发 */}
+                    <input
+                      id="image-picker"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      style={{ display: 'none' }}
+                      onChange={handlePickImages}
+                    />
+                    {/* 预览总在输入框上方（中文注释） */}
+                    {selectedImages.length > 0 && (
+                      <div className={styles.composerPreviews}>
+                        {selectedImages.map((src, i) => (
+                          <div key={i} className={styles.composerPreviewItem}>
+                            <img 
+                              src={src} 
+                              alt={`preview-${i}`} 
+                              className={styles.composerPreviewImg} 
+                              onClick={() => setPreviewImage(src)}
+                              style={{ cursor: 'pointer' }}
+                            />
+                            <button className={styles.composerPreviewRemove} onClick={(e) => { e.stopPropagation(); removeSelectedImage(i); }}>✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className={styles.composerRow}>
+                      <HighlightInput
+                        className={styles.composerInput}
+                        placeholder="Message ChatGPT"
+                        value={input}
+                        onChange={setInput}
+                        onPressEnter={handleSend}
+                        highlights={pendingHighlights}
+                        autoSize={{ minRows: 1, maxRows: 6 }}
+                      />
+                      <div className={styles.composerButtons}>
+                        <Upload
+                          disabled={!currentModelIsMultimodal}
+                          multiple
+                          accept="image/*"
+                          showUploadList={false}
+                          beforeUpload={(file) => {
+                            const reader = new FileReader()
+                            reader.onload = () => setSelectedImages((prev) => [...prev, reader.result])
+                            reader.readAsDataURL(file)
+                            return Upload.LIST_IGNORE
+                          }}
+                        >
+                          <Button icon={<CameraOutlined />} disabled={!currentModelIsMultimodal} title={currentModelIsMultimodal ? '' : 'Current model does not support images'} />
+                        </Upload>
+                        {!isGenerating ? (
+                          <Button type="primary" icon={<SendOutlined />} disabled={!input.trim() && selectedImages.length === 0} onClick={handleSend} />
+                        ) : (
+                          <Button danger icon={<StopOutlined />} onClick={stopGenerating}>Stop</Button>
+                        )}
+                      </div>
+                    </div>
+                    {/* Pending 关系标签（中文注释） */}
+                    {pendingRelations.length > 0 && (
+                      <div className={styles.relationTags} style={{ marginTop: '8px' }}>
+                        {pendingRelations.map(({ infon }, idx) => {
+                          const relatedInfons = getRelatedInfons(infon, pendingInfonIndex)
+                          const color = getInfonColor('REL')
+                          
+                          return (
+                            <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
+                              <span className={styles.relationTagName} style={{ color: color }}>
+                                {infon.relation_name || 'Relation'}
+                              </span>
+                              <span className={styles.relationTagArgs}>
+                                {relatedInfons.map((rel, ri) => {
+                                  const relColor = getInfonColor(rel.infon_type)
+                                  const keywords = getMatchKeywords(rel)
+                                  const label = keywords[0] || rel.iid
+                                  return (
+                                    <React.Fragment key={ri}>
+                                      {ri > 0 && <span className={styles.relationTagSep}>→</span>}
+                                      <span className={styles.relationTagArg} style={{ color: relColor }}>
+                                        {label}
+                                      </span>
+                                    </React.Fragment>
+                                  )
+                                })}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  <div className={styles.disclaimer}>Model streams responses. Context comes from this chat history.</div>
+                </div>
+              )}
             </Splitter.Panel>
             <Splitter.Panel defaultSize="35%" min="25%" max="50%">
               <div className={styles.rightPaneScroll}>
@@ -1061,106 +1160,6 @@ export default function AgentPage() {
             </Splitter.Panel>
           </Splitter>
         </div>
-
-        {/* 底部输入条（中文注释）：固定于底部，圆角胶囊样式 */}
-        {(currentSession && (currentSession.messages || []).length > 0) && (
-          <div className={styles.composerDock}>
-            <div className={styles.composerShadow} />
-            <div className={styles.composer}>
-              {/* 隐藏的图片选择器（中文注释）：通过按钮触发 */}
-              <input
-                id="image-picker"
-                type="file"
-                accept="image/*"
-                multiple
-                style={{ display: 'none' }}
-                onChange={handlePickImages}
-              />
-              {/* 预览总在输入框上方（中文注释） */}
-              {selectedImages.length > 0 && (
-                <div className={styles.composerPreviews}>
-                  {selectedImages.map((src, i) => (
-                    <div key={i} className={styles.composerPreviewItem}>
-                      <img 
-                        src={src} 
-                        alt={`preview-${i}`} 
-                        className={styles.composerPreviewImg} 
-                        onClick={() => setPreviewImage(src)}
-                        style={{ cursor: 'pointer' }}
-                      />
-                      <button className={styles.composerPreviewRemove} onClick={(e) => { e.stopPropagation(); removeSelectedImage(i); }}>✕</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className={styles.composerRow}>
-                <HighlightInput
-                  className={styles.composerInput}
-                  placeholder="Message ChatGPT"
-                  value={input}
-                  onChange={setInput}
-                  onPressEnter={handleSend}
-                  highlights={pendingHighlights}
-                  autoSize={{ minRows: 1, maxRows: 6 }}
-                />
-                <div className={styles.composerButtons}>
-                  <Upload
-                    disabled={!currentModelIsMultimodal}
-                    multiple
-                    accept="image/*"
-                    showUploadList={false}
-                    beforeUpload={(file) => {
-                      const reader = new FileReader()
-                      reader.onload = () => setSelectedImages((prev) => [...prev, reader.result])
-                      reader.readAsDataURL(file)
-                      return Upload.LIST_IGNORE
-                    }}
-                  >
-                    <Button icon={<CameraOutlined />} disabled={!currentModelIsMultimodal} title={currentModelIsMultimodal ? '' : 'Current model does not support images'} />
-                  </Upload>
-                  {!isGenerating ? (
-                    <Button type="primary" icon={<SendOutlined />} disabled={!input.trim() && selectedImages.length === 0} onClick={handleSend} />
-                  ) : (
-                    <Button danger icon={<StopOutlined />} onClick={stopGenerating}>Stop</Button>
-                  )}
-                </div>
-              </div>
-              {/* Pending 关系标签（中文注释） */}
-              {pendingRelations.length > 0 && (
-                <div className={styles.relationTags} style={{ marginTop: '8px' }}>
-                  {pendingRelations.map(({ infon }, idx) => {
-                    const relatedInfons = getRelatedInfons(infon, pendingInfonIndex)
-                    const color = getInfonColor('REL')
-                    
-                    return (
-                      <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
-                        <span className={styles.relationTagName} style={{ color: color }}>
-                          {infon.relation_name || 'Relation'}
-                        </span>
-                        <span className={styles.relationTagArgs}>
-                          {relatedInfons.map((rel, ri) => {
-                            const relColor = getInfonColor(rel.infon_type)
-                            const keywords = getMatchKeywords(rel)
-                            const label = keywords[0] || rel.iid
-                            return (
-                              <React.Fragment key={ri}>
-                                {ri > 0 && <span className={styles.relationTagSep}>→</span>}
-                                <span className={styles.relationTagArg} style={{ color: relColor }}>
-                                  {label}
-                                </span>
-                              </React.Fragment>
-                            )
-                          })}
-                        </span>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-            <div className={styles.disclaimer}>Model streams responses. Context comes from this chat history.</div>
-          </div>
-        )}
       </section>
 
       {/* 图片预览 Modal（中文注释） */}

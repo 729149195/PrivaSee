@@ -910,7 +910,7 @@ export const useStore = create((set, get) => ({
     }
   },
 
-  // 发送消息：整合上下文，调用本地 OpenAI 兼容接口并流式追加助手回复
+  // 发送消息：立即返回用户消息 ID，流式请求在后台进行
   async sendMessage(text) {
     const state = get()
     state._ensureCurrentSession()
@@ -919,8 +919,9 @@ export const useStore = create((set, get) => ({
 
     // 如历史对话包含图片，则改走多模态 /api/chat，并将图片并入上下文
     const hasHistoricalImages = (session.messages || []).some(m => Array.isArray(m.images) && m.images.length > 0)
-    const provider = get().customProviders?.[get().model]
-    if (hasHistoricalImages && !provider) {
+    const providerForModel = get().customProviders?.[get().model]
+    if (hasHistoricalImages && !providerForModel) {
+      // 委托到多模态路径（其本身也会“立即返回”）
       return await get().sendMessageWithImages(text, [])
     }
 
@@ -939,8 +940,8 @@ export const useStore = create((set, get) => ({
       id: assistantMsgId,
       role: 'assistant',
       content: '',
-      reasoning: '', // 思考过程：与最终回复分开存储
-      phase: 'thinking', // thinking -> answering -> done
+      reasoning: '',
+      phase: 'thinking',
       streaming: true,
       createdAt: Date.now(),
     })
@@ -955,108 +956,103 @@ export const useStore = create((set, get) => ({
     const controller = new AbortController()
     set({ isGenerating: true, abortController: controller })
 
-    try {
-      // 依据当前模型选择不同的基址与鉴权
-      const provider = get().customProviders?.[get().model]
-      const baseUrl = provider ? provider.baseUrl : get().baseUrl
-      const headers = { 'Content-Type': 'application/json' }
-      if (provider?.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`
+    // 后台执行网络与流式处理，不阻塞返回
+    ;(async () => {
+      try {
+        const provider = get().customProviders?.[get().model]
+        const baseUrl = provider ? provider.baseUrl : get().baseUrl
+        const headers = { 'Content-Type': 'application/json' }
+        if (provider?.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`
 
-      const res = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: get().model,
-          messages: payloadMessages,
-          temperature: 0.7,
-          stream: true,
-        }),
-        signal: controller.signal,
-      })
+        const res = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: get().model,
+            messages: payloadMessages,
+            temperature: 0.7,
+            stream: true,
+          }),
+          signal: controller.signal,
+        })
 
-      if (!res.ok) {
-        // 错误处理：写入错误信息
-        const textErr = await res.text().catch(() => '')
-        get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: textErr || 'Request failed', content: m.content }))
-        set({ isGenerating: false, abortController: null })
-        return
-      }
-
-      const reader = res.body?.getReader()
-      if (!reader) {
-        get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: 'No stream', content: m.content }))
-        set({ isGenerating: false, abortController: null })
-        return
-      }
-
-      // 在本地维护一个 think 状态以拆分 <think> ... </think>
-      let inThink = false
-
-      await streamOpenAIResponse(reader, ({ content, reasoning, finish }) => {
-        if (reasoning) {
-          get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, reasoning: (m.reasoning || '') + reasoning }))
+        if (!res.ok) {
+          const textErr = await res.text().catch(() => '')
+          get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: textErr || 'Request failed', content: m.content }))
+          set({ isGenerating: false, abortController: null })
+          return
         }
 
-        if (typeof content === 'string' && content.length) {
-          let rest = content
-          while (rest && rest.length) {
-            if (inThink) {
-              const endIdx = rest.indexOf('</think>')
-              if (endIdx >= 0) {
-                const head = rest.slice(0, endIdx)
-                const tail = rest.slice(endIdx + 8)
-                if (head) {
-                  get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, reasoning: (m.reasoning || '') + head }))
+        const reader = res.body?.getReader()
+        if (!reader) {
+          get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: 'No stream', content: m.content }))
+          set({ isGenerating: false, abortController: null })
+          return
+        }
+
+        let inThink = false
+        await streamOpenAIResponse(reader, ({ content, reasoning, finish }) => {
+          if (reasoning) {
+            get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, reasoning: (m.reasoning || '') + reasoning }))
+          }
+
+          if (typeof content === 'string' && content.length) {
+            let rest = content
+            while (rest && rest.length) {
+              if (inThink) {
+                const endIdx = rest.indexOf('</think>')
+                if (endIdx >= 0) {
+                  const head = rest.slice(0, endIdx)
+                  const tail = rest.slice(endIdx + 8)
+                  if (head) {
+                    get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, reasoning: (m.reasoning || '') + head }))
+                  }
+                  inThink = false
+                  rest = tail
+                  continue
+                } else {
+                  get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, reasoning: (m.reasoning || '') + rest }))
+                  rest = ''
+                  break
                 }
-                inThink = false
-                rest = tail
-                continue
               } else {
-                get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, reasoning: (m.reasoning || '') + rest }))
-                rest = ''
-                break
-              }
-            } else {
-              const startIdx = rest.indexOf('<think>')
-              if (startIdx >= 0) {
-                const before = rest.slice(0, startIdx)
-                const tail = rest.slice(startIdx + 7)
-                if (before) {
-                  get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, content: (m.content || '') + before, phase: 'answering' }))
+                const startIdx = rest.indexOf('<think>')
+                if (startIdx >= 0) {
+                  const before = rest.slice(0, startIdx)
+                  const tail = rest.slice(startIdx + 7)
+                  if (before) {
+                    get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, content: (m.content || '') + before, phase: 'answering' }))
+                  }
+                  inThink = true
+                  rest = tail
+                  continue
+                } else {
+                  get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, content: (m.content || '') + rest, phase: 'answering' }))
+                  rest = ''
+                  break
                 }
-                inThink = true
-                rest = tail
-                continue
-              } else {
-                get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, content: (m.content || '') + rest, phase: 'answering' }))
-                rest = ''
-                break
               }
             }
           }
-        }
 
-        if (finish) {
-          get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, phase: 'done' }))
-          // 助手回复完成后，启动对助手消息的信息元提取
-          // 已禁用对模型回复的信息元提取
-          // try { get().startMessageInfons(assistantMsgId) } catch (_) {}
-        }
-      })
+          if (finish) {
+            get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, phase: 'done' }))
+            // 已禁用对模型回复的信息元提取
+          }
+        })
+      } catch (err) {
+        const msg = (err && (err.name === 'AbortError')) ? 'Aborted' : 'Network error'
+        get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: msg }))
+      } finally {
+        set({ isGenerating: false, abortController: null })
+      }
+    })()
 
-    } catch (err) {
-      // 被中止或网络错误
-      const msg = (err && (err.name === 'AbortError')) ? 'Aborted' : 'Network error'
-      get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: msg }))
-    } finally {
-      set({ isGenerating: false, abortController: null })
-    }
-
-    // 返回用户消息 ID：用于后续处理
+    // 立即返回用户消息 ID
     return userMsgId
   },
 
-  // 发送带图片的多模态消息：调用 Ollama 原生 /api/chat，携带 images(base64) 并流式读取
+  // 发送带图片的多模态消息：立即返回用户消息 ID，流式在后台执行
   async sendMessageWithImages(text, imageDataUrls) {
     const state = get()
     state._ensureCurrentSession()
@@ -1130,54 +1126,52 @@ export const useStore = create((set, get) => ({
 
     const controller = new AbortController()
     set({ isGenerating: true, abortController: controller })
-    try {
-      const res = await fetch(`${apiBase}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: get().model,
-          messages: history,
-          stream: true,
-          options: { temperature: 0.2 }
-        }),
-        signal: controller.signal,
-      })
 
-      if (!res.ok) {
-        const textErr = await res.text().catch(() => '')
-        get().
-          _updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: textErr || 'Request failed', content: m.content }))
-        set({ isGenerating: false, abortController: null })
-        return
-      }
+    ;(async () => {
+      try {
+        const res = await fetch(`${apiBase}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: get().model,
+            messages: history,
+            stream: true,
+            options: { temperature: 0.2 }
+          }),
+          signal: controller.signal,
+        })
 
-      const reader = res.body?.getReader()
-      if (!reader) {
-        get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: 'No stream', content: m.content }))
-        set({ isGenerating: false, abortController: null })
-        return
-      }
-
-      await streamOllamaChatResponse(reader, ({ content, finish }) => {
-        if (typeof content === 'string' && content.length) {
-          get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, content: (m.content || '') + content, phase: 'answering' }))
+        if (!res.ok) {
+          const textErr = await res.text().catch(() => '')
+          get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: textErr || 'Request failed', content: m.content }))
+          set({ isGenerating: false, abortController: null })
+          return
         }
-        if (finish) {
-          get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, phase: 'done' }))
-          // 助手回复完成后，启动对助手消息的信息元提取
-          // 已禁用对模型回复的信息元提取
-          // try { get().startMessageInfons(assistantMsgId) } catch (_) {}
+
+        const reader = res.body?.getReader()
+        if (!reader) {
+          get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: 'No stream', content: m.content }))
+          set({ isGenerating: false, abortController: null })
+          return
         }
-      })
 
-    } catch (err) {
-      const msg = (err && (err.name === 'AbortError')) ? 'Aborted' : 'Network error'
-      get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: msg }))
-    } finally {
-      set({ isGenerating: false, abortController: null })
-    }
+        await streamOllamaChatResponse(reader, ({ content, finish }) => {
+          if (typeof content === 'string' && content.length) {
+            get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, content: (m.content || '') + content, phase: 'answering' }))
+          }
+          if (finish) {
+            get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, phase: 'done' }))
+          }
+        })
+      } catch (err) {
+        const msg = (err && (err.name === 'AbortError')) ? 'Aborted' : 'Network error'
+        get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: msg }))
+      } finally {
+        set({ isGenerating: false, abortController: null })
+      }
+    })()
 
-    // 返回用户消息 ID
+    // 立即返回用户消息 ID
     return userMsgId
   },
 
