@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { buildSystemPrompt } from './templates/infons.js'
+import { loadUserSessions, saveUserSessions } from './users/historyStorage'
 
 // 说明：
 // 1) 本 store 管理 ChatGPT 风格的多会话、消息流与流式生成状态；
@@ -271,6 +272,36 @@ export const useStore = create((set, get) => ({
   models: [], // 可选模型列表
   customModels: [], // 通过 API key 添加的自定义模型
   customProviders: {}, // { [modelId]: { baseUrl, apiKey } }
+
+  // 用户状态标识（中文注释）：用于判断是否启用历史数据持久化
+  currentUserId: null,
+  
+  // 设置当前用户（登录时调用）
+  setCurrentUser: (userId) => {
+    set({ currentUserId: userId })
+    // 登录时加载用户的历史数据
+    if (userId) {
+      get()._loadUserHistory(userId)
+    }
+  },
+  
+  // 清除当前用户（退出登录时调用）
+  clearCurrentUser: () => {
+    const { currentUserId } = get()
+    // 退出前保存当前数据
+    if (currentUserId) {
+      get()._saveUserHistory(currentUserId)
+    }
+    // 清空会话，重置为一个空会话（无痕模式）
+    const emptySession = createEmptySession()
+    set({ 
+      currentUserId: null,
+      sessions: [emptySession],
+      currentSessionId: emptySession.id,
+      infonSessions: {},
+      privacyInferences: {}
+    })
+  },
 
   // 多会话与状态：初始化一个空会话
   sessions: (() => {
@@ -1434,6 +1465,81 @@ export const useStore = create((set, get) => ({
     })
   },
 
+  // ========== 用户历史数据持久化方法 ==========
+  
+  // 内部：加载用户历史数据
+  _loadUserHistory(userId) {
+    try {
+      const data = loadUserSessions(userId)
+      
+      if (data && data.sessions && data.sessions.length > 0) {
+        set({
+          sessions: data.sessions,
+          infonSessions: data.infonSessions || {},
+          privacyInferences: data.privacyInferences || {},
+          currentSessionId: data.sessions[0]?.id || null
+        })
+        console.log('[PrivaSee] 用户历史数据已加载')
+      } else {
+        // 如果没有历史数据，初始化一个新会话
+        const newSession = createEmptySession()
+        set({
+          sessions: [newSession],
+          currentSessionId: newSession.id,
+          infonSessions: {},
+          privacyInferences: {}
+        })
+      }
+    } catch (error) {
+      console.error('[PrivaSee] 加载用户历史失败:', error)
+    }
+  },
+  
+  // 内部：保存用户历史数据
+  _saveUserHistory(userId) {
+    try {
+      const { sessions, infonSessions, privacyInferences } = get()
+      saveUserSessions(userId, sessions, infonSessions, privacyInferences)
+    } catch (error) {
+      console.error('[PrivaSee] 保存用户历史失败:', error)
+    }
+  },
+  
+  // 手动保存当前用户的数据
+  saveCurrentUserHistory() {
+    const { currentUserId } = get()
+    if (currentUserId) {
+      get()._saveUserHistory(currentUserId)
+    }
+  },
+
 }))
+
+// 自动保存：当用户登录时，定时保存历史数据（中文注释）
+if (typeof window !== 'undefined') {
+  let autoSaveTimer = null
+  
+  useStore.subscribe((state) => {
+    // 清除旧的定时器
+    if (autoSaveTimer) {
+      clearTimeout(autoSaveTimer)
+    }
+    
+    // 如果用户已登录，设置定时保存（30秒后）
+    if (state.currentUserId) {
+      autoSaveTimer = setTimeout(() => {
+        useStore.getState().saveCurrentUserHistory()
+      }, 30000) // 30秒延迟保存
+    }
+  })
+  
+  // 页面卸载前保存（中文注释）
+  window.addEventListener('beforeunload', () => {
+    const state = useStore.getState()
+    if (state.currentUserId) {
+      state._saveUserHistory(state.currentUserId)
+    }
+  })
+}
 
 

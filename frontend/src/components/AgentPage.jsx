@@ -9,6 +9,9 @@ import LawTree from './LawTree'
 import Timeline from './Timeline'
 import HighlightInput from './HighlightInput'
 import PrivacyRiskAnalysis from './PrivacyRiskAnalysis'
+import UserAuth from '../users/UserAuth'
+import { useUserStore } from '../users/userStore'
+import PrivacyModeIndicator from '../users/PrivacyModeIndicator'
 
 // 连线组件（中文注释）：根据关系信息元画连线连接标签和高亮文本
 const RelationConnections = ({ messageId, relations, infonIndex }) => {
@@ -144,8 +147,21 @@ export default function AgentPage() {
     selectedLaw,
   } = useStore()
 
+  // 用户状态（中文注释）：从用户 store 获取
+  const { currentUser, isLoggedIn } = useUserStore()
+  const { setCurrentUser, clearCurrentUser } = useStore()
+
   // 当前会话对象（中文注释）：需在引用它的 useMemo 之前定义
   const currentSession = getCurrentSession()
+
+  // 同步用户登录状态到主 store（中文注释）：用于控制历史数据持久化
+  useEffect(() => {
+    if (isLoggedIn && currentUser?.id) {
+      setCurrentUser(currentUser.id)
+    } else {
+      clearCurrentUser()
+    }
+  }, [isLoggedIn, currentUser, setCurrentUser, clearCurrentUser])
 
   // 多模态能力检测（中文注释）：基于模型 ID 关键词 + 自定义提供商回退
   const isModelMultimodal = React.useCallback((id) => {
@@ -683,6 +699,8 @@ export default function AgentPage() {
             <span>New chat</span>
           </button>
         </div>
+        {/* 无痕模式提示（中文注释） */}
+        <PrivacyModeIndicator />
         <div className={styles.sidebarScroll}>
           {sessions.map((s) => (
             <div
@@ -771,9 +789,15 @@ export default function AgentPage() {
           {/* <div className={styles.kv}><span>Base URL</span><span>{baseUrl}</span></div> */}
           <div className={styles.kv}><span>Model</span><span>{model}</span></div>
           <div className={styles.contextSection}>
-            <div className={styles.contextInfo}>
-              <div className={styles.contextLabel}>Context window<span className={styles.contextText}>{contextLabel}</span></div>
-              <Progress percent={contextPercent} size="small" className={styles.contextProgress} />
+            <div className={styles.contextInfo} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+              <div style={{ flex: 1 }}>
+                <div className={styles.contextLabel}>Context window<span className={styles.contextText}>{contextLabel}</span></div>
+                <Progress percent={contextPercent} size="small" className={styles.contextProgress} />
+              </div>
+              {/* 用户登录入口（中文注释）：放在 Context window 右上角 */}
+              <div style={{ marginLeft: '8px', marginTop: '-4px' }}>
+                <UserAuth />
+              </div>
             </div>
           </div>
         </div>

@@ -1,0 +1,124 @@
+.userAuth {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.userAvatar {
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.userAvatar:hover {
+  transform: scale(1.05);
+}
+
+.loginBtn {
+  font-size: 13px;
+  color: #475569;
+  font-weight: 500;
+  border-radius: 8px;
+  padding: 4px 12px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.loginBtn:hover {
+  background: #f1f5f9;
+  color: #0ea5e9;
+}
+
+.authModal :global(.ant-modal-content) {
+  padding: 32px 24px;
+  border-radius: 16px;
+}
+
+.authModal :global(.ant-modal-close) {
+  top: 16px;
+  right: 16px;
+}
+
+.authTabs {
+  margin-top: 8px;
+}
+
+.authTabs :global(.ant-tabs-nav) {
+  margin-bottom: 24px;
+}
+
+.authTabs :global(.ant-tabs-tab) {
+  font-size: 16px;
+  font-weight: 600;
+  padding: 8px 24px;
+}
+
+.authForm {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.formGroup label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #334155;
+}
+
+.formGroup :global(.ant-input-affix-wrapper),
+.formGroup :global(.ant-input) {
+  border-radius: 8px;
+  border-color: #e2e8f0;
+}
+
+.formGroup :global(.ant-input-affix-wrapper:hover),
+.formGroup :global(.ant-input:hover) {
+  border-color: #0ea5e9;
+}
+
+.formGroup :global(.ant-input-affix-wrapper:focus),
+.formGroup :global(.ant-input-affix-wrapper-focused),
+.formGroup :global(.ant-input:focus) {
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.1);
+}
+
+.submitBtn {
+  margin-top: 8px;
+  height: 44px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  background: #0ea5e9;
+  border: none;
+}
+
+.submitBtn:hover {
+  background: #0284c7;
+}
+
+.formHint {
+  text-align: center;
+  font-size: 13px;
+  color: #64748b;
+  margin-top: 8px;
+}
+
+.formHint a {
+  color: #0ea5e9;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.formHint a:hover {
+  color: #0284c7;
+  text-decoration: underline;
+}
+
