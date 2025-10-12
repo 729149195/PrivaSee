@@ -470,9 +470,60 @@ export const useStore = create((set, get) => ({
   // 选中的法律（用于推理）
   selectedLaw: null, // { key: 'PIPL', data: {...} }
   
+  // 选中的法律索引（用于UI显示）
+  selectedLawIdx: 0,
+  
+  // 用户自定义的隐私项
+  customPrivacyItems: [],
+  
+  // 选中的隐私项（Set转为Array存储）
+  selectedPrivacyItems: [],
+  
   // 设置选中的法律
   setSelectedLaw(lawKey, lawData) {
     set({ selectedLaw: { key: lawKey, data: lawData } })
+  },
+  
+  // 设置选中的法律索引
+  setSelectedLawIdx(idx) {
+    set({ selectedLawIdx: idx })
+  },
+  
+  // 添加自定义隐私项
+  addCustomPrivacyItem(item) {
+    set(state => ({
+      customPrivacyItems: [...state.customPrivacyItems, item]
+    }))
+  },
+  
+  // 删除自定义隐私项
+  removeCustomPrivacyItem(itemId) {
+    set(state => ({
+      customPrivacyItems: state.customPrivacyItems.filter(item => item.id !== itemId)
+    }))
+  },
+  
+  // 设置自定义隐私项列表
+  setCustomPrivacyItems(items) {
+    set({ customPrivacyItems: items })
+  },
+  
+  // 设置选中的隐私项
+  setSelectedPrivacyItems(items) {
+    set({ selectedPrivacyItems: Array.isArray(items) ? items : Array.from(items) })
+  },
+  
+  // 切换隐私项选中状态
+  togglePrivacyItem(itemId) {
+    set(state => {
+      const selected = new Set(state.selectedPrivacyItems)
+      if (selected.has(itemId)) {
+        selected.delete(itemId)
+      } else {
+        selected.add(itemId)
+      }
+      return { selectedPrivacyItems: Array.from(selected) }
+    })
   },
 
   // 初始化当前会话：第一次使用时指向首个会话
@@ -1627,7 +1678,10 @@ export const useStore = create((set, get) => ({
           sessions: data.sessions,
           infonSessions: data.infonSessions || {},
           privacyInferences: data.privacyInferences || {},
-          currentSessionId: data.sessions[0]?.id || null
+          currentSessionId: data.sessions[0]?.id || null,
+          customPrivacyItems: data.customPrivacyItems || [],
+          selectedLawIdx: data.selectedLawIdx ?? 0,
+          selectedPrivacyItems: data.selectedPrivacyItems || []
         })
         console.log('[PrivaSee] 用户历史数据已加载')
       } else {
@@ -1637,7 +1691,10 @@ export const useStore = create((set, get) => ({
           sessions: [newSession],
           currentSessionId: newSession.id,
           infonSessions: {},
-          privacyInferences: {}
+          privacyInferences: {},
+          customPrivacyItems: [],
+          selectedLawIdx: 0,
+          selectedPrivacyItems: []
         })
       }
     } catch (error) {
@@ -1648,7 +1705,7 @@ export const useStore = create((set, get) => ({
   // 内部：保存用户历史数据
   _saveUserHistory(userId) {
     try {
-      const { sessions, infonSessions, privacyInferences } = get()
+      const { sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems } = get()
       
       // 清理不可序列化的字段（中文注释）：移除 abortController
       const serializableInferences = {}
@@ -1660,7 +1717,7 @@ export const useStore = create((set, get) => ({
         }
       })
       
-      saveUserSessions(userId, sessions, infonSessions, serializableInferences)
+      saveUserSessions(userId, sessions, infonSessions, serializableInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems)
     } catch (error) {
       console.error('[PrivaSee] 保存用户历史失败:', error)
     }

@@ -2,7 +2,7 @@
 // 为每个登录用户单独保存会话历史和信息元数据
 
 // 保存用户的所有会话数据
-export function saveUserSessions(userId, sessions, infonSessions, privacyInferences) {
+export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems) {
   if (!userId) return
   
   try {
@@ -11,6 +11,9 @@ export function saveUserSessions(userId, sessions, infonSessions, privacyInferen
       sessions: sessions || [],
       infonSessions: infonSessions || {},
       privacyInferences: privacyInferences || {},
+      customPrivacyItems: customPrivacyItems || [],
+      selectedLawIdx: selectedLawIdx ?? 0,
+      selectedPrivacyItems: selectedPrivacyItems || [],
       savedAt: Date.now()
     }
     
@@ -38,6 +41,9 @@ export function loadUserSessions(userId) {
       sessions: parsed.sessions || [],
       infonSessions: parsed.infonSessions || {},
       privacyInferences: parsed.privacyInferences || {},
+      customPrivacyItems: parsed.customPrivacyItems || [],
+      selectedLawIdx: parsed.selectedLawIdx ?? 0,
+      selectedPrivacyItems: parsed.selectedPrivacyItems || [],
       savedAt: parsed.savedAt
     }
   } catch (error) {
@@ -107,7 +113,15 @@ export function importUserData(userId, file) {
         }
         
         // 保存导入的数据
-        saveUserSessions(userId, data.sessions, data.infonSessions, data.privacyInferences)
+        saveUserSessions(
+          userId, 
+          data.sessions, 
+          data.infonSessions, 
+          data.privacyInferences,
+          data.customPrivacyItems,
+          data.selectedLawIdx,
+          data.selectedPrivacyItems
+        )
         resolve(data)
       } catch (error) {
         reject(error)

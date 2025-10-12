@@ -37,10 +37,7 @@ const PRIVACY_ITEMS = [
 ]
 
 export default function LawTree() {
-  const [lawIdx, setLawIdx] = useState(0)
   const [lawData, setLawData] = useState([null, null, null, null])
-  const [selectedPrivacyItems, setSelectedPrivacyItems] = useState(new Set())
-  const [customPrivacyItems, setCustomPrivacyItems] = useState([]) // 用户自定义的隐私项
   const [newItemInput, setNewItemInput] = useState('') // 新隐私项输入框
   const [holdingLawIdx, setHoldingLawIdx] = useState(null) // 正在长按的法律索引
   const [holdProgress, setHoldProgress] = useState(0) // 长按进度 0-100
@@ -51,7 +48,30 @@ export default function LawTree() {
   const [size, setSize] = useState({ width: 928, height: 600 })
   
   // 从 store 获取推理结果和相关方法（中文注释）
-  const { getCurrentSession, privacyInferences, setSelectedLaw, startPrivacyInference } = useStore()
+  const { 
+    getCurrentSession, 
+    privacyInferences, 
+    setSelectedLaw, 
+    startPrivacyInference,
+    abortPrivacyInference,
+    clearPrivacyInference,
+    selectedLawIdx,
+    setSelectedLawIdx,
+    customPrivacyItems,
+    addCustomPrivacyItem,
+    removeCustomPrivacyItem,
+    selectedPrivacyItems: selectedPrivacyItemsArray,
+    setSelectedPrivacyItems,
+    togglePrivacyItem
+  } = useStore()
+  
+  // 使用store中的lawIdx
+  const lawIdx = selectedLawIdx
+  const setLawIdx = setSelectedLawIdx
+  
+  // 将数组转换为Set以便使用
+  const selectedPrivacyItems = useMemo(() => new Set(selectedPrivacyItemsArray), [selectedPrivacyItemsArray])
+  
   const session = getCurrentSession()
   const inference = useMemo(() => (session ? privacyInferences?.[session.id] : null), [session, privacyInferences])
 
@@ -71,18 +91,13 @@ export default function LawTree() {
     // eslint-disable-next-line
   }, [])
   
-  // 当法律数据或索引变化时，更新 store 中的选中法律（中文注释）
+  // 初始化时设置默认法律（中文注释）
   useEffect(() => {
-    if (LAWS[lawIdx].key === 'CUSTOM') {
-      // 对于自定义模式，传递用户选择的隐私项
-      setSelectedLaw(LAWS[lawIdx].key, { 
-        customItems: Array.from(selectedPrivacyItems),
-        isCustom: true 
-      })
-    } else if (lawData[lawIdx]) {
-      setSelectedLaw(LAWS[lawIdx].key, lawData[lawIdx])
+    if (lawData[0] && !useStore.getState().selectedLaw) {
+      setSelectedLaw(LAWS[0].key, lawData[0])
     }
-  }, [lawIdx, lawData, selectedPrivacyItems, setSelectedLaw])
+    // eslint-disable-next-line
+  }, [lawData])
 
   // 容器自适应
   useEffect(() => {
@@ -483,15 +498,7 @@ export default function LawTree() {
 
   // 处理复选框变化
   const handleCheckboxChange = (itemId) => {
-    setSelectedPrivacyItems(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(itemId)) {
-        newSet.delete(itemId)
-      } else {
-        newSet.add(itemId)
-      }
-      return newSet
-    })
+    togglePrivacyItem(itemId)
   }
 
   // 添加自定义隐私项
@@ -505,15 +512,22 @@ export default function LawTree() {
       category: 'Custom'
     }
     
-    setCustomPrivacyItems(prev => [...prev, newItem])
+    addCustomPrivacyItem(newItem)
     setNewItemInput('')
     
     // 自动选中新添加的项
-    setSelectedPrivacyItems(prev => {
-      const newSet = new Set(prev)
-      newSet.add(newItem.id)
-      return newSet
-    })
+    if (!selectedPrivacyItems.has(newItem.id)) {
+      togglePrivacyItem(newItem.id)
+    }
+  }
+  
+  // 删除自定义隐私项
+  const handleRemoveCustomItem = (itemId) => {
+    removeCustomPrivacyItem(itemId)
+    // 同时从选中项中移除
+    if (selectedPrivacyItems.has(itemId)) {
+      togglePrivacyItem(itemId)
+    }
   }
 
   // 长按法律选项卡处理
@@ -560,15 +574,73 @@ export default function LawTree() {
     }
   }
 
-  const handleTriggerInference = (idx) => {
-    // 先切换法律
-    setLawIdx(idx)
-    // 再触发推理
-    if (startPrivacyInference) {
-      // 延迟一下确保法律已切换
-      setTimeout(() => {
-        startPrivacyInference()
-      }, 100)
+  const handleTriggerInference = async (idx) => {
+    if (!session) {
+      console.warn('[LawTree] 没有会话，无法触发推理')
+      return
+    }
+    
+    console.log('[LawTree] 触发推理:', LAWS[idx].key, '当前推理状态:', inference?.status)
+    
+    try {
+      // 1. 如果正在推理，先中断
+      if (inference?.status === 'running') {
+        console.log('[LawTree] 中断正在进行的推理')
+        abortPrivacyInference(session)
+        // 等待中断完成
+        await new Promise(resolve => setTimeout(resolve, 150))
+      }
+      
+      // 2. 清除当前推理结果（无论是否完成）
+      if (inference) {
+        console.log('[LawTree] 清除旧的推理结果')
+        clearPrivacyInference()
+        // 等待清除完成
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      
+      // 3. 切换法律显示
+      setLawIdx(idx)
+      
+      // 4. 准备法律数据
+      let lawKey = LAWS[idx].key
+      let lawDataToSet = null
+      
+      if (lawKey === 'CUSTOM') {
+        console.log('[LawTree] 设置 Custom 法律，选中项:', selectedPrivacyItems.size)
+        
+        // 构建选中的隐私项详细信息列表
+        const allItems = [...PRIVACY_ITEMS, ...customPrivacyItems]
+        const selectedItemsDetails = allItems.filter(item => selectedPrivacyItems.has(item.id))
+        
+        lawDataToSet = { 
+          customItems: selectedItemsDetails, // 传递完整的项信息，而不仅仅是ID
+          isCustom: true 
+        }
+      } else {
+        if (!lawData[idx]) {
+          console.warn('[LawTree] 法律数据未加载:', lawKey)
+          return
+        }
+        console.log('[LawTree] 设置法律:', lawKey)
+        lawDataToSet = lawData[idx]
+      }
+      
+      // 5. 更新 selectedLaw
+      setSelectedLaw(lawKey, lawDataToSet)
+      
+      // 6. 等待一下确保状态更新完成，然后触发推理
+      await new Promise(resolve => setTimeout(resolve, 250))
+      
+      if (startPrivacyInference) {
+        console.log('[LawTree] 启动新的推理')
+        const result = await startPrivacyInference()
+        console.log('[LawTree] 推理已启动:', result)
+      } else {
+        console.error('[LawTree] startPrivacyInference 不可用')
+      }
+    } catch (error) {
+      console.error('[LawTree] 触发推理失败:', error)
     }
   }
 
@@ -596,6 +668,81 @@ export default function LawTree() {
 
   // 判断是否显示自定义选项界面
   const isCustomMode = LAWS[lawIdx].key === 'CUSTOM'
+
+  // Custom模式的风险映射：匹配推理结果到隐私项（中文注释）
+  const customRiskMap = useMemo(() => {
+    const map = new Map() // key: 隐私项ID, value: { level, confidence, risks }
+    
+    if (!isCustomMode || !inference || !inference.risks) return map
+    
+    // 检查推理结果是否与Custom法律匹配
+    if (inference.lawKey && inference.lawKey !== 'CUSTOM') {
+      return map
+    }
+    
+    console.log('[LawTree] Custom模式风险映射，推理风险数:', inference.risks.length)
+    
+    // 只使用选中的隐私项（预设+自定义）
+    const allItems = [...PRIVACY_ITEMS, ...customPrivacyItems]
+    const selectedItems = allItems.filter(item => selectedPrivacyItems.has(item.id))
+    
+    console.log('[LawTree] 选中的隐私项数:', selectedItems.length, selectedItems.map(i => i.label))
+    
+    // 为每个推理风险找到匹配的隐私项
+    inference.risks.forEach(risk => {
+      const lawNodeName = (risk.law_node_name || '').trim()
+      
+      console.log('[LawTree] 处理风险:', lawNodeName)
+      
+      // 只匹配选中的项
+      selectedItems.forEach(item => {
+        const itemLabel = item.label.trim()
+        
+        // 精确匹配策略：law_node_name必须与隐私项标签匹配
+        let isMatch = false
+        
+        // 1. 精确匹配（忽略大小写）
+        if (lawNodeName.toLowerCase() === itemLabel.toLowerCase()) {
+          isMatch = true
+          console.log('[LawTree] 精确匹配:', itemLabel)
+        }
+        
+        // 2. 部分匹配：law_node_name包含完整的项标签（作为独立词）
+        if (!isMatch) {
+          // 使用单词边界匹配，避免部分词匹配
+          const regex = new RegExp(`\\b${itemLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+          if (regex.test(lawNodeName)) {
+            isMatch = true
+            console.log('[LawTree] 词边界匹配:', itemLabel)
+          }
+        }
+        
+        if (isMatch) {
+          const levelPriority = { HIGH: 3, MEDIUM: 2, LOW: 1 }
+          
+          if (!map.has(item.id)) {
+            map.set(item.id, {
+              level: risk.risk_level,
+              confidence: risk.confidence,
+              risks: [risk]
+            })
+            console.log('[LawTree] 添加风险映射:', item.label, risk.risk_level)
+          } else {
+            const existing = map.get(item.id)
+            if ((levelPriority[risk.risk_level] || 0) > (levelPriority[existing.level] || 0)) {
+              existing.level = risk.risk_level
+            }
+            existing.confidence = Math.max(existing.confidence, risk.confidence)
+            existing.risks.push(risk)
+          }
+        }
+      })
+    })
+    
+    console.log('[LawTree] 最终风险映射数:', map.size)
+    
+    return map
+  }, [isCustomMode, inference, customPrivacyItems, selectedPrivacyItems])
 
   // 渲染自定义隐私项复选框界面
   const renderCustomPrivacyOptions = () => (
@@ -654,9 +801,28 @@ export default function LawTree() {
           marginTop: 4,
           fontSize: 11,
           color: 'var(--color-text-tertiary)',
-          textAlign: 'center'
+          textAlign: 'center',
+          display: 'flex',
+          gap: '8px',
+          justifyContent: 'center',
+          alignItems: 'center',
+          flexWrap: 'wrap'
         }}>
-          {selectedPrivacyItems.size} item{selectedPrivacyItems.size !== 1 ? 's' : ''} selected
+          <span>{selectedPrivacyItems.size} item{selectedPrivacyItems.size !== 1 ? 's' : ''} selected</span>
+          {customRiskMap.size > 0 && (
+            <>
+              <span style={{ color: 'var(--color-border-light)' }}>|</span>
+              <span style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '4px',
+                fontWeight: 600,
+                color: '#ef4444'
+              }}>
+                ⚠️ {customRiskMap.size} risk{customRiskMap.size !== 1 ? 's' : ''} detected
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -683,45 +849,119 @@ export default function LawTree() {
               gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
               gap: '4px'
             }}>
-              {items.map(item => (
-                <label
-                  key={item.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '5px 8px',
-                    background: selectedPrivacyItems.has(item.id) 
-                      ? 'var(--color-bg-tertiary)' 
-                      : 'transparent',
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    border: '1px solid var(--color-border-light)',
-                    transition: 'all 0.15s',
-                    fontSize: 12,
-                    color: 'var(--color-text-primary)',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedPrivacyItems.has(item.id)}
-                    onChange={() => handleCheckboxChange(item.id)}
-                    style={{ 
-                      cursor: 'pointer',
-                      width: '14px',
-                      height: '14px',
-                      flexShrink: 0
+              {items.map(item => {
+                const isCustomItem = item.id.startsWith('custom_')
+                const isSelected = selectedPrivacyItems.has(item.id)
+                // 只有选中的项才检查风险
+                const risk = isSelected ? customRiskMap.get(item.id) : null
+                
+                // 根据风险等级获取颜色
+                const getRiskColor = (level) => {
+                  switch (level) {
+                    case 'HIGH': return { bg: '#fef2f2', border: '#ef4444', dot: '#ef4444' }    // 红色
+                    case 'MEDIUM': return { bg: '#fffbeb', border: '#f59e0b', dot: '#f59e0b' }  // 橙色
+                    case 'LOW': return { bg: '#f0fdf4', border: '#10b981', dot: '#10b981' }     // 绿色
+                    default: return null
+                  }
+                }
+                
+                const riskColors = risk ? getRiskColor(risk.level) : null
+                
+                return (
+                  <div
+                    key={item.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      background: riskColors 
+                        ? riskColors.bg
+                        : selectedPrivacyItems.has(item.id) 
+                          ? 'var(--color-bg-tertiary)' 
+                          : 'transparent',
+                      borderRadius: 6,
+                      border: riskColors 
+                        ? `1.5px solid ${riskColors.border}`
+                        : '1px solid var(--color-border-light)',
+                      transition: 'all 0.15s',
+                      fontSize: 12,
+                      padding: '0',
+                      overflow: 'hidden',
+                      position: 'relative'
                     }}
-                  />
-                  <span style={{ 
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
-                  }}>
-                    {item.label}
-                  </span>
-                </label>
-              ))}
+                    title={risk ? `Risk: ${risk.level} (${(risk.confidence * 100).toFixed(0)}% confidence)\n${risk.risks.length} risk(s) detected` : ''}
+                  >
+                    {risk && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '2px',
+                        right: isCustomItem ? '30px' : '2px',
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '50%',
+                        background: riskColors.dot,
+                        boxShadow: `0 0 4px ${riskColors.dot}`
+                      }} />
+                    )}
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '5px 8px',
+                        flex: 1,
+                        cursor: 'pointer',
+                        color: 'var(--color-text-primary)',
+                        minWidth: 0
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedPrivacyItems.has(item.id)}
+                        onChange={() => handleCheckboxChange(item.id)}
+                        style={{ 
+                          cursor: 'pointer',
+                          width: '14px',
+                          height: '14px',
+                          flexShrink: 0
+                        }}
+                      />
+                      <span style={{ 
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontWeight: risk ? 600 : 400
+                      }}>
+                        {item.label}
+                      </span>
+                    </label>
+                    {isCustomItem && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleRemoveCustomItem(item.id)
+                        }}
+                        style={{
+                          padding: '4px 6px',
+                          background: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: 'var(--color-text-tertiary)',
+                          fontSize: '14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          transition: 'color 0.15s'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
+                        onMouseLeave={(e) => e.currentTarget.style.color = 'var(--color-text-tertiary)'}
+                        title="Delete custom item"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
         ))}

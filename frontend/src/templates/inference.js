@@ -142,7 +142,39 @@ export function extractInfonsSummary(infons) {
 
 // Extract law tree summary (for filling template)
 export function extractLawTreeSummary(lawData) {
-  if (!lawData || !lawData.name) {
+  if (!lawData) {
+    return 'No legal structure available'
+  }
+  
+  // Custom模式：只使用用户选中的隐私项
+  if (lawData.isCustom) {
+    const customItems = lawData.customItems || []
+    if (customItems.length === 0) {
+      return 'Custom Privacy Items:\n- (No items selected - cannot perform analysis)'
+    }
+    
+    const lines = [
+      '=== CUSTOM PRIVACY ANALYSIS MODE ===',
+      'IMPORTANT: Analyze ONLY the following privacy items that the user has specifically selected.',
+      'Do NOT analyze any other privacy categories. Focus exclusively on these items:',
+      ''
+    ]
+    
+    customItems.forEach(item => {
+      // item 现在包含 { id, label, category }
+      const itemLabel = item.label || item.id || 'Unknown'
+      const itemCategory = item.category || 'General'
+      lines.push(`  - ${itemLabel} (Category: ${itemCategory}) [LEAF NODE - USE THIS] (Path: Custom > ${itemCategory} > ${itemLabel})`)
+    })
+    
+    lines.push('')
+    lines.push('When mapping risks, use the exact item labels listed above as law_node_name.')
+    
+    return lines.join('\n')
+  }
+  
+  // 标准法律树模式
+  if (!lawData.name) {
     return 'No legal structure available'
   }
   
