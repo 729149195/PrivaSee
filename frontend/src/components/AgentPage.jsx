@@ -222,13 +222,20 @@ export default function AgentPage() {
   const [editingSessionId, setEditingSessionId] = useState(null)
   const [editingTitle, setEditingTitle] = useState('')
   
-  // 会话切换时重置时间选择（中文注释）
+  // 记录上次推理时使用的法律key（中文注释）：用于检测法律切换
+  const lastInferenceLawKeyRef = useRef(null)
+  // 记录上次推理完成的时间戳（中文注释）：用于防止频繁触发
+  const lastInferenceCompleteTimeRef = useRef(0)
+  
+  // 会话切换时重置时间选择和推理记录（中文注释）
   useEffect(() => {
     setSelectedTime(null)
     lastInferenceRunCountRef.current = 0 // 重置推断计数器
+    lastInferenceLawKeyRef.current = null // 重置法律记录
+    lastInferenceCompleteTimeRef.current = 0 // 重置完成时间
   }, [currentSessionId])
 
-  // 自动隐私推断（中文注释）：当没有正在提取的信息元时自动启动
+  // 自动隐私推断（中文注释）：当信息元提取完成且有新数据时自动启动
   useEffect(() => {
     if (!currentSession || !selectedLaw) return
     
@@ -236,34 +243,73 @@ export default function AgentPage() {
     const runs = infonSessions?.[currentSession.id]?.runs || []
     const hasRunningInfons = runs.some(run => run.status === 'running')
     
-    // 检查当前的推断状态
+    // 获取当前推理状态（不要在依赖中使用 privacyInferences）
     const currentInference = privacyInferences?.[currentSession.id]
     const isInferenceRunning = currentInference?.status === 'running'
     
-    // 如果有信息元正在提取，且推断正在运行，则中止推断
+    // 如果有信息元正在提取，且推断正在运行，则中止推断（避免冲突）
     if (hasRunningInfons && isInferenceRunning) {
       abortPrivacyInference?.()
       return
     }
     
-    // 统计完成的信息元runs数量
-    const doneRuns = runs.filter(run => run.status === 'done' && run.resultJson?.infons?.length > 0)
-    const currentRunCount = doneRuns.length
+    // 统计完成的信息元runs数量（过滤掉被取代的信息元）
+    const allRawInfons = []
+    const supersededIids = new Set()
+    runs.forEach(run => {
+      if (run.status === 'done') {
+        const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
+        allRawInfons.push(...infons)
+        infons.forEach(infon => {
+          if (Array.isArray(infon._supersedes)) {
+            infon._supersedes.forEach(oldIid => supersededIids.add(oldIid))
+          }
+        })
+      }
+    })
+    const activeInfons = allRawInfons.filter(infon => infon.iid && !supersededIids.has(infon.iid))
+    const activeInfonCount = activeInfons.length
     
-    // 检查是否有新的信息元（与上次推断时相比）
-    const hasNewInfons = currentRunCount > lastInferenceRunCountRef.current
+    // 检查推理完成状态，更新完成时间戳（中文注释）
+    if (currentInference?.status === 'done' && currentInference?.updatedAt) {
+      const lastRecordedTime = lastInferenceCompleteTimeRef.current
+      const currentCompleteTime = currentInference.updatedAt
+      // 只在时间戳更新时记录（避免重复记录）
+      if (currentCompleteTime > lastRecordedTime) {
+        lastInferenceCompleteTimeRef.current = currentCompleteTime
+        // 同步记录当前状态
+        if (lastInferenceRunCountRef.current !== activeInfonCount) {
+          lastInferenceRunCountRef.current = activeInfonCount
+        }
+        if (lastInferenceLawKeyRef.current !== selectedLaw.key) {
+          lastInferenceLawKeyRef.current = selectedLaw.key
+        }
+      }
+    }
     
-    // 如果没有信息元正在提取，有新的信息元数据，且推断未运行，则启动推断
-    if (!hasRunningInfons && hasNewInfons && !isInferenceRunning && currentRunCount > 0) {
+    // 检查触发条件
+    const hasNewInfons = activeInfonCount > lastInferenceRunCountRef.current
+    const lawChanged = selectedLaw.key !== lastInferenceLawKeyRef.current
+    const needsInference = (hasNewInfons || lawChanged) && activeInfonCount > 0
+    
+    // 防止推理刚完成就立即触发（中文注释）：至少等待3秒
+    const timeSinceLastComplete = Date.now() - lastInferenceCompleteTimeRef.current
+    const tooSoonToRetrigger = timeSinceLastComplete < 3000 && lastInferenceCompleteTimeRef.current > 0
+    
+    // 如果满足条件，且当前没有正在运行的推理或信息元提取，则启动推断
+    if (!hasRunningInfons && !isInferenceRunning && needsInference && !tooSoonToRetrigger) {
+      // 立即更新记录，防止重复触发（中文注释）
+      lastInferenceRunCountRef.current = activeInfonCount
+      lastInferenceLawKeyRef.current = selectedLaw.key
+      
       // 使用延迟避免频繁触发
       const timer = setTimeout(() => {
-        lastInferenceRunCountRef.current = currentRunCount // 更新记录
         startPrivacyInference?.()
       }, 1000)
       return () => clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [infonSessions, currentSessionId, selectedLaw, privacyInferences])
+  }, [infonSessions, currentSessionId, selectedLaw?.key])
 
   // 监听信息元提取结果，当首次出现 SIT 类型时自动更新对话标题（中文注释）
   useEffect(() => {
@@ -1123,7 +1169,7 @@ export default function AgentPage() {
                 <Progress percent={contextPercent} size="small" className={styles.contextProgress} />
               </div>
               {/* 用户登录入口（中文注释）：放在 Context window 右上角 */}
-              <div style={{ marginLeft: '8px', marginTop: '-4px' }}>
+              <div style={{ marginLeft: '8px' }}>
                 <UserAuth />
               </div>
             </div>

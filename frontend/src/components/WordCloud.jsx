@@ -82,7 +82,20 @@ export default function WordCloud({ selectedTime = null }) {
     const allInfons = []
     const relationInfons = []
     const infonById = new Map()
+    const supersededIids = new Set() // 记录被取代的信息元iid（中文注释）
     
+    // 第一遍：收集所有被取代的iid（中文注释）
+    for (const run of runs) {
+      if (!run || (run.status !== 'done' && run.status !== 'running')) continue
+      const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
+      infons.forEach((infon) => {
+        if (Array.isArray(infon._supersedes)) {
+          infon._supersedes.forEach(oldIid => supersededIids.add(oldIid))
+        }
+      })
+    }
+    
+    // 第二遍：提取信息元，过滤掉被取代的（中文注释）
     for (const run of runs) {
       // 允许 running 状态参与可视化（中文注释）：实现流式显示
       if (!run || (run.status !== 'done' && run.status !== 'running')) continue
@@ -90,6 +103,11 @@ export default function WordCloud({ selectedTime = null }) {
       infons.forEach((infon) => {
         const type = String(infon.infon_type || '').toUpperCase()
         const iid = infon.iid
+        
+        // 跳过被取代的信息元（中文注释）
+        if (iid && supersededIids.has(iid)) {
+          return
+        }
         
         // 保存到 iid 映射表（中文注释）
         if (iid) {

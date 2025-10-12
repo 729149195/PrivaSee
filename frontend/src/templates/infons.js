@@ -73,7 +73,12 @@ export const OUTPUT_CONSTRAINTS = String.raw`
 【Output Requirements】
 - Output only a single JSON object, no explanatory text or markdown fences
 - Each infon must have: iid, infon_type, record_time, confidence, support
-- Use stable IDs with appropriate prefixes: desc:, scen:, rel:, sit:
+- **IID Format Rule**: Use format "{type_prefix}:r{round}_{index}" where:
+  * type_prefix: "desc", "scen", "rel", or "sit"
+  * round: conversation round number (will be provided in context)
+  * index: sequential index starting from 1 for each infon in THIS extraction
+  * Example: "desc:r2_1", "scen:r2_2", "rel:r2_3"
+- **REL arg_refs Rule**: When referencing other infons in REL arg_refs, use the EXACT iid format. If referencing infons from current extraction, use the same round number. If referencing existing infons (provided in context), use their exact iid.
 - Confidence in [0,1]; only assign high confidence to explicitly observed information
 - Include occur_time when temporal context is available
 - For visual infons with bounding boxes, include bbox in scenario infons
@@ -84,27 +89,27 @@ export const OUTPUT_FORMAT = String.raw`
 {
   "infons": [
     {
-      "iid": "desc:...", "infon_type": "DESC", 
+      "iid": "desc:r{round}_{index}", "infon_type": "DESC", 
       "entity": "entity_name", "attribute": "attribute_value", "data_type": "string|number|boolean",
       "record_time": "ISO8601", "occur_time": "ISO8601", 
-      "confidence": 0.95, "support": {"sid":"sit:...","justification":"str"}
+      "confidence": 0.95, "support": {"sid":"sit:r{round}_{index}","justification":"str"}
     },
     {
-      "iid": "scen:...", "infon_type": "SCEN",
+      "iid": "scen:r{round}_{index}", "infon_type": "SCEN",
       "temporal": "ISO8601|fuzzy_expression", "spatial": "place_name|coordinate", 
       "granularity": "year|month|day|hour", "bbox": [x,y,w,h],
       "record_time": "ISO8601", "occur_time": "ISO8601",
-      "confidence": 0.90, "support": {"sid":"sit:...","justification":"str"}
+      "confidence": 0.90, "support": {"sid":"sit:r{round}_{index}","justification":"str"}
     },
     {
-      "iid": "rel:...", "infon_type": "REL",
+      "iid": "rel:r{round}_{index}", "infon_type": "REL",
       "relation_name": "age_of|holding|located_at", "arity": 2,
-      "arg_refs": ["desc:...","scen:..."], "arg_types": ["DESC","SCEN"],
+      "arg_refs": ["desc:r{round}_{index}","scen:r{round}_{index}"], "arg_types": ["DESC","SCEN"],
       "record_time": "ISO8601", "occur_time": "ISO8601",
-      "confidence": 0.90, "support": {"sid":"sit:...","justification":"str"}
+      "confidence": 0.90, "support": {"sid":"sit:r{round}_{index}","justification":"str"}
     },
     {
-      "iid": "sit:...", "infon_type": "SIT",
+      "iid": "sit:r{round}_{index}", "infon_type": "SIT",
       "situation_type": "discourse|scene|event|frame", "description": "brief_description", "context_span": {"text":{"char_start":0,"char_end":42},"image":{"bbox":[x,y,w,h]}},
       "record_time": "ISO8601", "occur_time": "ISO8601",
       "confidence": 1.0, "support": {"sid":"sit:self","justification":"direct_observation"}
@@ -184,14 +189,14 @@ export const SELF_CHECKLIST = String.raw`
 `;
 
 export const EXAMPLES_SNIPPET = String.raw`
-【Example】Text "我叫王小明，今年27岁了" extracts (note: "attribute" contains exact text for highlighting):
-- SIT infon: {"iid":"sit:self_introduction", "infon_type":"SIT", "situation_type":"discourse", "description":"自我介绍"}
-- DESC infon: {"iid":"desc:speaker", "infon_type":"DESC", "entity":"人称", "attribute":"我", "data_type":"string"}
-- REL infon: {"iid":"rel:name_relation", "infon_type":"REL", "relation_name":"名字", "arg_refs":["desc:speaker","desc:name"]}
-- DESC infon: {"iid":"desc:name", "infon_type":"DESC", "entity":"姓名", "attribute":"王小明", "data_type":"string"}
-- SCEN infon: {"iid":"scen:current_year", "infon_type":"SCEN", "temporal":"今年", "granularity":"year"}
-- DESC infon: {"iid":"desc:age", "infon_type":"DESC", "entity":"年龄", "attribute":"27", "data_type":"number"}
-- REL infon: {"iid":"rel:age_relation", "infon_type":"REL", "relation_name":"年龄关系", "arg_refs":["desc:speaker","desc:age"]}
+【Example】Text "我叫王小明，今年27岁了" in conversation round 1 extracts (note: "attribute" contains exact text for highlighting):
+- SIT infon: {"iid":"sit:r1_1", "infon_type":"SIT", "situation_type":"discourse", "description":"自我介绍"}
+- DESC infon: {"iid":"desc:r1_2", "infon_type":"DESC", "entity":"人称", "attribute":"我", "data_type":"string"}
+- REL infon: {"iid":"rel:r1_3", "infon_type":"REL", "relation_name":"名字", "arg_refs":["desc:r1_2","desc:r1_4"]}
+- DESC infon: {"iid":"desc:r1_4", "infon_type":"DESC", "entity":"姓名", "attribute":"王小明", "data_type":"string"}
+- SCEN infon: {"iid":"scen:r1_5", "infon_type":"SCEN", "temporal":"今年", "granularity":"year"}
+- DESC infon: {"iid":"desc:r1_6", "infon_type":"DESC", "entity":"年龄", "attribute":"27", "data_type":"number"}
+- REL infon: {"iid":"rel:r1_7", "infon_type":"REL", "relation_name":"年龄关系", "arg_refs":["desc:r1_2","desc:r1_6"]}
 
 【Counter-Example】For "别放大麦芽醋":
 - WRONG: {"entity":"大麦芽醋", "attribute":"禁止成分"} ← "禁止成分" is not in text, cannot highlight!
@@ -203,7 +208,9 @@ export function buildSystemPrompt(options = {}) {
   const {
     modalities = ["text", "image", "audio"],
     includeExamples = false,
-    extraInstructions = ""
+    extraInstructions = "",
+    currentRound = 1,
+    existingInfons = []
   } = options;
 
   const parts = [
@@ -219,6 +226,33 @@ export function buildSystemPrompt(options = {}) {
 
   parts.push(SELF_CHECKLIST);
   if (includeExamples) parts.push(EXAMPLES_SNIPPET);
+  
+  // Add conversation round context
+  let contextInfo = `\n【Current Extraction Context】\n- Current conversation round: ${currentRound}\n- Generate iid using format: "{type_prefix}:r${currentRound}_{index}" (index starts from 1 for this extraction)\n`;
+  
+  // Add existing infons for reference (for cross-round relations)
+  if (Array.isArray(existingInfons) && existingInfons.length > 0) {
+    contextInfo += `- Existing infons from previous rounds (for reference in REL arg_refs):\n`;
+    existingInfons.forEach(infon => {
+      const type = String(infon.infon_type || '').toUpperCase();
+      let summary = '';
+      if (type === 'DESC') {
+        summary = `${infon.entity || ''}: ${infon.attribute || ''}`;
+      } else if (type === 'SCEN') {
+        summary = `${infon.temporal || ''} @ ${infon.spatial || ''}`;
+      } else if (type === 'REL') {
+        summary = infon.relation_name || 'Relation';
+      } else if (type === 'SIT') {
+        summary = infon.description || 'Situation';
+      }
+      contextInfo += `  * [${infon.iid}] ${type}: ${summary}\n`;
+    });
+    contextInfo += `- When creating REL infons that reference existing infons, use their exact iid from the list above.\n`;
+    contextInfo += `- Avoid duplicating infons that already exist with identical semantic content. If new text mentions the same entity/attribute as existing infons, create a REL to link them instead of duplicating.\n`;
+  }
+  
+  parts.push(contextInfo);
+  
   if (extraInstructions && String(extraInstructions).trim()) parts.push(String(extraInstructions));
 
   return parts.join("\n\n");

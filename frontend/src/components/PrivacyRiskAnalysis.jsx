@@ -34,6 +34,11 @@ export default function PrivacyRiskAnalysis({
         <details className={styles.wordCloudDetails} open={inference.status === 'running' || inference.status === 'done'}>
           <summary className={styles.wordCloudDetailsSummary}>
             Inference Results ({inference.risks.length} risk{inference.risks.length > 1 ? 's' : ''})
+            {inference.status === 'running' && (
+              <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--color-accent-primary)' }}>
+                (streaming...)
+              </span>
+            )}
           </summary>
           <div className={styles.wordCloudDetailsContent} style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {inference.risks.map((risk, idx) => (
@@ -97,8 +102,13 @@ export default function PrivacyRiskAnalysis({
           </div>
         </details>
       ) : inference?.status === 'running' ? (
-        <div style={{ padding: 12, fontSize: 11, color: 'var(--color-text-tertiary)', textAlign: 'center' }}>
-          Analyzing privacy risks...
+        <div style={{ padding: 20, fontSize: 11, color: 'var(--color-text-tertiary)', textAlign: 'center' }}>
+          <div style={{ marginBottom: 8, fontWeight: 600, color: 'var(--color-accent-primary)' }}>
+            Analyzing privacy risks...
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--color-text-tertiary)' }}>
+            This may take a few seconds to start streaming results
+          </div>
         </div>
       ) : inference?.status === 'error' ? (
         <div style={{ padding: 12, fontSize: 11, color: '#ef4444', textAlign: 'center' }}>

@@ -6,6 +6,7 @@ const LAWS = [
   { key: 'PIPL', label: 'PIPL', file: './law/PIPL.json' },
   { key: 'GDPR', label: 'GDPR', file: './law/GDPR.json' },
   { key: 'CCPA_CPRA', label: 'CCPA/CPRA', file: './law/CCPA_CPRA.json' },
+  { key: 'CUSTOM', label: 'Custom', file: null }, // Custom mode uses checkboxes instead of tree
 ]
 
 async function fetchLawData(file) {
@@ -13,22 +14,51 @@ async function fetchLawData(file) {
   return await res.json()
 }
 
+// 自定义隐私项列表
+const PRIVACY_ITEMS = [
+  { id: 'name', label: 'Name', category: 'Identity' },
+  { id: 'email', label: 'Email Address', category: 'Contact' },
+  { id: 'phone', label: 'Phone Number', category: 'Contact' },
+  { id: 'address', label: 'Home Address', category: 'Contact' },
+  { id: 'dob', label: 'Date of Birth', category: 'Identity' },
+  { id: 'gender', label: 'Gender', category: 'Identity' },
+  { id: 'photo', label: 'Photos/Images', category: 'Identity' },
+  { id: 'ip', label: 'IP Address', category: 'Digital' },
+  { id: 'device', label: 'Device ID', category: 'Digital' },
+  { id: 'cookies', label: 'Cookies', category: 'Digital' },
+  { id: 'location', label: 'Location/GPS', category: 'Location' },
+  { id: 'browsing', label: 'Browsing History', category: 'Behavioral' },
+  { id: 'search', label: 'Search History', category: 'Behavioral' },
+  { id: 'biometric', label: 'Biometric Data', category: 'Sensitive' },
+  { id: 'financial', label: 'Financial Information', category: 'Sensitive' },
+  { id: 'health', label: 'Health Data', category: 'Sensitive' },
+  { id: 'social', label: 'Social Media Activity', category: 'Behavioral' },
+  { id: 'purchases', label: 'Purchase History', category: 'Behavioral' },
+]
+
 export default function LawTree() {
   const [lawIdx, setLawIdx] = useState(0)
-  const [lawData, setLawData] = useState([null, null, null])
+  const [lawData, setLawData] = useState([null, null, null, null])
+  const [selectedPrivacyItems, setSelectedPrivacyItems] = useState(new Set())
+  const [customPrivacyItems, setCustomPrivacyItems] = useState([]) // 用户自定义的隐私项
+  const [newItemInput, setNewItemInput] = useState('') // 新隐私项输入框
+  const [holdingLawIdx, setHoldingLawIdx] = useState(null) // 正在长按的法律索引
+  const [holdProgress, setHoldProgress] = useState(0) // 长按进度 0-100
   const containerRef = useRef(null)
   const svgRef = useRef(null)
+  const holdTimerRef = useRef(null)
+  const holdStartRef = useRef(null)
   const [size, setSize] = useState({ width: 928, height: 600 })
   
   // 从 store 获取推理结果和相关方法（中文注释）
-  const { getCurrentSession, privacyInferences, setSelectedLaw } = useStore()
+  const { getCurrentSession, privacyInferences, setSelectedLaw, startPrivacyInference } = useStore()
   const session = getCurrentSession()
   const inference = useMemo(() => (session ? privacyInferences?.[session.id] : null), [session, privacyInferences])
 
-  // 预加载三份数据
+  // 预加载法律数据（跳过Custom）
   useEffect(() => {
     LAWS.forEach((law, idx) => {
-      if (!lawData[idx]) {
+      if (!lawData[idx] && law.file) {
         fetchLawData(law.file).then(data => {
           setLawData(prev => {
             const arr = [...prev]
@@ -43,10 +73,16 @@ export default function LawTree() {
   
   // 当法律数据或索引变化时，更新 store 中的选中法律（中文注释）
   useEffect(() => {
-    if (lawData[lawIdx]) {
+    if (LAWS[lawIdx].key === 'CUSTOM') {
+      // 对于自定义模式，传递用户选择的隐私项
+      setSelectedLaw(LAWS[lawIdx].key, { 
+        customItems: Array.from(selectedPrivacyItems),
+        isCustom: true 
+      })
+    } else if (lawData[lawIdx]) {
       setSelectedLaw(LAWS[lawIdx].key, lawData[lawIdx])
     }
-  }, [lawIdx, lawData, setSelectedLaw])
+  }, [lawIdx, lawData, selectedPrivacyItems, setSelectedLaw])
 
   // 容器自适应
   useEffect(() => {
@@ -445,6 +481,254 @@ export default function LawTree() {
     }
   }, [lawData, lawIdx, size, riskMap])
 
+  // 处理复选框变化
+  const handleCheckboxChange = (itemId) => {
+    setSelectedPrivacyItems(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId)
+      } else {
+        newSet.add(itemId)
+      }
+      return newSet
+    })
+  }
+
+  // 添加自定义隐私项
+  const handleAddCustomItem = () => {
+    const trimmed = newItemInput.trim()
+    if (!trimmed) return
+    
+    const newItem = {
+      id: `custom_${Date.now()}`,
+      label: trimmed,
+      category: 'Custom'
+    }
+    
+    setCustomPrivacyItems(prev => [...prev, newItem])
+    setNewItemInput('')
+    
+    // 自动选中新添加的项
+    setSelectedPrivacyItems(prev => {
+      const newSet = new Set(prev)
+      newSet.add(newItem.id)
+      return newSet
+    })
+  }
+
+  // 长按法律选项卡处理
+  const handleLawMouseDown = (idx) => {
+    setHoldingLawIdx(idx)
+    holdStartRef.current = Date.now()
+    
+    const updateProgress = () => {
+      if (!holdStartRef.current) return
+      
+      const elapsed = Date.now() - holdStartRef.current
+      const progress = Math.min((elapsed / 1000) * 100, 100) // 1秒
+      setHoldProgress(progress)
+      
+      if (progress >= 100) {
+        // 触发推理
+        handleTriggerInference(idx)
+        setHoldingLawIdx(null)
+        setHoldProgress(0)
+        holdStartRef.current = null
+      } else {
+        holdTimerRef.current = requestAnimationFrame(updateProgress)
+      }
+    }
+    
+    holdTimerRef.current = requestAnimationFrame(updateProgress)
+  }
+
+  const handleLawMouseUp = (idx) => {
+    const wasHolding = holdingLawIdx === idx
+    const progress = holdProgress
+    
+    setHoldingLawIdx(null)
+    setHoldProgress(0)
+    holdStartRef.current = null
+    if (holdTimerRef.current) {
+      cancelAnimationFrame(holdTimerRef.current)
+      holdTimerRef.current = null
+    }
+    
+    // 如果长按未完成（进度<100%），则视为普通点击，只切换法律不推理
+    if (wasHolding && progress < 100) {
+      setLawIdx(idx)
+    }
+  }
+
+  const handleTriggerInference = (idx) => {
+    // 先切换法律
+    setLawIdx(idx)
+    // 再触发推理
+    if (startPrivacyInference) {
+      // 延迟一下确保法律已切换
+      setTimeout(() => {
+        startPrivacyInference()
+      }, 100)
+    }
+  }
+
+  // 清理定时器
+  useEffect(() => {
+    return () => {
+      if (holdTimerRef.current) {
+        cancelAnimationFrame(holdTimerRef.current)
+      }
+    }
+  }, [])
+
+  // 按类别分组隐私项（包含自定义项）
+  const groupedItems = useMemo(() => {
+    const groups = {}
+    const allItems = [...PRIVACY_ITEMS, ...customPrivacyItems]
+    allItems.forEach(item => {
+      if (!groups[item.category]) {
+        groups[item.category] = []
+      }
+      groups[item.category].push(item)
+    })
+    return groups
+  }, [customPrivacyItems])
+
+  // 判断是否显示自定义选项界面
+  const isCustomMode = LAWS[lawIdx].key === 'CUSTOM'
+
+  // 渲染自定义隐私项复选框界面
+  const renderCustomPrivacyOptions = () => (
+    <div style={{ 
+      height: size.height,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden'
+    }}>
+      {/* 顶部：添加自定义项的输入框 */}
+      <div style={{ 
+        padding: '8px 10px',
+        borderBottom: '1px solid var(--color-border-light)',
+        flexShrink: 0
+      }}>
+        <div style={{ 
+          display: 'flex',
+          gap: '6px',
+          alignItems: 'center'
+        }}>
+          <input
+            type="text"
+            value={newItemInput}
+            onChange={(e) => setNewItemInput(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleAddCustomItem()}
+            placeholder="Add custom privacy item..."
+            style={{
+              flex: 1,
+              padding: '6px 10px',
+              fontSize: 12,
+              border: '1px solid var(--color-border-light)',
+              borderRadius: 6,
+              background: 'var(--color-bg-primary)',
+              color: 'var(--color-text-primary)',
+              outline: 'none'
+            }}
+          />
+          <button
+            onClick={handleAddCustomItem}
+            style={{
+              padding: '6px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              background: 'var(--color-bg-tertiary)',
+              color: 'var(--color-text-primary)',
+              border: '1px solid var(--color-border-light)',
+              borderRadius: 6,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            Add
+          </button>
+        </div>
+        <div style={{
+          marginTop: 4,
+          fontSize: 11,
+          color: 'var(--color-text-tertiary)',
+          textAlign: 'center'
+        }}>
+          {selectedPrivacyItems.size} item{selectedPrivacyItems.size !== 1 ? 's' : ''} selected
+        </div>
+      </div>
+
+      {/* 中部：滚动区域，显示所有隐私项 */}
+      <div style={{ 
+        flex: 1,
+        overflowY: 'auto',
+        padding: '8px 10px'
+      }}>
+        {Object.entries(groupedItems).map(([category, items]) => (
+          <div key={category} style={{ marginBottom: 10 }}>
+            <div style={{ 
+              fontSize: 11, 
+              fontWeight: 600, 
+              color: 'var(--color-text-secondary)',
+              marginBottom: 4,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px'
+            }}>
+              {category}
+            </div>
+            <div style={{ 
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+              gap: '4px'
+            }}>
+              {items.map(item => (
+                <label
+                  key={item.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '5px 8px',
+                    background: selectedPrivacyItems.has(item.id) 
+                      ? 'var(--color-bg-tertiary)' 
+                      : 'transparent',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    border: '1px solid var(--color-border-light)',
+                    transition: 'all 0.15s',
+                    fontSize: 12,
+                    color: 'var(--color-text-primary)',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedPrivacyItems.has(item.id)}
+                    onChange={() => handleCheckboxChange(item.id)}
+                    style={{ 
+                      cursor: 'pointer',
+                      width: '14px',
+                      height: '14px',
+                      flexShrink: 0
+                    }}
+                  />
+                  <span style={{ 
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    {item.label}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 8, paddingLeft: 4 }}>
@@ -463,29 +747,65 @@ export default function LawTree() {
         }}
       >
         <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center' }}>
-          {LAWS.map((law, idx) => (
-            <div
-              key={law.key}
-              onClick={() => setLawIdx(idx)}
-              style={{
-                cursor: 'pointer',
-                padding: '6px 6px',
-                borderRadius: 10,
-                fontWeight: 600,
-                fontSize: 12,
-                color: lawIdx === idx ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-                background: lawIdx === idx ? 'var(--color-bg-tertiary)' : 'transparent',
-                borderWidth: 0.5,
-                borderStyle: 'solid',
-                borderColor: 'var(--color-border-light)',
-                boxShadow: lawIdx === idx ? '0 0 0 1px #334155' : 'none',
-                transition: 'background-color 0.18s, color 0.18s',
-              }}
-            >
-              {law.label}
-            </div>
-          ))}
-          {inference && inference.lawKey && inference.lawKey !== LAWS[lawIdx].key && (
+          {LAWS.map((law, idx) => {
+            const isHolding = holdingLawIdx === idx
+            const isActive = lawIdx === idx
+            
+            return (
+              <div key={law.key} style={{ position: 'relative' }}>
+                <div
+                  onMouseDown={() => handleLawMouseDown(idx)}
+                  onMouseUp={() => handleLawMouseUp(idx)}
+                  onMouseLeave={() => handleLawMouseUp(idx)}
+                  onTouchStart={() => handleLawMouseDown(idx)}
+                  onTouchEnd={() => handleLawMouseUp(idx)}
+                  style={{
+                    cursor: 'pointer',
+                    padding: '6px 12px',
+                    borderRadius: 10,
+                    fontWeight: 600,
+                    fontSize: 12,
+                    color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                    background: isHolding
+                      ? `linear-gradient(to right, #3b82f6 ${holdProgress}%, var(--color-bg-tertiary) ${holdProgress}%)`
+                      : isActive 
+                        ? 'var(--color-bg-tertiary)' 
+                        : 'transparent',
+                    borderWidth: 0.5,
+                    borderStyle: 'solid',
+                    borderColor: 'var(--color-border-light)',
+                    boxShadow: isActive ? '0 0 0 1px #334155' : 'none',
+                    transition: isHolding ? 'none' : 'background-color 0.18s, color 0.18s',
+                    transform: isHolding ? 'scale(0.98)' : 'scale(1)',
+                    userSelect: 'none',
+                  }}
+                >
+                  {law.label}
+                </div>
+                {isHolding && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    marginTop: 4,
+                    padding: '4px 8px',
+                    background: 'rgba(0,0,0,0.8)',
+                    color: 'white',
+                    fontSize: 10,
+                    borderRadius: 4,
+                    whiteSpace: 'nowrap',
+                    pointerEvents: 'none',
+                    zIndex: 10
+                  }}>
+                    Hold for {((1000 - holdProgress * 10) / 1000).toFixed(1)}s to analyze...
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          
+          {inference && inference.lawKey && inference.lawKey !== LAWS[lawIdx].key && !isCustomMode && (
             <div style={{ 
               fontSize: 11, 
               color: 'var(--color-text-tertiary)',
@@ -498,7 +818,11 @@ export default function LawTree() {
             </div>
           )}
         </div>
-        <svg ref={svgRef} style={{ width: '100%', height: size.height, display: 'block' }} />
+        {isCustomMode ? (
+          renderCustomPrivacyOptions()
+        ) : (
+          <svg ref={svgRef} style={{ width: '100%', height: size.height, display: 'block' }} />
+        )}
       </div>
     </div>
   )

@@ -98,12 +98,141 @@ function normalizeInfonOutput(obj, { recordTimeISO, defaultModality, sessionId, 
   return out
 }
 
-function buildInfonSystemPrompt(modalities, nowISO) {
+function buildInfonSystemPrompt(modalities, nowISO, options = {}) {
+  const { currentRound = 1, existingInfons = [] } = options;
   return buildSystemPrompt({
     modalities,
     includeExamples: false,
+    currentRound,
+    existingInfons,
     extraInstructions: `System time (ISO8601) = ${nowISO}. Set run_metadata.record_time to this value. For each situation and infon, if record_time is missing, set it to this value. Only set occur_time when it is explicitly expressed; otherwise omit.`
   })
+}
+
+// 增量更新逻辑（中文注释）：检测和处理重复/冲突的信息元
+// 策略调整：
+// 1. 每轮的信息元都保留（因为它们有独立的上下文和 iid）
+// 2. 只标记明确的语义冲突（如同一主体的不同属性值）
+// 3. 返回标记了冲突关系的新信息元，由上层决定如何展示
+function deduplicateAndMergeInfons(newInfons, existingInfons) {
+  if (!Array.isArray(newInfons) || newInfons.length === 0) return newInfons;
+  if (!Array.isArray(existingInfons) || existingInfons.length === 0) return newInfons;
+  
+  const result = [];
+  const conflictInfons = []; // 记录被新信息元替换的旧信息元
+  
+  // 合并新旧信息元列表用于查找引用（中文注释）
+  const allInfonsForLookup = [...existingInfons, ...newInfons];
+  
+  // 处理每个新信息元（中文注释）
+  newInfons.forEach(newInfon => {
+    const conflicts = findConflictingInfons(newInfon, existingInfons, allInfonsForLookup);
+    
+    if (conflicts.length > 0) {
+      // 发现冲突：标记此信息元替换了哪些旧信息元（中文注释）
+      result.push({ 
+        ...newInfon, 
+        _supersedes: conflicts.map(c => c.iid) // 记录此信息元取代了哪些旧的
+      });
+      conflictInfons.push(...conflicts);
+    } else {
+      // 无冲突：直接添加（中文注释）
+      result.push(newInfon);
+    }
+  });
+  
+  return result;
+}
+
+// 查找与新信息元冲突的已有信息元（中文注释）
+// 冲突定义：表达同一主体的不同属性值，需要用新值替换旧值
+function findConflictingInfons(newInfon, existingInfons, allInfonsForLookup) {
+  if (!newInfon || !Array.isArray(existingInfons)) return [];
+  
+  const type = String(newInfon.infon_type || '').toUpperCase();
+  const conflicts = [];
+  
+  if (type === 'DESC') {
+    // DESC冲突检测：查找同一主体实体的不同属性值（中文注释）
+    const newEntity = String(newInfon.entity || '').trim().toLowerCase();
+    const newAttr = String(newInfon.attribute || '').trim().toLowerCase();
+    
+    // 特殊处理：姓名类属性冲突（中文注释）
+    const isNameEntity = ['姓名', '名字', 'name', '名称'].includes(newEntity);
+    
+    existingInfons.forEach(existing => {
+      if (String(existing.infon_type || '').toUpperCase() !== 'DESC') return;
+      
+      const existEntity = String(existing.entity || '').trim().toLowerCase();
+      const existAttr = String(existing.attribute || '').trim().toLowerCase();
+      
+      // 同一实体类别，但属性值不同（中文注释）
+      if (newEntity === existEntity && newAttr !== existAttr) {
+        // 对于姓名类属性，只有当两者都是姓名时才判定为冲突
+        if (isNameEntity) {
+          conflicts.push(existing);
+        }
+      }
+    });
+  } else if (type === 'REL') {
+    // REL冲突检测：查找同一关系名称连接同一第一参数的关系（中文注释）
+    const newRelName = String(newInfon.relation_name || '').trim().toLowerCase();
+    const newArgRefs = Array.isArray(newInfon.arg_refs) ? newInfon.arg_refs : [];
+    
+    // 特殊处理：名称关系冲突（中文注释）
+    const isNameRelation = ['名字', '姓名', 'name', '名称', '名称关系', '名字关系'].includes(newRelName);
+    
+    if (isNameRelation && newArgRefs.length >= 2) {
+      const newSubject = newArgRefs[0]; // 第一个参数是主体（如"我"）
+      
+      existingInfons.forEach(existing => {
+        if (String(existing.infon_type || '').toUpperCase() !== 'REL') return;
+        
+        const existRelName = String(existing.relation_name || '').trim().toLowerCase();
+        const existArgRefs = Array.isArray(existing.arg_refs) ? existing.arg_refs : [];
+        
+        // 同一类型关系，且主体相同（中文注释）
+        if (isNameRelation && existArgRefs.length >= 2) {
+          const existSubject = existArgRefs[0];
+          
+          // 检查是否指向同一主体（通过查找主体信息元的实际内容）（中文注释）
+          // 使用合并后的列表查找，以支持跨新旧信息元的引用
+          if (isSameSubject(newSubject, existSubject, allInfonsForLookup || existingInfons)) {
+            conflicts.push(existing);
+          }
+        }
+      });
+    }
+  }
+  
+  return conflicts;
+}
+
+// 检查两个信息元引用是否指向同一主体（中文注释）
+function isSameSubject(iid1, iid2, allInfons) {
+  if (iid1 === iid2) return true;
+  
+  // 查找两个iid对应的信息元内容
+  const infon1 = allInfons.find(i => i.iid === iid1);
+  const infon2 = allInfons.find(i => i.iid === iid2);
+  
+  if (!infon1 || !infon2) return false;
+  
+  // 如果都是DESC类型且实体相同，认为是同一主体
+  if (String(infon1.infon_type || '').toUpperCase() === 'DESC' &&
+      String(infon2.infon_type || '').toUpperCase() === 'DESC') {
+    const entity1 = String(infon1.entity || '').trim().toLowerCase();
+    const entity2 = String(infon2.entity || '').trim().toLowerCase();
+    const attr1 = String(infon1.attribute || '').trim().toLowerCase();
+    const attr2 = String(infon2.attribute || '').trim().toLowerCase();
+    
+    // 同一实体和属性，或都是"我"、"用户"等主体代词
+    const subjectPronouns = ['我', 'i', 'me', '用户', 'user'];
+    return (entity1 === entity2 && attr1 === attr2) || 
+           (subjectPronouns.includes(attr1) && subjectPronouns.includes(attr2));
+  }
+  
+  return false;
 }
 
 // 在流中增量解析 infons 数组，逐个对象产出
@@ -718,6 +847,20 @@ export const useStore = create((set, get) => ({
     const session = get().getCurrentSession()
     if (!session) return
 
+    // 计算当前对话轮次（中文注释）：基于消息数量
+    const messageCount = (session.messages || []).length
+    const currentRound = Math.floor(messageCount / 2) + 1
+    
+    // 获取已有的所有信息元（中文注释）：用于模型参考，避免重复和建立跨轮关系
+    const currentRuns = get().getCurrentInfonRuns()
+    const completedRuns = currentRuns.filter(r => r.status === 'done')
+    const existingInfons = []
+    completedRuns.forEach(r => {
+      if (r.resultJson?.infons) {
+        existingInfons.push(...r.resultJson.infons)
+      }
+    })
+
     const runId = generateId()
     const run = {
       id: runId,
@@ -747,7 +890,7 @@ export const useStore = create((set, get) => ({
     if (provider?.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`
 
     const nowISO = new Date().toISOString()
-    const systemPrompt = buildInfonSystemPrompt(['text'], nowISO)
+    const systemPrompt = buildInfonSystemPrompt(['text'], nowISO, { currentRound, existingInfons })
     const messages = [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: `Extract Situation Theory infons as a strict single JSON object. Input text:\n\n${text}` },
@@ -776,21 +919,8 @@ export const useStore = create((set, get) => ({
 
       await streamOpenAIResponse(reader, ({ content, finish }) => {
         if (typeof content === 'string' && content.length) {
-          // 1) 追加流文本
+          // 只追加流文本，不进行增量解析（中文注释）：等完成后统一处理
           get()._updateInfonRun(session.id, runId, (r) => ({ ...r, buffer: r.buffer + content }))
-          // 2) 尝试从流文本中增量解析 infons 并即时推送
-          const currentBuffer = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)?.buffer || ''
-          const parserState = get().infonParsers?.[runId] || null
-          const { state, yielded } = incrementalExtractInfons(currentBuffer, parserState)
-          set((st) => ({ infonParsers: { ...(st.infonParsers || {}), [runId]: state } }))
-          if (yielded && yielded.length) {
-            const nowISO2 = nowISO
-            const normalizedYield = yielded.map((o) => ({ record_time: nowISO2, ...o }))
-            get()._updateInfonRun(session.id, runId, (r) => {
-              const base = r.resultJson && typeof r.resultJson === 'object' ? r.resultJson : { run_metadata: {}, infons: [], quality_report: { stats: {} } }
-              return { ...r, resultJson: { ...base, infons: [...(base.infons || []), ...normalizedYield] } }
-            })
-          }
         }
         if (finish) {
           const raw = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)?.buffer || ''
@@ -813,7 +943,12 @@ export const useStore = create((set, get) => ({
               infonIndex,
               infonType: 'desc'
             })
-            get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'done', progress: 100, resultJson: normalized }))
+            
+            // 应用增量更新逻辑：去重和冲突解决（中文注释）
+            const deduplicated = deduplicateAndMergeInfons(normalized.infons || [], existingInfons)
+            const finalResult = { ...normalized, infons: deduplicated }
+            
+            get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'done', progress: 100, resultJson: finalResult }))
           } else {
             get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
           }
@@ -829,6 +964,20 @@ export const useStore = create((set, get) => ({
   async _startImageInfonRun({ targetType, targetKey, dataUrl, imageIndex, _hash }) {
     const session = get().getCurrentSession()
     if (!session) return
+
+    // 计算当前对话轮次（中文注释）：基于消息数量
+    const messageCount = (session.messages || []).length
+    const currentRound = Math.floor(messageCount / 2) + 1
+    
+    // 获取已有的所有信息元（中文注释）：用于模型参考，避免重复和建立跨轮关系
+    const currentRuns = get().getCurrentInfonRuns()
+    const completedRuns = currentRuns.filter(r => r.status === 'done')
+    const existingInfons = []
+    completedRuns.forEach(r => {
+      if (r.resultJson?.infons) {
+        existingInfons.push(...r.resultJson.infons)
+      }
+    })
 
     const runId = generateId()
     const run = {
@@ -863,7 +1012,7 @@ export const useStore = create((set, get) => ({
     }
 
     const nowISO = new Date().toISOString()
-    const systemPrompt = buildInfonSystemPrompt(['image'], nowISO)
+    const systemPrompt = buildInfonSystemPrompt(['image'], nowISO, { currentRound, existingInfons })
     const messages = [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: 'Extract Situation Theory infons as a strict single JSON object.', images: [stripDataUrl(dataUrl)] },
@@ -892,21 +1041,8 @@ export const useStore = create((set, get) => ({
 
       await streamOllamaChatResponse(reader, ({ content, finish }) => {
         if (typeof content === 'string' && content.length) {
-          // 1) 追加流文本
+          // 只追加流文本，不进行增量解析（中文注释）：等完成后统一处理
           get()._updateInfonRun(session.id, runId, (r) => ({ ...r, buffer: r.buffer + content }))
-          // 2) 尝试从流文本中增量解析 infons 并即时推送
-          const currentBuffer = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)?.buffer || ''
-          const parserState = get().infonParsers?.[runId] || null
-          const { state, yielded } = incrementalExtractInfons(currentBuffer, parserState)
-          set((st) => ({ infonParsers: { ...(st.infonParsers || {}), [runId]: state } }))
-          if (yielded && yielded.length) {
-            const nowISO2 = nowISO
-            const normalizedYield = yielded.map((o) => ({ record_time: nowISO2, ...o }))
-            get()._updateInfonRun(session.id, runId, (r) => {
-              const base = r.resultJson && typeof r.resultJson === 'object' ? r.resultJson : { run_metadata: {}, infons: [], quality_report: { stats: {} } }
-              return { ...r, resultJson: { ...base, infons: [...(base.infons || []), ...normalizedYield] } }
-            })
-          }
         }
         if (finish) {
           const raw = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)?.buffer || ''
@@ -929,7 +1065,12 @@ export const useStore = create((set, get) => ({
               infonIndex,
               infonType: 'desc'
             })
-            get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'done', progress: 100, resultJson: normalized }))
+            
+            // 应用增量更新逻辑：去重和冲突解决（中文注释）
+            const deduplicated = deduplicateAndMergeInfons(normalized.infons || [], existingInfons)
+            const finalResult = { ...normalized, infons: deduplicated }
+            
+            get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'done', progress: 100, resultJson: finalResult }))
           } else {
             get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
           }
@@ -1252,14 +1393,28 @@ export const useStore = create((set, get) => ({
       return
     }
     
-    // 获取当前会话的所有信息元
+    // 获取当前会话的所有信息元（中文注释）：只使用增量更新后保留的信息元
     const runs = infonSessions?.[session.id]?.runs || []
-    const allInfons = []
+    const allRawInfons = []
+    const supersededIids = new Set() // 收集所有被取代的信息元iid
+    
+    // 第一遍：收集所有信息元和被取代的iid
     runs.forEach(run => {
       if (run.status === 'done' || run.status === 'running') {
         const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
-        allInfons.push(...infons)
+        allRawInfons.push(...infons)
+        // 收集被取代的iid
+        infons.forEach(infon => {
+          if (Array.isArray(infon._supersedes)) {
+            infon._supersedes.forEach(oldIid => supersededIids.add(oldIid))
+          }
+        })
       }
+    })
+    
+    // 第二遍：过滤掉被取代的信息元
+    const allInfons = allRawInfons.filter(infon => {
+      return infon.iid && !supersededIids.has(infon.iid)
     })
     
     if (allInfons.length === 0) {
@@ -1285,9 +1440,13 @@ export const useStore = create((set, get) => ({
     }))
     
     try {
+      console.log(`[Privacy Inference] 使用 ${allInfons.length} 个信息元进行推理`)
+      
       // 构建推理提示词
       const { fillPromptTemplate } = await import('./templates/inference.js')
       const prompt = fillPromptTemplate(allInfons, selectedLaw.data)
+      
+      console.log(`[Privacy Inference] Prompt 长度: ${prompt.length} 字符`)
       
       // 隐私推理强制使用 DeepSeek API（中文注释）：与信息元提取保持一致
       const deepseekId = 'deepseek-chat'
@@ -1324,15 +1483,16 @@ export const useStore = create((set, get) => ({
       const decoder = new TextDecoder('utf-8')
       let buffer = ''
       
+      // 流式接收并逐个解析风险项（中文注释）
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
         
         const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n').filter(line => line.trim())
+        const lines = chunk.split('\n')
         
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
+          if (!line.trim() || !line.startsWith('data: ')) continue
           const data = line.slice(6).trim()
           if (data === '[DONE]') continue
           
@@ -1355,7 +1515,7 @@ export const useStore = create((set, get) => ({
                 }
               }))
               
-              // 如果有新的风险项被解析出来，立即添加到结果中
+              // 如果有新的风险项被解析出来，立即添加到结果中（流式显示）
               if (yielded && yielded.length > 0) {
                 set(state => {
                   const currentRisks = state.privacyInferences?.[session.id]?.risks || []
@@ -1372,25 +1532,15 @@ export const useStore = create((set, get) => ({
                     }
                   }
                 })
-              } else {
-                // 只更新 buffer，不更新 risks
-                set(state => ({
-                  privacyInferences: {
-                    ...state.privacyInferences,
-                    [session.id]: {
-                      ...state.privacyInferences[session.id],
-                      buffer: buffer,
-                      updatedAt: Date.now()
-                    }
-                  }
-                }))
               }
             }
           } catch (err) {
-            // 解析错误，继续累积
+            // 忽略解析错误
           }
         }
       }
+      
+      console.log(`[Privacy Inference] 流式接收完成`)
       
       // 完成推理
       set(state => ({
@@ -1499,7 +1649,18 @@ export const useStore = create((set, get) => ({
   _saveUserHistory(userId) {
     try {
       const { sessions, infonSessions, privacyInferences } = get()
-      saveUserSessions(userId, sessions, infonSessions, privacyInferences)
+      
+      // 清理不可序列化的字段（中文注释）：移除 abortController
+      const serializableInferences = {}
+      Object.keys(privacyInferences).forEach(sessionId => {
+        const inference = privacyInferences[sessionId]
+        if (inference) {
+          const { abortController, ...rest } = inference
+          serializableInferences[sessionId] = rest
+        }
+      })
+      
+      saveUserSessions(userId, sessions, infonSessions, serializableInferences)
     } catch (error) {
       console.error('[PrivaSee] 保存用户历史失败:', error)
     }
