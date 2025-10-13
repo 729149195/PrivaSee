@@ -1,5 +1,7 @@
 import React from 'react'
 import styles from './AgentPage.module.css'
+import WordCloud from './WordCloud'
+import { Tooltip } from 'antd'
 
 // Privacy Risk Analysis组件：用于显示隐私风险分析结果（自动推断版本）
 export default function PrivacyRiskAnalysis({ 
@@ -45,15 +47,25 @@ export default function PrivacyRiskAnalysis({
               // 支持部分数据：某些字段可能还未流式输出
               const isPartial = risk._isComplete === false
               const riskLevel = risk.risk_level || 'UNKNOWN'
-              const confidence = risk.confidence ?? 0
               const lawNodeName = risk.law_node_name || 'Loading...'
               const privacyExposure = risk.privacy_exposure || (isPartial ? 'Analyzing...' : 'N/A')
               const inferenceChain = risk.inference_chain || (isPartial ? 'Streaming reasoning...' : '')
               const usedInfons = risk.used_infons || []
+              const usedIids = Array.isArray(usedInfons) ? usedInfons.map(x => (typeof x === 'string' ? x : x?.iid)).filter(Boolean) : []
+              const uniqueKey = risk._objIndex ?? idx
               
               return (
+                <Tooltip 
+                  key={uniqueKey}
+                  title={usedIids.length > 0 ? (
+                    <WordCloud selectedTime={null} filterIids={usedIids} compact={true} />
+                  ) : null}
+                  placement={(idx % 2 === 0) ? 'right' : 'left'}
+                  mouseEnterDelay={0.1}
+                  overlayClassName={`${styles.riskTooltipOverlay} ${(idx % 2 === 0) ? styles.riskTooltipRight : styles.riskTooltipLeft}`}
+                  arrow={false}
+                >
                 <div 
-                  key={risk._objIndex ?? idx} 
                   className={styles.riskItem}
                   style={{ 
                     flex: '0 0 calc(50% - 3px)',
@@ -77,7 +89,7 @@ export default function PrivacyRiskAnalysis({
                       {riskLevel}
                     </span>
                     <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
-                      Confidence: {(confidence * 100).toFixed(0)}%
+                      {lawNodeName}
                     </span>
                     {isPartial && (
                       <span style={{ 
@@ -92,9 +104,6 @@ export default function PrivacyRiskAnalysis({
                         streaming...
                       </span>
                     )}
-                  </div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 4 }}>
-                    {lawNodeName}
                   </div>
                   {privacyExposure && (
                     <div style={{ 
@@ -116,27 +125,8 @@ export default function PrivacyRiskAnalysis({
                       {inferenceChain}
                     </div>
                   )}
-                  {usedInfons.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
-                      <span style={{ fontSize: 10, color: 'var(--color-text-tertiary)' }}>Used Infons:</span>
-                      {usedInfons.map((infon, i) => (
-                        <span 
-                          key={i}
-                          style={{ 
-                            fontSize: 10, 
-                            padding: '2px 6px', 
-                            borderRadius: 4,
-                            background: 'var(--color-bg-secondary)',
-                            border: '1px solid var(--color-border-light)',
-                            color: 'var(--color-text-secondary)'
-                          }}
-                        >
-                          [{infon.type}] {infon.keyword}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
+                </Tooltip>
               )
             })}
           </div>

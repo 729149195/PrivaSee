@@ -4,7 +4,7 @@ import styles from './AgentPage.module.css'
 import * as d3 from 'd3'
 
 // 信息元词云可视化（中文注释）：使用 D3 力导向布局 + 词云算法
-export default function WordCloud({ selectedTime = null }) {
+export default function WordCloud({ selectedTime = null, filterIids = null, compact = false, fontScale = null }) {
   const { getCurrentSession, infonSessions } = useStore()
   const session = getCurrentSession()
   const runs = useMemo(() => (session ? (infonSessions?.[session.id]?.runs || []) : []), [session, infonSessions])
@@ -34,10 +34,10 @@ export default function WordCloud({ selectedTime = null }) {
       }
     })
     ro.observe(el)
-    // 固定高度为 280px
-    setContainerHeight(280)
+    // 固定高度：紧凑模式更小
+    setContainerHeight(compact ? 220 : 280)
     return () => ro.disconnect()
-  }, [])
+  }, [compact])
   
   // 会话切换时清空节点位置缓存（中文注释）
   useEffect(() => {
@@ -79,6 +79,7 @@ export default function WordCloud({ selectedTime = null }) {
 
   // 从所有 runs 中提取信息元数据（中文注释）：过滤 SIT，保留 REL 作为节点，支持时间筛选
   const { wordData, relations, infonMap } = useMemo(() => {
+    const filterSet = (Array.isArray(filterIids) && filterIids.length > 0) ? new Set(filterIids) : null
     const allInfons = []
     const relationInfons = []
     const infonById = new Map()
@@ -106,6 +107,11 @@ export default function WordCloud({ selectedTime = null }) {
         
         // 跳过被取代的信息元（中文注释）
         if (iid && supersededIids.has(iid)) {
+          return
+        }
+
+        // 若提供过滤列表，仅保留包含在 filterIids 内的节点（中文注释）
+        if (filterSet && (!iid || !filterSet.has(iid))) {
           return
         }
         
@@ -190,7 +196,7 @@ export default function WordCloud({ selectedTime = null }) {
       relations: relationInfons,
       infonMap: infonById
     }
-  }, [runs, selectedTime])
+  }, [runs, selectedTime, filterIids])
 
   // D3 词云布局与渲染（中文注释）
   useEffect(() => {
@@ -205,10 +211,11 @@ export default function WordCloud({ selectedTime = null }) {
     const centerX = width / 2
     const centerY = height / 2
 
-    // 计算字体大小：基于置信度和出现次数（中文注释）：缩小字号
+    // 计算字体大小：基于置信度和出现次数（中文注释）
     const maxCount = Math.max(...wordData.map(d => d.count))
-    const minFontSize = 12
-    const maxFontSize = 16
+    // 紧凑模式下直接使用较大基础字号，不做额外放大避免溢出
+    const minFontSize = compact ? 13 : 12
+    const maxFontSize = compact ? 18 : 16
     
     const fontSizeScale = d3.scaleSqrt()
       .domain([1, maxCount])
@@ -383,6 +390,7 @@ export default function WordCloud({ selectedTime = null }) {
       .style('opacity', d => d.isNew ? 0 : 1) // 新节点从透明开始，已存在节点直接显示
       .call(drag)
       .on('click', (event, d) => {
+        if (compact) return
         setSelectedInfon(d.infons[0]) // 显示第一个关联的信息元
       })
     
@@ -739,9 +747,9 @@ export default function WordCloud({ selectedTime = null }) {
   }, [wordData, relations, infonMap, containerWidth, containerHeight])
 
   return (
-    <div ref={containerRef} style={{ marginBottom: '12px' }}>
-      <div className={styles.wordCloudTitle}>Infons Cloud</div>
-      <div className={styles.wordCloudRoot}>
+    <div ref={containerRef} style={{ marginBottom: compact ? 0 : '12px' }}>
+      {!compact && (<div className={styles.wordCloudTitle}>Infons Cloud</div>)}
+      <div className={`${styles.wordCloudRoot} ${compact ? styles.wordCloudRootCompact : ''}`}>
         {wordData.length === 0 ? (
           <div className={styles.infonEmpty} style={{ padding: '20px', textAlign: 'center' }}>No inference yet</div>
         ) : (
@@ -756,7 +764,7 @@ export default function WordCloud({ selectedTime = null }) {
         )}
       </div>
       
-      {selectedInfon ? (
+      {!compact && selectedInfon ? (
         <details className={styles.wordCloudDetails} open>
           <summary className={styles.wordCloudDetailsSummary}>
             Infon details

@@ -1215,6 +1215,15 @@
     padding: 8px;
     position: relative;
     overflow: hidden;
+    box-sizing: border-box;
+}
+
+/* 词云紧凑模式（用于 Tooltip 内），更轻量边框与背景（中文注释） */
+.wordCloudRootCompact {
+    border: 1px solid var(--color-border-light);
+    background: var(--color-bg-primary);
+    padding: 6px;
+    box-sizing: border-box;
 }
 
 .wordCloudTitle {
@@ -1342,6 +1351,22 @@
 .riskItem {
     animation: fadeInRisk 0.3s ease-in;
 }
+
+/* 风险卡片 Tooltip 覆盖样式（中文注释）：浅色、圆角、阴影 */
+.riskTooltipOverlay :global(.ant-tooltip-inner) {
+    padding: 8px;
+    background: var(--color-bg-primary);
+    border: 1px solid var(--color-border-light);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    max-width: 420px; /* 限制最大宽度，避免无限拉长 */
+}
+
+.riskTooltipOverlay :global(.ant-tooltip-arrow) { display: none !important; }
+
+/* 根据列方向的对齐微调（中文注释） */
+.riskTooltipRight :global(.ant-tooltip-inner) { margin-left: 4px; }
+.riskTooltipLeft :global(.ant-tooltip-inner) { margin-right: 4px; }
 
 .wordCloudTable {
     width: 100%;

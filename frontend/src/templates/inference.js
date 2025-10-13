@@ -58,8 +58,7 @@ Always check if inferred information falls into sensitive categories:
 **CRITICAL - Streaming Optimization**: To enable fast progressive visualization, output fields in THIS EXACT ORDER for each risk:
 1. FIRST: law_node_name (for quick highlighting)
 2. SECOND: risk_level (for color coding)
-3. THIRD: confidence (for display)
-4. THEN: all other fields (inference_chain, privacy_exposure, used_infons, etc.)
+3. THEN: all other fields (inference_chain, privacy_exposure, used_infons, etc.)
 
 Output ONLY valid JSON (no markdown, no explanation):
 {
@@ -67,23 +66,16 @@ Output ONLY valid JSON (no markdown, no explanation):
     {
       "law_node_name": "Most specific (leaf-level) node name, e.g., 'Article 13, Paragraph 2'",
       "risk_level": "HIGH | MEDIUM | LOW",
-      "confidence": 0.95,
       "privacy_exposure": "Specific privacy information exposed or inferable (be explicit about implicit inferences)",
       "inference_chain": "Step-by-step reasoning: [1] What explicit info? [2] What can be implicitly inferred? [3] Why does this violate the specific clause?",
-      "used_infons": [
-        {
-          "iid": "infon_id",
-          "type": "DESC | SCEN | REL | SIT",
-          "keyword": "keyword"
-        }
-      ]
+      "used_infons": ["infon_id_1", "infon_id_2"]
     }
   ]
 }
 
 ## Critical Requirements
 1. **Output ONLY JSON** - no markdown code blocks, no explanatory text
-2. **Field Order Matters** - MUST output fields in the exact order shown above (law_node_name → risk_level → confidence → other fields) for optimal streaming performance
+2. **Field Order Matters** - MUST output fields in the exact order shown above (law_node_name → risk_level → other fields) for optimal streaming performance
 3. **Map to LEAF NODES ONLY** - CRITICAL: Always identify the MOST SPECIFIC legal clause at the DEEPEST level in hierarchy (leaf nodes). NEVER map to intermediate/parent nodes. The law_node_name MUST be the final level clause name that appears in the law tree structure.
 4. **EXACT Name Matching** - The law_node_name MUST be copied EXACTLY from the law tree structure, character by character. DO NOT paraphrase, summarize, or modify the node name. Look for the [LEAF NODE - USE THIS] markers in the law tree and copy the name EXACTLY.
 5. **CUSTOM MODE RESTRICTION** - If you see "CUSTOM PRIVACY ANALYSIS MODE" in the law tree section, the law_node_name MUST be one of the explicitly listed selected items (marked with ✓). You CANNOT use any other privacy category names, even if you can infer them. If a privacy risk doesn't match any selected item, skip it entirely.
@@ -91,7 +83,7 @@ Output ONLY valid JSON (no markdown, no explanation):
 7. **Comprehensive Coverage** - Analyze ALL possible privacy angles: direct exposure + implicit inference + contextual correlation (BUT respect Custom Mode restrictions)
 8. **Clear Attribution** - Every risk must trace back to specific information elements with logical reasoning
 9. **Prioritize Sensitivity** - Treat health, beliefs, children, biometrics as HIGH risk
-10. **Sort Properly** - HIGH risks first, then by confidence (highest first)
+10. **Sort Properly** - HIGH risks first
 11. **Verify Before Output** - Before outputting each risk, find the [LEAF NODE - USE THIS] entry in the provided law tree and copy its exact name. If you cannot find an exact leaf node match, choose the closest leaf node from the tree.
 
 ## Example Output Format
@@ -99,7 +91,7 @@ When you find a privacy risk, you MUST:
 1. Find the DEEPEST leaf node in the law tree that matches this privacy exposure
 2. Set law_node_name to ONLY the leaf node name (copied EXACTLY from the law tree)
 3. DO NOT use intermediate node names - always use the most specific (leaf) node
-4. Output fields in order: law_node_name, risk_level, confidence, then other fields
+4. Output fields in order: law_node_name, risk_level, then other fields
 
 Example:
 If input contains "looking for gluten-free restaurant menu", infer:

@@ -84,6 +84,17 @@ export default function Timeline({ onTimeSelect }) {
     })
   }, [timelineData])
   
+  // 刷新重进或数据更新时自动滚动到最右边（中文注释）
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || timelineData.length === 0) return
+    // 延迟滚动，确保 DOM 渲染完成
+    const timer = setTimeout(() => {
+      container.scrollLeft = container.scrollWidth
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [session?.id, timelineData.length])
+  
   // 处理时间点点击（中文注释）
   const handleTimeClick = (timeData) => {
     if (selectedTime === timeData.time) {

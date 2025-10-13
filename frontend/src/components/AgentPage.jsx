@@ -194,7 +194,8 @@ export default function AgentPage() {
   const [landingInput, setLandingInput] = useState('')
   // 图片选择状态（中文注释）：保存 data URL 用于预览与发送
   const [selectedImages, setSelectedImages] = useState([])
-  const listRef = useRef(null)
+  const mainScrollRef = useRef(null) // 主滚动区域（中文注释）
+  const leftPaneScrollRef = useRef(null) // 左侧面板滚动区域（中文注释）
   const [maxContextTokens, setMaxContextTokens] = useState(null)
   // 属性级展示不再需要画像索引（中文注释）
   const [apiModalOpen, setApiModalOpen] = useState(false)
@@ -472,10 +473,24 @@ export default function AgentPage() {
 
   // 自动滚动到底部（中文注释）：流式时保持跟随
   useEffect(() => {
-    const el = listRef.current
-    if (!el) return
-    el.scrollTop = el.scrollHeight
+    const mainEl = mainScrollRef.current
+    const leftEl = leftPaneScrollRef.current
+    if (mainEl) mainEl.scrollTop = mainEl.scrollHeight
+    if (leftEl) leftEl.scrollTop = leftEl.scrollHeight
   }, [currentSession?.messages?.length, isGenerating])
+  
+  // 刷新重进或切换 chat 时自动滚动到底部（中文注释）
+  useEffect(() => {
+    const mainEl = mainScrollRef.current
+    const leftEl = leftPaneScrollRef.current
+    if (!currentSession?.messages?.length) return
+    // 延迟滚动，确保 DOM 渲染完成
+    const timer = setTimeout(() => {
+      if (mainEl) mainEl.scrollTop = mainEl.scrollHeight
+      if (leftEl) leftEl.scrollTop = leftEl.scrollHeight
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [currentSessionId, currentSession?.messages?.length])
 
   // 拉取模型列表（中文注释）：页面挂载时
   useEffect(() => { fetchModels?.() }, [fetchModels])
@@ -1417,7 +1432,7 @@ export default function AgentPage() {
 
       {/* 右侧：主区域 */}
       <section className={styles.main}>
-        <div className={styles.scroll} ref={listRef}>
+        <div className={styles.scroll} ref={mainScrollRef}>
           {/* 顶部：左上角模型选择器 */}
           <div className={styles.toolbar}>
             <div className={styles.modelPicker}>
@@ -1480,7 +1495,7 @@ export default function AgentPage() {
                   <span className={styles.legendLabel}>Relation (REL)</span>
                 </div>
               </div>
-              <div className={styles.leftPaneScroll} ref={listRef} style={{ flex: 1, overflow: 'auto' }}>
+              <div className={styles.leftPaneScroll} ref={leftPaneScrollRef} style={{ flex: 1, overflow: 'auto' }}>
                 {hasMessages ? (
                   <div className={styles.column}>
                     {(currentSession?.messages || []).map((m) => {
