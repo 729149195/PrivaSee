@@ -226,6 +226,8 @@ export default function AgentPage() {
   const lastInferenceLawKeyRef = useRef(null)
   // 记录上次推理完成的时间戳（中文注释）：用于防止频繁触发
   const lastInferenceCompleteTimeRef = useRef(0)
+  // 记录上次推理时的活跃信息元签名（中文注释）：用于检测“数量未变但内容替换”的情况
+  const lastInferenceInfonSignatureRef = useRef('')
   
   // 会话切换时重置时间选择和推理记录（中文注释）
   useEffect(() => {
@@ -233,6 +235,7 @@ export default function AgentPage() {
     lastInferenceRunCountRef.current = 0 // 重置推断计数器
     lastInferenceLawKeyRef.current = null // 重置法律记录
     lastInferenceCompleteTimeRef.current = 0 // 重置完成时间
+    lastInferenceInfonSignatureRef.current = '' // 重置信息元签名
   }, [currentSessionId])
 
   // 自动隐私推断（中文注释）：当信息元提取完成且有新数据时自动启动
@@ -241,13 +244,14 @@ export default function AgentPage() {
     
     // 检查是否有正在运行的信息元提取
     const runs = infonSessions?.[currentSession.id]?.runs || []
-    const hasRunningInfons = runs.some(run => run.status === 'running')
+    // 仅将 message 级信息元提取视为“占用中的提取”（中文注释），忽略 pending
+    const hasRunningInfons = runs.some(run => run.status === 'running' && run.targetType === 'message')
     
     // 获取当前推理状态（不要在依赖中使用 privacyInferences）
     const currentInference = privacyInferences?.[currentSession.id]
     const isInferenceRunning = currentInference?.status === 'running'
     
-    // 如果有信息元正在提取，且推断正在运行，则中止推断（避免冲突）
+    // 如果有信息元正在提取（message级），且推断正在运行，则中止推断（避免冲突）
     if (hasRunningInfons && isInferenceRunning) {
       abortPrivacyInference?.()
       return
@@ -269,6 +273,14 @@ export default function AgentPage() {
     })
     const activeInfons = allRawInfons.filter(infon => infon.iid && !supersededIids.has(infon.iid))
     const activeInfonCount = activeInfons.length
+    // 计算当前活跃信息元签名：基于iid稳定排序拼接（中文注释）
+    const buildInfonSignature = (list) => {
+      try {
+        const ids = list.map(x => String(x.iid || '')).filter(Boolean).sort()
+        return ids.join('|')
+      } catch (_) { return '' }
+    }
+    const activeInfonSignature = buildInfonSignature(activeInfons)
     
     // 检查推理完成状态，更新完成时间戳（中文注释）
     if (currentInference?.status === 'done' && currentInference?.updatedAt) {
@@ -284,13 +296,25 @@ export default function AgentPage() {
         if (lastInferenceLawKeyRef.current !== selectedLaw.key) {
           lastInferenceLawKeyRef.current = selectedLaw.key
         }
+        // 记录本次完成时的签名（中文注释）
+        if (lastInferenceInfonSignatureRef.current !== activeInfonSignature) {
+          lastInferenceInfonSignatureRef.current = activeInfonSignature
+        }
+      }
+    }
+    
+    // 若推理被中止/出错/置空闲，则允许后续在相同信息元集合上重新触发（中文注释）
+    if (currentInference?.status === 'aborted' || currentInference?.status === 'error' || currentInference?.status === 'idle') {
+      if (lastInferenceInfonSignatureRef.current === activeInfonSignature) {
+        lastInferenceInfonSignatureRef.current = ''
       }
     }
     
     // 检查触发条件
     const hasNewInfons = activeInfonCount > lastInferenceRunCountRef.current
+    const infonSetChanged = activeInfonSignature !== lastInferenceInfonSignatureRef.current
     const lawChanged = selectedLaw.key !== lastInferenceLawKeyRef.current
-    const needsInference = (hasNewInfons || lawChanged) && activeInfonCount > 0
+    const needsInference = (hasNewInfons || infonSetChanged || lawChanged) && activeInfonCount > 0
     
     // 防止推理刚完成就立即触发（中文注释）：至少等待3秒
     const timeSinceLastComplete = Date.now() - lastInferenceCompleteTimeRef.current
@@ -301,6 +325,7 @@ export default function AgentPage() {
       // 立即更新记录，防止重复触发（中文注释）
       lastInferenceRunCountRef.current = activeInfonCount
       lastInferenceLawKeyRef.current = selectedLaw.key
+      lastInferenceInfonSignatureRef.current = activeInfonSignature
       
       // 使用延迟避免频繁触发
       const timer = setTimeout(() => {
@@ -309,7 +334,7 @@ export default function AgentPage() {
       return () => clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [infonSessions, currentSessionId, selectedLaw?.key])
+  }, [infonSessions, currentSessionId, selectedLaw?.key, privacyInferences?.[currentSessionId]?.status])
 
   // 监听信息元提取结果，当首次出现 SIT 类型时自动更新对话标题（中文注释）
   useEffect(() => {
@@ -672,9 +697,54 @@ export default function AgentPage() {
 
   // 属性级展示（中文注释）：不需要默认选择
 
-
+  // 发送锁定状态与阶段检测（中文注释）：计算当前隐私保护流程进度
+  const sendLockState = useMemo(() => {
+    if (!currentSession?.id) return { locked: false, stage: 'ready', label: 'Send' }
+    
+    const runs = infonSessions?.[currentSession.id]?.runs || []
+    // 检查 pending 和 message 级别的信息元提取
+    const hasRunningPendingInfons = runs.some(run => run.status === 'running' && run.targetType === 'pending')
+    const hasRunningMessageInfons = runs.some(run => run.status === 'running' && run.targetType === 'message')
+    const currentInference = privacyInferences?.[currentSession.id]
+    const isInferenceRunning = currentInference?.status === 'running'
+    
+    // Pending 信息元提取中（用户刚输入完，还在提取）
+    if (hasRunningPendingInfons) {
+      return { locked: true, stage: 'extracting', label: 'Extracting Infons...' }
+    }
+    // Message 信息元提取中
+    if (hasRunningMessageInfons) {
+      return { locked: true, stage: 'extracting', label: 'Extracting Infons...' }
+    }
+    // 隐私推理中
+    if (isInferenceRunning) {
+      return { locked: true, stage: 'analyzing', label: 'Privacy Analyzing...' }
+    }
+    
+    // 严格检查：只要存在任何 pending 信息元（无论状态），且没有完成推理，就锁定
+    const hasPendingInfons = runs.some(run => run.targetType === 'pending')
+    const hasCompletedInference = currentInference?.status === 'done'
+    
+    // 如果有 pending 信息元但推理未完成，保持锁定
+    if (hasPendingInfons && selectedLaw) {
+      if (!hasCompletedInference) {
+        // 判断当前处于哪个等待阶段
+        const hasDonePending = runs.some(run => run.targetType === 'pending' && run.status === 'done')
+        if (hasDonePending) {
+          return { locked: true, stage: 'waiting', label: 'Privacy Analyzing...' }
+        } else {
+          return { locked: true, stage: 'waiting', label: 'Extracting Infons...' }
+        }
+      }
+    }
+    
+    return { locked: false, stage: 'ready', label: 'Send' }
+  }, [currentSession?.id, infonSessions, privacyInferences, selectedLaw])
 
   const handleSend = async () => {
+    // 隐私保护流程未完成时禁止发送（中文注释）
+    if (sendLockState.locked) return
+    
     const text = (input || '').trim()
     const imgs = [...selectedImages]
     const hasImages = imgs.length > 0
@@ -705,6 +775,9 @@ export default function AgentPage() {
   }
 
   const handleLandingSend = async () => {
+    // 隐私保护流程未完成时禁止发送（中文注释）
+    if (sendLockState.locked) return
+    
     const text = (landingInput || '').trim()
     const imgs = [...selectedImages]
     const hasImages = imgs.length > 0
@@ -1529,7 +1602,16 @@ export default function AgentPage() {
                             highlights={pendingHighlights}
                             autoSize={{ minRows: 1, maxRows: 6 }}
                           />
-                          <Button type="primary" icon={<SendOutlined />} onClick={handleLandingSend} disabled={!landingInput.trim() && selectedImages.length === 0} />
+                          <Button 
+                            type={sendLockState.locked ? "default" : "primary"}
+                            icon={sendLockState.stage === 'ready' ? <SendOutlined /> : null}
+                            onClick={handleLandingSend} 
+                            disabled={!landingInput.trim() && selectedImages.length === 0}
+                            loading={sendLockState.locked}
+                            className={sendLockState.locked ? styles.sendButtonLocked : ''}
+                          >
+                            {sendLockState.locked ? sendLockState.label : ''}
+                          </Button>
                         </div>
                         {/* Pending 关系标签（中文注释） */}
                         {pendingRelations.length > 0 && (
@@ -1625,7 +1707,16 @@ export default function AgentPage() {
                           <Button icon={<CameraOutlined />} disabled={!currentModelIsMultimodal} title={currentModelIsMultimodal ? '' : 'Current model does not support images'} />
                         </Upload>
                         {!isGenerating ? (
-                          <Button type="primary" icon={<SendOutlined />} disabled={!input.trim() && selectedImages.length === 0} onClick={handleSend} />
+                          <Button 
+                            type={sendLockState.locked ? "default" : "primary"}
+                            icon={sendLockState.stage === 'ready' ? <SendOutlined /> : null}
+                            disabled={(!input.trim() && selectedImages.length === 0) || sendLockState.locked}
+                            onClick={handleSend}
+                            loading={sendLockState.locked}
+                            className={sendLockState.locked ? styles.sendButtonLocked : ''}
+                          >
+                            {sendLockState.locked ? sendLockState.label : ''}
+                          </Button>
                         ) : (
                           <Button danger icon={<StopOutlined />} onClick={stopGenerating}>Stop</Button>
                         )}

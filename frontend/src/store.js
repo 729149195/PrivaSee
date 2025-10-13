@@ -237,7 +237,18 @@ function isSameSubject(iid1, iid2, allInfons) {
 
 // 在流中增量解析 infons 数组，逐个对象产出
 function incrementalExtractInfons(streamText, parser) {
-  const state = parser || { foundArray: false, arrayStart: -1, scanPos: 0, inString: false, escape: false, objStart: -1, braceDepth: 0, closed: false, yieldedHashes: [] }
+  const state = parser || { 
+    foundArray: false, 
+    arrayStart: -1, 
+    scanPos: 0, 
+    inString: false, 
+    escape: false, 
+    objStart: -1, 
+    braceDepth: 0, 
+    closed: false, 
+    objectStates: new Map(), // Map<objIndex, {lastParsedHash, data}>
+    currentObjIndex: 0
+  }
   const yielded = []
   const text = String(streamText || '')
 
@@ -272,23 +283,55 @@ function incrementalExtractInfons(streamText, parser) {
     }
     if (ch === '"') { inString = true; continue }
     if (ch === '{') {
-      if (objStart < 0) { objStart = i; braceDepth = 1 } else { braceDepth++ }
+      if (objStart < 0) { 
+        objStart = i
+        braceDepth = 1
+        // 新对象开始
+        if (!state.objectStates.has(state.currentObjIndex)) {
+          state.objectStates.set(state.currentObjIndex, { lastParsedHash: null, data: {} })
+        }
+      } else { 
+        braceDepth++ 
+      }
       continue
     }
     if (ch === '}') {
       if (objStart >= 0) {
         braceDepth--
         if (braceDepth === 0) {
-          const objText = text.slice(objStart, i + 1)
+          // 对象完整闭合
+          let objText = text.slice(objStart, i + 1)
+          objText = objText.trim()
+          
+          if (!objText.endsWith('}')) {
+            const lastBrace = objText.lastIndexOf('}')
+            if (lastBrace >= 0) {
+              objText = objText.slice(0, lastBrace + 1)
+            }
+          }
+          
           const hash = computeHashId(objText)
-          if (!state.yieldedHashes.includes(hash)) {
+          if (!state.objectStates.get(state.currentObjIndex)?.lastParsedHash || 
+              state.objectStates.get(state.currentObjIndex).lastParsedHash !== hash) {
             const { ok, value } = tryParseJSON(objText)
             if (ok) {
-              yielded.push(value)
-              state.yieldedHashes = [...state.yieldedHashes, hash]
+              yielded.push({ ...value, _objIndex: state.currentObjIndex, _isComplete: true })
+              const objState = state.objectStates.get(state.currentObjIndex)
+              if (objState) {
+                objState.data = value
+                objState.lastParsedHash = hash
+              }
+            } else {
+              // 解析失败时使用部分数据
+              const objState = state.objectStates.get(state.currentObjIndex)
+              if (objState && Object.keys(objState.data).length > 0) {
+                yielded.push({ ...objState.data, _objIndex: state.currentObjIndex, _isComplete: true })
+                objState.lastParsedHash = hash
+              }
             }
           }
           objStart = -1
+          state.currentObjIndex++
         }
       }
       continue
@@ -296,6 +339,33 @@ function incrementalExtractInfons(streamText, parser) {
     if (ch === ']') {
       // 数组关闭（仅当当前不在对象中）
       if (objStart < 0) { state.closed = true; i++ ; break }
+    }
+    
+    // 尝试部分解析（每隔一定字符数或遇到特定标记时）
+    if (objStart >= 0 && braceDepth > 0) {
+      const objText = text.slice(objStart, i + 1)
+      // 当累积了足够多的内容时，尝试部分解析
+      if ((ch === ',' || ch === '\n') && (i - objStart) > 20) {
+        const objState = state.objectStates.get(state.currentObjIndex)
+        const currentHash = computeHashId(objText)
+        
+        // 只有当内容有变化时才解析
+        if (objState && objState.lastParsedHash !== currentHash) {
+          const partialData = parsePartialInfon(objText)
+          if (partialData && Object.keys(partialData).length > 0) {
+            // 检查是否有新字段
+            const hasNewData = Object.keys(partialData).some(
+              key => partialData[key] !== objState.data[key]
+            )
+            
+            if (hasNewData) {
+              objState.data = { ...objState.data, ...partialData }
+              objState.lastParsedHash = currentHash
+              yielded.push({ ...objState.data, _objIndex: state.currentObjIndex, _isComplete: false })
+            }
+          }
+        }
+      }
     }
   }
 
@@ -305,6 +375,56 @@ function incrementalExtractInfons(streamText, parser) {
   state.braceDepth = braceDepth
   state.scanPos = i
   return { state, yielded }
+}
+
+// 解析部分infon对象
+function parsePartialInfon(objText) {
+  const result = {}
+  
+  // 关键字段优先提取
+  const criticalFields = ['iid', 'infon_type', 'entity', 'attribute', 'temporal', 'spatial']
+  const otherFields = ['data_type', 'relation_name', 'arity', 'arg_refs', 'description', 'confidence', 'bbox']
+  
+  for (const field of [...criticalFields, ...otherFields]) {
+    const value = extractInfonFieldValue(objText, field)
+    if (value !== null) {
+      result[field] = value
+    }
+  }
+  
+  return result
+}
+
+// 从部分JSON文本中提取字段值
+function extractInfonFieldValue(text, fieldName) {
+  const patterns = [
+    // 字符串值
+    new RegExp(`"${fieldName}"\\s*:\\s*"([^"]*(?:\\\\.[^"]*)*)"`, 's'),
+    // 数字值
+    new RegExp(`"${fieldName}"\\s*:\\s*(\\d+\\.?\\d*)`, 's'),
+    // 布尔值
+    new RegExp(`"${fieldName}"\\s*:\\s*(true|false)`, 's'),
+    // 数组值（简单处理）
+    new RegExp(`"${fieldName}"\\s*:\\s*(\\[[^\\]]*\\])`, 's'),
+  ]
+  
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    if (match) {
+      try {
+        // 字符串
+        if (pattern.source.includes('"([^"]*')) {
+          return match[1].replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\\\/g, '\\')
+        }
+        // 数字、布尔、数组
+        return JSON.parse(match[1])
+      } catch (err) {
+        continue
+      }
+    }
+  }
+  
+  return null
 }
 
 // 新建会话：创建一个空消息会话，标题默认 "New chat"
@@ -968,10 +1088,67 @@ export const useStore = create((set, get) => ({
         return
       }
 
-      await streamOpenAIResponse(reader, ({ content, finish }) => {
+      await streamOpenAIResponse(reader, async ({ content, finish }) => {
         if (typeof content === 'string' && content.length) {
-          // 只追加流文本，不进行增量解析（中文注释）：等完成后统一处理
-          get()._updateInfonRun(session.id, runId, (r) => ({ ...r, buffer: r.buffer + content }))
+          // 流式增量解析（中文注释）：逐步提取infons
+          const currentRun = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)
+          const buffer = (currentRun?.buffer || '') + content
+          
+          // 更新buffer
+          get()._updateInfonRun(session.id, runId, (r) => ({ ...r, buffer }))
+          
+          // 使用增量解析器逐个提取infons
+          const parserState = get().infonParsers?.[runId] || null
+          const { state: newState, yielded } = incrementalExtractInfons(buffer, parserState)
+          
+          // 更新解析器状态
+          set(state => ({
+            infonParsers: {
+              ...state.infonParsers,
+              [runId]: newState
+            }
+          }))
+          
+          // 如果有新的infons被解析出来，立即添加到结果中（流式显示）
+          if (yielded && yielded.length > 0) {
+            get()._updateInfonRun(session.id, runId, (r) => {
+              const currentInfons = r.resultJson?.infons || []
+              
+              // 智能合并：根据_objIndex更新现有对象或添加新对象
+              const updatedInfons = [...currentInfons]
+              
+              yielded.forEach(newInfon => {
+                const objIndex = newInfon._objIndex
+                
+                if (objIndex !== undefined) {
+                  const existingIndex = updatedInfons.findIndex(inf => inf._objIndex === objIndex)
+                  
+                  if (existingIndex >= 0) {
+                    // 更新现有对象
+                    updatedInfons[existingIndex] = {
+                      ...updatedInfons[existingIndex],
+                      ...newInfon
+                    }
+                  } else {
+                    // 添加新对象
+                    updatedInfons.push(newInfon)
+                  }
+                } else {
+                  // 没有objIndex，直接添加
+                  updatedInfons.push(newInfon)
+                }
+              })
+              
+              return {
+                ...r,
+                status: 'running',
+                resultJson: {
+                  ...r.resultJson,
+                  infons: updatedInfons
+                }
+              }
+            })
+          }
         }
         if (finish) {
           const raw = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)?.buffer || ''
@@ -1090,10 +1267,67 @@ export const useStore = create((set, get) => ({
         return
       }
 
-      await streamOllamaChatResponse(reader, ({ content, finish }) => {
+      await streamOllamaChatResponse(reader, async ({ content, finish }) => {
         if (typeof content === 'string' && content.length) {
-          // 只追加流文本，不进行增量解析（中文注释）：等完成后统一处理
-          get()._updateInfonRun(session.id, runId, (r) => ({ ...r, buffer: r.buffer + content }))
+          // 流式增量解析（中文注释）：逐步提取infons
+          const currentRun = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)
+          const buffer = (currentRun?.buffer || '') + content
+          
+          // 更新buffer
+          get()._updateInfonRun(session.id, runId, (r) => ({ ...r, buffer }))
+          
+          // 使用增量解析器逐个提取infons
+          const parserState = get().infonParsers?.[runId] || null
+          const { state: newState, yielded } = incrementalExtractInfons(buffer, parserState)
+          
+          // 更新解析器状态
+          set(state => ({
+            infonParsers: {
+              ...state.infonParsers,
+              [runId]: newState
+            }
+          }))
+          
+          // 如果有新的infons被解析出来，立即添加到结果中（流式显示）
+          if (yielded && yielded.length > 0) {
+            get()._updateInfonRun(session.id, runId, (r) => {
+              const currentInfons = r.resultJson?.infons || []
+              
+              // 智能合并：根据_objIndex更新现有对象或添加新对象
+              const updatedInfons = [...currentInfons]
+              
+              yielded.forEach(newInfon => {
+                const objIndex = newInfon._objIndex
+                
+                if (objIndex !== undefined) {
+                  const existingIndex = updatedInfons.findIndex(inf => inf._objIndex === objIndex)
+                  
+                  if (existingIndex >= 0) {
+                    // 更新现有对象
+                    updatedInfons[existingIndex] = {
+                      ...updatedInfons[existingIndex],
+                      ...newInfon
+                    }
+                  } else {
+                    // 添加新对象
+                    updatedInfons.push(newInfon)
+                  }
+                } else {
+                  // 没有objIndex，直接添加
+                  updatedInfons.push(newInfon)
+                }
+              })
+              
+              return {
+                ...r,
+                status: 'running',
+                resultJson: {
+                  ...r.resultJson,
+                  infons: updatedInfons
+                }
+              }
+            })
+          }
         }
         if (finish) {
           const raw = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)?.buffer || ''
@@ -1549,9 +1783,18 @@ export const useStore = create((set, get) => ({
           
           try {
             const parsed = JSON.parse(data)
-            const content = parsed?.choices?.[0]?.delta?.content || ''
-            if (content) {
-              buffer += content
+            const delta = parsed?.choices?.[0]?.delta || {}
+            // 兼容多种字段：content / reasoning_content / reasoning / thoughts / inner_thoughts
+            const contentDelta = (
+              delta?.content ||
+              delta?.reasoning_content ||
+              delta?.reasoning ||
+              delta?.thoughts ||
+              delta?.inner_thoughts ||
+              ''
+            )
+            if (contentDelta) {
+              buffer += contentDelta
               
               // 使用增量解析器逐个提取风险项（中文注释）
               const { incrementalExtractRisks } = await import('./templates/inference.js')
