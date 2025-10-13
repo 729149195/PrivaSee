@@ -201,10 +201,12 @@ export default function AgentPage() {
   const [apiModelId, setApiModelId] = useState('')
   const [apiBaseUrl, setApiBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
-  // 500ms 防抖计时器（中文注释）
+  // 1.5秒 防抖计时器（中文注释）
   const pendingTimerRef = useRef(null)
-  // 记录上次推断时的信息元数量（中文注释）：防止重复推断
-  const lastInferenceRunCountRef = useRef(0)
+  // 追踪是否正在等待防抖（中文注释）：用于锁定发送按钮
+  const [isWaitingForDebounce, setIsWaitingForDebounce] = useState(false)
+  // 记录上次推断时的 message run IDs（中文注释）：用于检测新的信息元提取完成
+  const lastInferenceRunCountRef = useRef('')
   // 图片预览 Modal（中文注释）
   const [previewImage, setPreviewImage] = useState(null)
   // 时间线选中的时间（中文注释）：用于筛选 WordCloud 中的信息元
@@ -232,109 +234,129 @@ export default function AgentPage() {
   // 会话切换时重置时间选择和推理记录（中文注释）
   useEffect(() => {
     setSelectedTime(null)
-    lastInferenceRunCountRef.current = 0 // 重置推断计数器
+    lastInferenceRunCountRef.current = '' // 重置 message run IDs
     lastInferenceLawKeyRef.current = null // 重置法律记录
     lastInferenceCompleteTimeRef.current = 0 // 重置完成时间
     lastInferenceInfonSignatureRef.current = '' // 重置信息元签名
   }, [currentSessionId])
 
-  // 自动隐私推断（中文注释）：当信息元提取完成且有新数据时自动启动
+  // 隐私推理自动触发逻辑（中文注释）：信息元提取完成后自动触发
+  // 核心逻辑：pending 或 message 信息元提取完成就触发推理
   useEffect(() => {
-    if (!currentSession || !selectedLaw) return
+    if (!currentSession?.id || !selectedLaw) return
     
-    // 检查是否有正在运行的信息元提取
     const runs = infonSessions?.[currentSession.id]?.runs || []
-    // 仅将 message 级信息元提取视为“占用中的提取”（中文注释），忽略 pending
-    const hasRunningInfons = runs.some(run => run.status === 'running' && run.targetType === 'message')
-    
-    // 获取当前推理状态（不要在依赖中使用 privacyInferences）
     const currentInference = privacyInferences?.[currentSession.id]
     const isInferenceRunning = currentInference?.status === 'running'
     
-    // 如果有信息元正在提取（message级），且推断正在运行，则中止推断（避免冲突）
-    if (hasRunningInfons && isInferenceRunning) {
-      abortPrivacyInference?.()
+    // 检查是否有任何信息元正在提取（message 或 pending）
+    const hasAnyRunningInfons = runs.some(run => run.status === 'running')
+    
+    // 优先使用 pending infons（输入框中），其次使用 message infons（已发送）
+    const pendingRuns = runs.filter(run => run.targetType === 'pending' && run.status === 'done')
+    const messageRuns = runs.filter(run => run.targetType === 'message' && run.status === 'done')
+    
+    // 生成信息元签名：优先 pending，没有 pending 则用 message
+    let currentSignature = ''
+    let infonType = ''
+    if (pendingRuns.length > 0) {
+      currentSignature = pendingRuns.map(r => r.id).sort().join('|')
+      infonType = 'pending'
+    } else if (messageRuns.length > 0) {
+      currentSignature = messageRuns.map(r => r.id).sort().join('|')
+      infonType = 'message'
+    }
+    
+    // 如果没有任何信息元，直接返回
+    if (!currentSignature) return
+    
+    // 初始化：如果是刷新进入且已有推理结果，直接记录当前签名，不触发推理
+    if (!lastInferenceRunCountRef.current && currentInference?.status === 'done') {
+      console.log('[Privacy Inference] 初始化：已有推理结果，记录签名')
+      lastInferenceRunCountRef.current = currentSignature
       return
     }
     
-    // 统计完成的信息元runs数量（过滤掉被取代的信息元）
-    const allRawInfons = []
-    const supersededIids = new Set()
-    runs.forEach(run => {
-      if (run.status === 'done') {
-        const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
-        allRawInfons.push(...infons)
-        infons.forEach(infon => {
-          if (Array.isArray(infon._supersedes)) {
-            infon._supersedes.forEach(oldIid => supersededIids.add(oldIid))
-          }
-        })
-      }
-    })
-    const activeInfons = allRawInfons.filter(infon => infon.iid && !supersededIids.has(infon.iid))
-    const activeInfonCount = activeInfons.length
-    // 计算当前活跃信息元签名：基于iid稳定排序拼接（中文注释）
-    const buildInfonSignature = (list) => {
-      try {
-        const ids = list.map(x => String(x.iid || '')).filter(Boolean).sort()
-        return ids.join('|')
-      } catch (_) { return '' }
-    }
-    const activeInfonSignature = buildInfonSignature(activeInfons)
-    
-    // 检查推理完成状态，更新完成时间戳（中文注释）
-    if (currentInference?.status === 'done' && currentInference?.updatedAt) {
-      const lastRecordedTime = lastInferenceCompleteTimeRef.current
-      const currentCompleteTime = currentInference.updatedAt
-      // 只在时间戳更新时记录（避免重复记录）
-      if (currentCompleteTime > lastRecordedTime) {
-        lastInferenceCompleteTimeRef.current = currentCompleteTime
-        // 同步记录当前状态
-        if (lastInferenceRunCountRef.current !== activeInfonCount) {
-          lastInferenceRunCountRef.current = activeInfonCount
-        }
-        if (lastInferenceLawKeyRef.current !== selectedLaw.key) {
-          lastInferenceLawKeyRef.current = selectedLaw.key
-        }
-        // 记录本次完成时的签名（中文注释）
-        if (lastInferenceInfonSignatureRef.current !== activeInfonSignature) {
-          lastInferenceInfonSignatureRef.current = activeInfonSignature
-        }
-      }
-    }
-    
-    // 若推理被中止/出错/置空闲，则允许后续在相同信息元集合上重新触发（中文注释）
-    if (currentInference?.status === 'aborted' || currentInference?.status === 'error' || currentInference?.status === 'idle') {
-      if (lastInferenceInfonSignatureRef.current === activeInfonSignature) {
-        lastInferenceInfonSignatureRef.current = ''
-      }
-    }
-    
-    // 检查触发条件
-    const hasNewInfons = activeInfonCount > lastInferenceRunCountRef.current
-    const infonSetChanged = activeInfonSignature !== lastInferenceInfonSignatureRef.current
-    const lawChanged = selectedLaw.key !== lastInferenceLawKeyRef.current
-    const needsInference = (hasNewInfons || infonSetChanged || lawChanged) && activeInfonCount > 0
-    
-    // 防止推理刚完成就立即触发（中文注释）：至少等待3秒
-    const timeSinceLastComplete = Date.now() - lastInferenceCompleteTimeRef.current
-    const tooSoonToRetrigger = timeSinceLastComplete < 3000 && lastInferenceCompleteTimeRef.current > 0
-    
-    // 如果满足条件，且当前没有正在运行的推理或信息元提取，则启动推断
-    if (!hasRunningInfons && !isInferenceRunning && needsInference && !tooSoonToRetrigger) {
-      // 立即更新记录，防止重复触发（中文注释）
-      lastInferenceRunCountRef.current = activeInfonCount
-      lastInferenceLawKeyRef.current = selectedLaw.key
-      lastInferenceInfonSignatureRef.current = activeInfonSignature
+    // 检测到新的信息元完成，触发推理（无论当前推理状态）
+    if (currentSignature !== lastInferenceRunCountRef.current && !hasAnyRunningInfons) {
+      console.log('[Privacy Inference] 信息元提取完成，触发推理', {
+        type: infonType,
+        signature: currentSignature,
+        lastSignature: lastInferenceRunCountRef.current,
+        inferenceStatus: currentInference?.status
+      })
+      lastInferenceRunCountRef.current = currentSignature
       
-      // 使用延迟避免频繁触发
+      // 如果推理正在运行，先中止
+      if (isInferenceRunning) {
+        console.log('[Privacy Inference] 中止当前推理')
+        abortPrivacyInference?.()
+      }
+      
+      // 直接调用推理，和长按 law 按钮一样的逻辑
       const timer = setTimeout(() => {
         startPrivacyInference?.()
-      }, 1000)
+      }, 300)
       return () => clearTimeout(timer)
     }
+    
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [infonSessions, currentSessionId, selectedLaw?.key, privacyInferences?.[currentSessionId]?.status])
+  }, [
+    infonSessions?.[currentSessionId]?.runs,
+    currentSessionId,
+    selectedLaw?.key,
+  ])
+
+  // 推理中止逻辑1：任何信息元开始重新提取时（含 pending/message），若推理运行则立刻中止并恢复上次结果（中文注释）
+  useEffect(() => {
+    if (!currentSession?.id) return
+    
+    const runs = infonSessions?.[currentSession.id]?.runs || []
+    const currentInference = privacyInferences?.[currentSession.id]
+    const isInferenceRunning = currentInference?.status === 'running'
+    
+    // 检查是否有 pending 或 message 类型的信息元正在提取
+    const hasAnyRunningInfons = runs.some(run => run.status === 'running' && (run.targetType === 'pending' || run.targetType === 'message'))
+    
+    // 如果任一信息元开始提取，且推理正在运行，中止推理
+    if (hasAnyRunningInfons && isInferenceRunning) {
+      console.log('[Privacy Inference] 中止推理：信息元开始重新提取（pending/message）')
+      abortPrivacyInference?.()
+    }
+    
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    infonSessions?.[currentSessionId]?.runs,
+    currentSessionId,
+    privacyInferences?.[currentSessionId]?.status
+  ])
+
+  // 推理中止逻辑2：切换法律时，中止正在进行的推理（中文注释）
+  useEffect(() => {
+    if (!currentSession?.id) return
+    
+    const currentInference = privacyInferences?.[currentSession.id]
+    const isInferenceRunning = currentInference?.status === 'running'
+    
+    // 记录当前选中的法律
+    if (!lastInferenceLawKeyRef.current && selectedLaw?.key) {
+      lastInferenceLawKeyRef.current = selectedLaw.key
+      return
+    }
+    
+    // 如果法律改变，且推理正在运行，中止推理
+    if (selectedLaw?.key && selectedLaw.key !== lastInferenceLawKeyRef.current && isInferenceRunning) {
+      console.log('[Privacy Inference] 中止推理：切换法律')
+      abortPrivacyInference?.()
+    }
+    
+    // 更新记录的法律
+    if (selectedLaw?.key) {
+      lastInferenceLawKeyRef.current = selectedLaw.key
+    }
+    
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLaw?.key, currentSessionId])
 
   // 监听信息元提取结果，当首次出现 SIT 类型时自动更新对话标题（中文注释）
   useEffect(() => {
@@ -741,6 +763,11 @@ export default function AgentPage() {
   const sendLockState = useMemo(() => {
     if (!currentSession?.id) return { locked: false, stage: 'ready', label: 'Send' }
     
+    // 正在等待防抖（用户输入中）
+    if (isWaitingForDebounce) {
+      return { locked: true, stage: 'waiting', label: 'Preparing...' }
+    }
+    
     const runs = infonSessions?.[currentSession.id]?.runs || []
     // 检查 pending 和 message 级别的信息元提取
     const hasRunningPendingInfons = runs.some(run => run.status === 'running' && run.targetType === 'pending')
@@ -779,7 +806,7 @@ export default function AgentPage() {
     }
     
     return { locked: false, stage: 'ready', label: 'Send' }
-  }, [currentSession?.id, infonSessions, privacyInferences, selectedLaw])
+  }, [currentSession?.id, infonSessions, privacyInferences, selectedLaw, isWaitingForDebounce])
 
   const handleSend = async () => {
     // 隐私保护流程未完成时禁止发送（中文注释）
@@ -790,28 +817,56 @@ export default function AgentPage() {
     const hasImages = imgs.length > 0
     if (!text && !hasImages) return
     
-    // 清空输入和图片（中文注释）
-    setInput('')
-    setSelectedImages([])
+    // 在发送前，先获取当前的 pending runs 用于后续签名计算
+    const currentRuns = infonSessions?.[currentSession.id]?.runs || []
+    const pendingRunIds = currentRuns
+      .filter(run => run.targetType === 'pending' && run.status === 'done')
+      .map(r => r.id)
+      .sort()
+    
+    // 注意：先完成 adopt，再清空输入，避免触发新的 pending 提取
     
     if (hasImages) {
       const userId = await useStore.getState().sendMessageWithImages(text, imgs)
       try {
-        const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
-        if (!adopted) startMessageInfons?.(userId)
+        // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
+        if (pendingRunIds.length > 0) {
+          const messageSignature = pendingRunIds.join('|')
+          lastInferenceRunCountRef.current = messageSignature
+          console.log('[Send] 提前更新签名，避免重复推理', { signature: messageSignature })
+        }
+        
+        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
+          startMessageInfons?.(userId)
+        }
       } catch (_) {}
+      // 清空输入和图片（中文注释）
+      setInput('')
+      setSelectedImages([])
     } else {
       const userId = await sendMessage(text)
       try {
-        const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
-        if (!adopted) startMessageInfons?.(userId)
+        // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
+        if (pendingRunIds.length > 0) {
+          const messageSignature = pendingRunIds.join('|')
+          lastInferenceRunCountRef.current = messageSignature
+          console.log('[Send] 提前更新签名，避免重复推理', { signature: messageSignature })
+        }
+        
+        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
+          startMessageInfons?.(userId)
+        }
       } catch (_) {}
+      // 清空输入和图片（中文注释）
+      setInput('')
+      setSelectedImages([])
     }
     
-    // 发送后立即清空 pending 信息元，移除关系标签显示（中文注释）
-    try {
-      clearAllPendingInfons?.()
-    } catch (_) {}
+    // 注意：adoptPendingInfonsToMessage 已经处理了 pending infons，无需再清空
   }
 
   const handleLandingSend = async () => {
@@ -823,28 +878,54 @@ export default function AgentPage() {
     const hasImages = imgs.length > 0
     if (!text && !hasImages) return
     
-    // 清空输入和图片（中文注释）
-    setLandingInput('')
-    setSelectedImages([])
+    // 在发送前，先获取当前的 pending runs 用于后续签名计算
+    const currentRuns = infonSessions?.[currentSession.id]?.runs || []
+    const pendingRunIds = currentRuns
+      .filter(run => run.targetType === 'pending' && run.status === 'done')
+      .map(r => r.id)
+      .sort()
     
     if (hasImages) {
       const userId = await useStore.getState().sendMessageWithImages(text, imgs)
       try {
-        const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
-        if (!adopted) startMessageInfons?.(userId)
+        // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
+        if (pendingRunIds.length > 0) {
+          const messageSignature = pendingRunIds.join('|')
+          lastInferenceRunCountRef.current = messageSignature
+          console.log('[LandingSend] 提前更新签名，避免重复推理', { signature: messageSignature })
+        }
+        
+        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
+          startMessageInfons?.(userId)
+        }
       } catch (_) {}
+      // 清空输入和图片（中文注释）
+      setLandingInput('')
+      setSelectedImages([])
     } else {
       const userId = await sendMessage(text)
       try {
-        const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
-        if (!adopted) startMessageInfons?.(userId)
+        // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
+        if (pendingRunIds.length > 0) {
+          const messageSignature = pendingRunIds.join('|')
+          lastInferenceRunCountRef.current = messageSignature
+          console.log('[LandingSend] 提前更新签名，避免重复推理', { signature: messageSignature })
+        }
+        
+        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
+          startMessageInfons?.(userId)
+        }
       } catch (_) {}
+      // 清空输入和图片（中文注释）
+      setLandingInput('')
+      setSelectedImages([])
     }
     
-    // 发送后立即清空 pending 信息元，移除关系标签显示（中文注释）
-    try {
-      clearAllPendingInfons?.()
-    } catch (_) {}
+    // 注意：adoptPendingInfonsToMessage 已经处理了 pending infons，无需再清空
   }
 
   // 复制消息内容（中文注释）
@@ -997,18 +1078,45 @@ export default function AgentPage() {
     // 采纳 pending 信息元
     // 注意：这里我们将 pending 信息元转移到即将发送的新消息
     
+    // 在发送前，先获取当前的 pending runs 用于后续签名计算
+    const currentRuns = infonSessions?.[session.id]?.runs || []
+    const pendingRunIds = currentRuns
+      .filter(run => run.targetType === 'pending' && run.status === 'done')
+      .map(r => r.id)
+      .sort()
+    
     // 发送新消息
     if (editingImages.length > 0) {
       const userId = await useStore.getState().sendMessageWithImages(text, editingImages)
       try {
-        const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
-        if (!adopted) startMessageInfons?.(userId)
+        // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
+        if (pendingRunIds.length > 0) {
+          const messageSignature = pendingRunIds.join('|')
+          lastInferenceRunCountRef.current = messageSignature
+          console.log('[SaveEdit] 提前更新签名，避免重复推理', { signature: messageSignature })
+        }
+        
+        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
+          startMessageInfons?.(userId)
+        }
       } catch (_) {}
     } else {
       const userId = await sendMessage(text)
       try {
-        const adopted = useStore.getState().adoptPendingInfonsToMessage?.(userId) || 0
-        if (!adopted) startMessageInfons?.(userId)
+        // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
+        if (pendingRunIds.length > 0) {
+          const messageSignature = pendingRunIds.join('|')
+          lastInferenceRunCountRef.current = messageSignature
+          console.log('[SaveEdit] 提前更新签名，避免重复推理', { signature: messageSignature })
+        }
+        
+        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
+          startMessageInfons?.(userId)
+        }
       } catch (_) {}
     }
 
@@ -1141,13 +1249,15 @@ export default function AgentPage() {
     setSelectedImages((prev) => prev.filter((_, i) => i !== idx))
   }
 
-  // 输入变化时，立刻中止 pending 的提取（中文注释）
+  // 输入变化时，立刻中止 pending 的提取（但不清除结果，等新的提取覆盖）
   useEffect(() => {
-    try { abortPendingInfons?.(false) } catch (_) {}
+    try { 
+      abortPendingInfons?.(false)
+    } catch (_) {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, landingInput, editingContent])
 
-  // 500ms 防抖：在用户停止输入 500ms 后启动 pending 提取（中文注释）
+  // 1.5秒 防抖：在用户停止输入后启动 pending 提取（中文注释）
   // 支持主输入框和编辑框两种模式
   useEffect(() => {
     // 优先使用编辑模式的内容（如果正在编辑）
@@ -1161,12 +1271,27 @@ export default function AgentPage() {
       clearTimeout(pendingTimerRef.current)
       pendingTimerRef.current = null
     }
-    // 若无输入也无图片，则不启动（中文注释）
-    if (!textToUse && imgs.length === 0) return
+    
+    // 若无输入也无图片，则清空旧的 pending 并返回（中文注释）
+    if (!textToUse && imgs.length === 0) {
+      setIsWaitingForDebounce(false)
+      try { clearAllPendingInfons?.() } catch (_) {}
+      return
+    }
+    
+    // 标记正在等待防抖
+    setIsWaitingForDebounce(true)
+    
+    // 启动新的提取前，清除旧的 pending 结果
     pendingTimerRef.current = setTimeout(() => {
-      try { startPendingInfons?.(textToUse, imgs) } catch (_) {}
+      try { 
+        clearAllPendingInfons?.() // 先清空旧结果
+        startPendingInfons?.(textToUse, imgs) // 再启动新提取
+        setIsWaitingForDebounce(false) // 防抖结束
+      } catch (_) {}
       pendingTimerRef.current = null
     }, 1500)
+    
     return () => {
       if (pendingTimerRef.current) {
         clearTimeout(pendingTimerRef.current)

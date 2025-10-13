@@ -720,21 +720,23 @@ export const useStore = create((set, get) => ({
   // 返回被采纳的数量
   adoptPendingInfonsToMessage(messageId) {
     const session = get().getCurrentSession()
-    if (!session || !messageId) return 0
+    if (!session || !messageId) return { adopted: 0, runIds: [] }
     let adopted = 0
+    const adoptedRunIds = []
     set((state) => {
       const box = state.infonSessions?.[session.id]
       if (!box) return {}
       const runs = box.runs.map((r) => {
         if (r.targetType === 'pending') {
           adopted++
+          adoptedRunIds.push(r.id)
           return { ...r, targetType: 'message', targetKey: messageId }
         }
         return r
       })
       return { infonSessions: { ...state.infonSessions, [session.id]: { runs } }, lastPendingTextHash: null, lastPendingImageHashes: [] }
     })
-    return adopted
+    return { adopted, runIds: adoptedRunIds }
   },
 
   // 创建会话：并切换为当前
@@ -1708,6 +1710,10 @@ export const useStore = create((set, get) => ({
     }
     
     // 初始化推理状态（中文注释）：记录当前选中的法律key，用于匹配高亮
+    // 保存之前的推理结果（如果存在），用于中止后恢复
+    const previousInference = get().privacyInferences?.[session.id]
+    const previousRisks = previousInference?.status === 'done' ? (previousInference.risks || []) : []
+    
     const abortController = new AbortController()
     set(state => ({
       privacyInferences: {
@@ -1718,9 +1724,15 @@ export const useStore = create((set, get) => ({
           buffer: '',
           abortController,
           lawKey: selectedLaw.key, // 记录推理时使用的法律
+          previousRisks: previousRisks, // 保存之前的结果，用于中止时恢复
           createdAt: Date.now(),
           updatedAt: Date.now()
         }
+      },
+      // 重置隐私推理解析器状态，确保流式增量从头开始
+      privacyParsers: {
+        ...(state.privacyParsers || {}),
+        [session.id]: null
       }
     }))
     
@@ -1745,6 +1757,8 @@ export const useStore = create((set, get) => ({
       const apiUrl = provider?.baseUrl || 'https://api.deepseek.com/v1'
       const apiKey = provider?.apiKey || ''
       
+      console.log(`[Privacy Inference] 发起推理请求到 ${apiUrl}`)
+      
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -1760,8 +1774,12 @@ export const useStore = create((set, get) => ({
         signal: abortController.signal
       })
       
+      console.log(`[Privacy Inference] API响应状态: ${response.status}`)
+      
       if (!response.ok) {
-        throw new Error(`API error: ${response.status}`)
+        const errorText = await response.text().catch(() => '')
+        console.error(`[Privacy Inference] API错误: ${response.status} - ${errorText}`)
+        throw new Error(`API error: ${response.status} - ${errorText}`)
       }
       
       const reader = response.body.getReader()
@@ -1793,6 +1811,12 @@ export const useStore = create((set, get) => ({
               delta?.inner_thoughts ||
               ''
             )
+            
+            // 首次收到内容时记录日志
+            if (contentDelta && buffer.length === 0) {
+              console.log('[Privacy Inference] 开始接收流式内容')
+            }
+            
             if (contentDelta) {
               buffer += contentDelta
               
@@ -1800,6 +1824,15 @@ export const useStore = create((set, get) => ({
               const { incrementalExtractRisks } = await import('./templates/inference.js')
               const parserState = get().privacyParsers?.[session.id] || null
               const { state: newState, yielded } = incrementalExtractRisks(buffer, parserState)
+              
+              // 调试：记录解析器发现的内容
+              if (buffer.length < 100) {
+                console.log('[Privacy Inference] 解析状态:', {
+                  bufferLength: buffer.length,
+                  foundArray: newState.foundArray,
+                  yieldedCount: yielded?.length || 0
+                })
+              }
               
               // 更新解析器状态
               set(state => ({
@@ -1861,9 +1894,72 @@ export const useStore = create((set, get) => ({
         }
       }
       
-      console.log(`[Privacy Inference] 流式接收完成`)
+      console.log(`[Privacy Inference] 流式接收完成，buffer长度: ${buffer.length}`)
+      console.log(`[Privacy Inference] Buffer内容预览:`, buffer.slice(0, 500))
+      
+      // 尝试清理buffer：移除可能的markdown代码块标记
+      let cleanBuffer = buffer
+      // 移除 ```json 和 ``` 标记
+      cleanBuffer = cleanBuffer.replace(/^```json\s*/i, '').replace(/```\s*$/i, '')
+      // 查找第一个 { 和最后一个 }，提取JSON部分
+      const firstBrace = cleanBuffer.indexOf('{')
+      const lastBrace = cleanBuffer.lastIndexOf('}')
+      if (firstBrace >= 0 && lastBrace > firstBrace) {
+        cleanBuffer = cleanBuffer.slice(firstBrace, lastBrace + 1)
+        console.log(`[Privacy Inference] 清理后buffer长度: ${cleanBuffer.length}`)
+        
+        // 尝试直接解析完整JSON（如果已经接收完成）
+        if (cleanBuffer.length > 0) {
+          try {
+            const parsed = JSON.parse(cleanBuffer)
+            if (parsed.risks && Array.isArray(parsed.risks)) {
+              console.log(`[Privacy Inference] 成功解析完整JSON，风险数: ${parsed.risks.length}`)
+              // 直接设置结果
+              set(state => ({
+                privacyInferences: {
+                  ...state.privacyInferences,
+                  [session.id]: {
+                    ...state.privacyInferences[session.id],
+                    status: 'done',
+                    risks: parsed.risks,
+                    buffer: cleanBuffer,
+                    abortController: null,
+                    updatedAt: Date.now()
+                  }
+                }
+              }))
+              return
+            }
+          } catch (parseErr) {
+            console.log(`[Privacy Inference] 完整JSON解析失败:`, parseErr.message)
+          }
+        }
+      }
+      
+      // 检查是否真的有内容
+      const currentState = get().privacyInferences?.[session.id]
+      const hasRisks = currentState?.risks && currentState.risks.length > 0
+      console.log(`[Privacy Inference] 解析器状态:`, get().privacyParsers?.[session.id])
+      
+      if (!hasRisks && buffer.length === 0) {
+        console.warn('[Privacy Inference] 未收到任何内容，可能API调用失败')
+        set(state => ({
+          privacyInferences: {
+            ...state.privacyInferences,
+            [session.id]: {
+              ...state.privacyInferences[session.id],
+              status: 'error',
+              error: 'No response received from API',
+              abortController: null,
+              updatedAt: Date.now()
+            }
+          }
+        }))
+        return
+      }
       
       // 完成推理
+      console.log(`[Privacy Inference] 推理完成，风险数: ${currentState?.risks?.length || 0}`)
       set(state => ({
         privacyInferences: {
           ...state.privacyInferences,
@@ -1871,6 +1967,7 @@ export const useStore = create((set, get) => ({
             ...state.privacyInferences[session.id],
             status: 'done',
             abortController: null,
+            previousRisks: undefined, // 清除临时保存的数据
             updatedAt: Date.now()
           }
         }
@@ -1878,13 +1975,21 @@ export const useStore = create((set, get) => ({
       
     } catch (err) {
       if (err.name === 'AbortError') {
+        // 推理被中止，恢复之前的结果
+        const currentState = get().privacyInferences?.[session.id]
+        const previousRisks = currentState?.previousRisks || []
+        
+        console.log(`[Privacy Inference] 推理被中止，恢复之前的 ${previousRisks.length} 个风险项`)
+        
         set(state => ({
           privacyInferences: {
             ...state.privacyInferences,
             [session.id]: {
               ...state.privacyInferences[session.id],
-              status: 'aborted',
+              status: previousRisks.length > 0 ? 'done' : 'aborted',
+              risks: previousRisks, // 恢复之前的结果
               abortController: null,
+              previousRisks: undefined, // 清除临时保存的数据
               updatedAt: Date.now()
             }
           }
