@@ -41,64 +41,104 @@ export default function PrivacyRiskAnalysis({
             )}
           </summary>
           <div className={styles.wordCloudDetailsContent} style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {inference.risks.map((risk, idx) => (
-              <div 
-                key={idx} 
-                className={styles.riskItem}
-                style={{ 
-                  flex: '0 0 calc(50% - 3px)',
-                  padding: 12, 
-                  borderRadius: 8, 
-                  background: 'var(--color-bg-tertiary)',
-                  border: `1px solid ${risk.risk_level === 'HIGH' ? '#ef4444' : risk.risk_level === 'MEDIUM' ? '#f59e0b' : '#10b981'}`
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
-                  <span style={{ 
-                    fontSize: 10, 
-                    fontWeight: 700, 
-                    padding: '2px 6px', 
-                    borderRadius: 4,
-                    background: risk.risk_level === 'HIGH' ? '#ef4444' : risk.risk_level === 'MEDIUM' ? '#f59e0b' : '#10b981',
-                    color: '#fff'
-                  }}>
-                    {risk.risk_level}
-                  </span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
-                    Confidence: {(risk.confidence * 100).toFixed(0)}%
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 4 }}>
-                  {risk.law_node_name}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-primary)', marginBottom: 6 }}>
-                  {risk.privacy_exposure}
-                </div>
-                <div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 4 }}>
-                  {risk.inference_chain}
-                </div>
-                {risk.used_infons && risk.used_infons.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
-                    <span style={{ fontSize: 10, color: 'var(--color-text-tertiary)' }}>Used Infons:</span>
-                    {risk.used_infons.map((infon, i) => (
-                      <span 
-                        key={i}
-                        style={{ 
-                          fontSize: 10, 
-                          padding: '2px 6px', 
-                          borderRadius: 4,
-                          background: 'var(--color-bg-secondary)',
-                          border: '1px solid var(--color-border-light)',
-                          color: 'var(--color-text-secondary)'
-                        }}
-                      >
-                        [{infon.type}] {infon.keyword}
+            {inference.risks.map((risk, idx) => {
+              // 支持部分数据：某些字段可能还未流式输出
+              const isPartial = risk._isComplete === false
+              const riskLevel = risk.risk_level || 'UNKNOWN'
+              const confidence = risk.confidence ?? 0
+              const lawNodeName = risk.law_node_name || 'Loading...'
+              const privacyExposure = risk.privacy_exposure || (isPartial ? 'Analyzing...' : 'N/A')
+              const inferenceChain = risk.inference_chain || (isPartial ? 'Streaming reasoning...' : '')
+              const usedInfons = risk.used_infons || []
+              
+              return (
+                <div 
+                  key={risk._objIndex ?? idx} 
+                  className={styles.riskItem}
+                  style={{ 
+                    flex: '0 0 calc(50% - 3px)',
+                    padding: 12, 
+                    borderRadius: 8, 
+                    background: 'var(--color-bg-tertiary)',
+                    border: `1px solid ${riskLevel === 'HIGH' ? '#ef4444' : riskLevel === 'MEDIUM' ? '#f59e0b' : riskLevel === 'LOW' ? '#10b981' : '#94a3b8'}`,
+                    opacity: isPartial ? 0.85 : 1,
+                    transition: 'opacity 0.3s ease'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                    <span style={{ 
+                      fontSize: 10, 
+                      fontWeight: 700, 
+                      padding: '2px 6px', 
+                      borderRadius: 4,
+                      background: riskLevel === 'HIGH' ? '#ef4444' : riskLevel === 'MEDIUM' ? '#f59e0b' : riskLevel === 'LOW' ? '#10b981' : '#94a3b8',
+                      color: '#fff'
+                    }}>
+                      {riskLevel}
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                      Confidence: {(confidence * 100).toFixed(0)}%
+                    </span>
+                    {isPartial && (
+                      <span style={{ 
+                        fontSize: 10, 
+                        color: 'var(--color-accent-primary)', 
+                        fontStyle: 'italic',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }}>
+                        <span className={styles.analyzingDot} style={{ width: 4, height: 4 }}></span>
+                        streaming...
                       </span>
-                    ))}
+                    )}
                   </div>
-                )}
-              </div>
-            ))}
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 4 }}>
+                    {lawNodeName}
+                  </div>
+                  {privacyExposure && (
+                    <div style={{ 
+                      fontSize: 11, 
+                      color: 'var(--color-text-primary)', 
+                      marginBottom: 6,
+                      fontStyle: isPartial && !risk.privacy_exposure ? 'italic' : 'normal'
+                    }}>
+                      {privacyExposure}
+                    </div>
+                  )}
+                  {inferenceChain && (
+                    <div style={{ 
+                      fontSize: 10, 
+                      color: 'var(--color-text-tertiary)', 
+                      marginBottom: 4,
+                      fontStyle: isPartial && !risk.inference_chain ? 'italic' : 'normal'
+                    }}>
+                      {inferenceChain}
+                    </div>
+                  )}
+                  {usedInfons.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                      <span style={{ fontSize: 10, color: 'var(--color-text-tertiary)' }}>Used Infons:</span>
+                      {usedInfons.map((infon, i) => (
+                        <span 
+                          key={i}
+                          style={{ 
+                            fontSize: 10, 
+                            padding: '2px 6px', 
+                            borderRadius: 4,
+                            background: 'var(--color-bg-secondary)',
+                            border: '1px solid var(--color-border-light)',
+                            color: 'var(--color-text-secondary)'
+                          }}
+                        >
+                          [{infon.type}] {infon.keyword}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </details>
       ) : inference?.status === 'running' ? (

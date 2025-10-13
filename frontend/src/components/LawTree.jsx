@@ -163,37 +163,19 @@ export default function LawTree() {
     
     traverseTree(lawData[lawIdx])
     
-    // 匹配推理结果到法律节点
+    // 匹配推理结果到法律节点（仅使用law_node_name，无需law_path）
     inference.risks.forEach(risk => {
-      const lawPath = risk.law_path || ''
       const nodeName = risk.law_node_name || ''
+      
+      // 跳过还没有law_node_name的部分风险对象
+      if (!nodeName || nodeName === 'Loading...') {
+        return
+      }
       
       let matchedNode = null
       
-      // 策略1：优先使用完整路径精确匹配
-      if (lawPath) {
-        // 尝试完全匹配
-        if (nodePathMap.has(lawPath)) {
-          matchedNode = nodePathMap.get(lawPath)
-        } else {
-          // 尝试模糊匹配（路径可能格式不同）
-          const normalizedPath = lawPath.replace(/\s*[>›→]\s*/g, ' > ').trim()
-          if (nodePathMap.has(normalizedPath)) {
-            matchedNode = nodePathMap.get(normalizedPath)
-          } else {
-            // 尝试部分路径匹配（从最后一级开始往上）
-            for (const [key, value] of nodePathMap.entries()) {
-              if (key.endsWith(nodeName) || normalizedPath.includes(key)) {
-                matchedNode = value
-                break
-              }
-            }
-          }
-        }
-      }
-      
-      // 策略2：使用节点名称匹配，优先匹配叶子节点
-      if (!matchedNode && nodeName) {
+      // 策略：使用节点名称匹配，优先匹配叶子节点
+      if (nodeName) {
         const candidates = nodeNameMap.get(nodeName) || []
         if (candidates.length > 0) {
           // 优先选择叶子节点
@@ -271,12 +253,16 @@ export default function LawTree() {
       
       if (matchedNode) {
         const key = matchedNode.node.name
-        const levelPriority = { HIGH: 3, MEDIUM: 2, LOW: 1 }
+        const levelPriority = { HIGH: 3, MEDIUM: 2, LOW: 1, UNKNOWN: 0 }
+        
+        // 支持部分风险对象（可能缺少某些字段）
+        const riskLevel = risk.risk_level || 'UNKNOWN'
+        const confidence = risk.confidence ?? 0
         
         if (!map.has(key)) {
           map.set(key, {
-            level: risk.risk_level,
-            confidence: risk.confidence,
+            level: riskLevel,
+            confidence: confidence,
             risks: [risk],
             isLeaf: matchedNode.isLeaf,
             path: matchedNode.path,
@@ -284,18 +270,28 @@ export default function LawTree() {
           })
         } else {
           const existing = map.get(key)
-          if ((levelPriority[risk.risk_level] || 0) > (levelPriority[existing.level] || 0)) {
-            existing.level = risk.risk_level
+          if ((levelPriority[riskLevel] || 0) > (levelPriority[existing.level] || 0)) {
+            existing.level = riskLevel
           }
-          existing.confidence = Math.max(existing.confidence, risk.confidence)
-          existing.risks.push(risk)
+          existing.confidence = Math.max(existing.confidence, confidence)
+          // 使用_objIndex去重，避免部分更新导致重复
+          const existingIndices = existing.risks.map(r => r._objIndex).filter(i => i !== undefined)
+          if (risk._objIndex === undefined || !existingIndices.includes(risk._objIndex)) {
+            existing.risks.push(risk)
+          } else {
+            // 更新现有的risk对象
+            const idx = existing.risks.findIndex(r => r._objIndex === risk._objIndex)
+            if (idx >= 0) {
+              existing.risks[idx] = risk
+            }
+          }
         }
       }
     })
     
     // 向上传播高亮到父节点（中文注释）：第二级及以上的节点也要高亮
     const propagatedMap = new Map(map)
-    const levelPriority = { HIGH: 3, MEDIUM: 2, LOW: 1 }
+    const levelPriority = { HIGH: 3, MEDIUM: 2, LOW: 1, UNKNOWN: 0 }
     
     for (const [nodeName, riskInfo] of map.entries()) {
       // 获取该节点的路径，向上遍历所有父节点
@@ -692,6 +688,11 @@ export default function LawTree() {
     inference.risks.forEach(risk => {
       const lawNodeName = (risk.law_node_name || '').trim()
       
+      // 跳过还没有law_node_name的部分风险对象
+      if (!lawNodeName || lawNodeName === 'Loading...') {
+        return
+      }
+      
       console.log('[LawTree] 处理风险:', lawNodeName)
       
       // 只匹配选中的项
@@ -718,22 +719,36 @@ export default function LawTree() {
         }
         
         if (isMatch) {
-          const levelPriority = { HIGH: 3, MEDIUM: 2, LOW: 1 }
+          const levelPriority = { HIGH: 3, MEDIUM: 2, LOW: 1, UNKNOWN: 0 }
+          
+          // 支持部分风险对象（可能缺少某些字段）
+          const riskLevel = risk.risk_level || 'UNKNOWN'
+          const confidence = risk.confidence ?? 0
           
           if (!map.has(item.id)) {
             map.set(item.id, {
-              level: risk.risk_level,
-              confidence: risk.confidence,
+              level: riskLevel,
+              confidence: confidence,
               risks: [risk]
             })
-            console.log('[LawTree] 添加风险映射:', item.label, risk.risk_level)
+            console.log('[LawTree] 添加风险映射:', item.label, riskLevel)
           } else {
             const existing = map.get(item.id)
-            if ((levelPriority[risk.risk_level] || 0) > (levelPriority[existing.level] || 0)) {
-              existing.level = risk.risk_level
+            if ((levelPriority[riskLevel] || 0) > (levelPriority[existing.level] || 0)) {
+              existing.level = riskLevel
             }
-            existing.confidence = Math.max(existing.confidence, risk.confidence)
-            existing.risks.push(risk)
+            existing.confidence = Math.max(existing.confidence, confidence)
+            // 使用_objIndex去重，避免部分更新导致重复
+            const existingIndices = existing.risks.map(r => r._objIndex).filter(i => i !== undefined)
+            if (risk._objIndex === undefined || !existingIndices.includes(risk._objIndex)) {
+              existing.risks.push(risk)
+            } else {
+              // 更新现有的risk对象
+              const idx = existing.risks.findIndex(r => r._objIndex === risk._objIndex)
+              if (idx >= 0) {
+                existing.risks[idx] = risk
+              }
+            }
           }
         }
       })
@@ -861,6 +876,7 @@ export default function LawTree() {
                     case 'HIGH': return { bg: '#fef2f2', border: '#ef4444', dot: '#ef4444' }    // 红色
                     case 'MEDIUM': return { bg: '#fffbeb', border: '#f59e0b', dot: '#f59e0b' }  // 橙色
                     case 'LOW': return { bg: '#f0fdf4', border: '#10b981', dot: '#10b981' }     // 绿色
+                    case 'UNKNOWN': return { bg: '#f1f5f9', border: '#94a3b8', dot: '#94a3b8' } // 灰色（部分数据）
                     default: return null
                   }
                 }
@@ -891,7 +907,7 @@ export default function LawTree() {
                     }}
                     title={risk ? `Risk: ${risk.level} (${(risk.confidence * 100).toFixed(0)}% confidence)\n${risk.risks.length} risk(s) detected` : ''}
                   >
-                    {risk && (
+                    {risk && riskColors && (
                       <div style={{
                         position: 'absolute',
                         top: '2px',

@@ -1570,13 +1570,40 @@ export const useStore = create((set, get) => ({
               if (yielded && yielded.length > 0) {
                 set(state => {
                   const currentRisks = state.privacyInferences?.[session.id]?.risks || []
+                  
+                  // 智能合并：根据_objIndex更新现有对象或添加新对象
+                  const updatedRisks = [...currentRisks]
+                  
+                  yielded.forEach(newRisk => {
+                    const objIndex = newRisk._objIndex
+                    
+                    if (objIndex !== undefined) {
+                      // 查找是否已存在相同objIndex的risk
+                      const existingIndex = updatedRisks.findIndex(r => r._objIndex === objIndex)
+                      
+                      if (existingIndex >= 0) {
+                        // 更新现有对象（合并字段，保留新数据）
+                        updatedRisks[existingIndex] = {
+                          ...updatedRisks[existingIndex],
+                          ...newRisk
+                        }
+                      } else {
+                        // 添加新对象
+                        updatedRisks.push(newRisk)
+                      }
+                    } else {
+                      // 没有objIndex，直接添加（兜底逻辑）
+                      updatedRisks.push(newRisk)
+                    }
+                  })
+                  
                   return {
                     privacyInferences: {
                       ...state.privacyInferences,
                       [session.id]: {
                         ...state.privacyInferences[session.id],
                         status: 'running',
-                        risks: [...currentRisks, ...yielded],
+                        risks: updatedRisks,
                         buffer: buffer,
                         updatedAt: Date.now()
                       }
