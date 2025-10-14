@@ -224,6 +224,40 @@ export default function AgentPage() {
   // 左侧栏编辑状态（中文注释）：用于追踪正在编辑的 session 和编辑的标题
   const [editingSessionId, setEditingSessionId] = useState(null)
   const [editingTitle, setEditingTitle] = useState('')
+  // 左侧会话拖拽排序（中文注释）
+  const [draggingSessionId, setDraggingSessionId] = useState(null)
+  const [reorderedSessions, setReorderedSessions] = useState(null)
+  const chatItemRefs = useRef({}) // { [sessionId]: HTMLElement }
+  const lastReorderRef = useRef({ fromId: null, index: -1 })
+  const measureRects = () => {
+    const result = {}
+    try {
+      const entries = Object.entries(chatItemRefs.current || {})
+      for (const [id, el] of entries) {
+        if (el && el.getBoundingClientRect) result[id] = el.getBoundingClientRect()
+      }
+    } catch (_) {}
+    return result
+  }
+  const animateFLIP = (prevRects, nextRects) => {
+    try {
+      const ids = Object.keys(nextRects || {})
+      for (const id of ids) {
+        const el = chatItemRefs.current[id]
+        const prev = prevRects?.[id]
+        const next = nextRects?.[id]
+        if (!el || !prev || !next) continue
+        const dy = prev.top - next.top
+        if (!dy) continue
+        el.style.transition = 'transform 0s'
+        el.style.transform = `translateY(${dy}px)`
+        requestAnimationFrame(() => {
+          el.style.transition = 'transform 150ms ease'
+          el.style.transform = ''
+        })
+      }
+    } catch (_) {}
+  }
   
   // 记录上次推理时使用的法律key（中文注释）：用于检测法律切换
   const lastInferenceLawKeyRef = useRef(null)
@@ -1316,6 +1350,77 @@ export default function AgentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, landingInput, selectedImages, hasMessages, editingMessageId, editingContent, editingImages])
 
+  // 会话拖拽排序事件（中文注释）
+  const handleDragStartSession = (id) => (e) => {
+    try {
+      setDraggingSessionId(id)
+      setReorderedSessions([...sessions])
+      if (e?.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move'
+        // 兼容获取来源
+        e.dataTransfer.setData('text/plain', id)
+      }
+    } catch (_) {}
+  }
+
+  const handleDragOverSession = (id) => (e) => {
+    // 允许放置
+    e.preventDefault()
+    if (e?.dataTransfer) e.dataTransfer.dropEffect = 'move'
+    const fromId = draggingSessionId
+    if (!fromId) return
+    const targetEl = e.currentTarget
+    const rect = targetEl?.getBoundingClientRect?.()
+    if (!rect) return
+    const y = e.clientY
+    const ratio = (y - rect.top) / Math.max(1, rect.height)
+    // 40%/60% 阈值（中文注释）：避免在中间区域频繁抖动
+    const beforeZone = ratio < 0.4
+    const afterZone = ratio > 0.6
+    if (!beforeZone && !afterZone) return
+
+    const list = Array.isArray(reorderedSessions) ? [...reorderedSessions] : [...sessions]
+    const fromIdx = list.findIndex((s) => s.id === fromId)
+    const targetIdx = list.findIndex((s) => s.id === id)
+    if (fromIdx === -1 || targetIdx === -1) return
+
+    // 计算期望插入索引（中文注释）：在目标项前或后
+    let desiredIndex = beforeZone ? targetIdx : targetIdx + 1
+    desiredIndex = Math.max(0, Math.min(desiredIndex, list.length))
+    // 移除源项后索引校正（中文注释）
+    const shiftAdjustedIndex = desiredIndex - (fromIdx < desiredIndex ? 1 : 0)
+    if (shiftAdjustedIndex === fromIdx) return
+    // 重复目标去重（中文注释）：同一 fromId + index 不重复执行
+    if (lastReorderRef.current.fromId === fromId && lastReorderRef.current.index === shiftAdjustedIndex) return
+    lastReorderRef.current = { fromId, index: shiftAdjustedIndex }
+
+    const prevRects = measureRects()
+    const [moved] = list.splice(fromIdx, 1)
+    list.splice(shiftAdjustedIndex, 0, moved)
+    setReorderedSessions(list)
+    requestAnimationFrame(() => {
+      const nextRects = measureRects()
+      animateFLIP(prevRects, nextRects)
+    })
+  }
+
+  const handleDropSession = (id) => (e) => {
+    e.preventDefault()
+    const fromId = draggingSessionId || (e?.dataTransfer ? e.dataTransfer.getData('text/plain') : null)
+    setDraggingSessionId(null)
+    if (!fromId) { setReorderedSessions(null); return }
+    const list = Array.isArray(reorderedSessions) ? reorderedSessions : sessions
+    // 提交重排（中文注释）
+    useStore.setState({ sessions: list })
+    setReorderedSessions(null)
+  }
+
+  const handleDragEndSession = () => {
+    setDraggingSessionId(null)
+    setReorderedSessions(null)
+    lastReorderRef.current = { fromId: null, index: -1 }
+  }
+
   return (
     <div className={styles.shell}>
       {/* 左侧：侧边栏 */}
@@ -1329,7 +1434,7 @@ export default function AgentPage() {
         {/* 无痕模式提示（中文注释） */}
         <PrivacyModeIndicator />
         <div className={styles.sidebarScroll}>
-          {sessions.map((s) => (
+          {(reorderedSessions || sessions).map((s) => (
             <div
               key={s.id}
               className={`${styles.chatItem} ${s.id === currentSessionId ? styles.chatItemActive : ''}`}
@@ -1339,6 +1444,13 @@ export default function AgentPage() {
                 }
               }}
               title={editingSessionId === s.id ? '' : s.title}
+              draggable
+              onDragStart={handleDragStartSession(s.id)}
+              onDragOver={handleDragOverSession(s.id)}
+              onDrop={handleDropSession(s.id)}
+              onDragEnd={handleDragEndSession}
+              ref={(el) => { if (el) chatItemRefs.current[s.id] = el; else delete chatItemRefs.current[s.id] }}
+              style={{ opacity: draggingSessionId === s.id ? 0.8 : 1 }}
             >
               <div className={styles.chatItemHeader}>
                 <div className={styles.chatItemInfo}>

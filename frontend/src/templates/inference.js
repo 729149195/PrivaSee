@@ -218,9 +218,43 @@ export function fillPromptTemplate(infons, lawData) {
   const infonsSummary = extractInfonsSummary(infons)
   const lawTreeSummary = extractLawTreeSummary(lawData)
   
-  return PRIVACY_INFERENCE_PROMPT
-    .replace('{{INFONS}}', infonsSummary)
-    .replace('{{LAW_TREE}}', lawTreeSummary)
+  // 构建简洁版提示词，更适合本地模型
+  const simplePrompt = `You are a privacy risk analyzer. Analyze the information elements below and identify privacy risks.
+
+INPUT DATA TO ANALYZE:
+${infonsSummary}
+
+LEGAL FRAMEWORK:
+${lawTreeSummary}
+
+TASK:
+1. Identify what privacy information can be inferred from the input data
+2. Map each privacy risk to the most specific legal clause name
+3. Output ONLY valid JSON (no markdown, no extra text)
+
+OUTPUT FORMAT (EXACT JSON):
+{
+  "risks": [
+    {
+      "law_node_name": "exact leaf node name from legal framework",
+      "risk_level": "HIGH or MEDIUM or LOW",
+      "privacy_exposure": "what privacy info is exposed",
+      "inference_chain": "reasoning: 1) what data shows 2) what it implies 3) why it matters",
+      "used_infons": ["infon_id1", "infon_id2"]
+    }
+  ]
+}
+
+CRITICAL RULES:
+- Output ONLY the JSON object, no other text
+- law_node_name MUST be exact copy from legal framework above
+- If you see "CUSTOM PRIVACY ANALYSIS MODE", ONLY analyze the selected items marked with ✓
+- Deep inference: infer health conditions, beliefs from behaviors (e.g., gluten-free → celiac disease)
+- Sort by risk_level: HIGH first
+
+NOW OUTPUT THE JSON:`
+  
+  return simplePrompt
 }
 
 // Incremental parser for streaming risk items with partial object support

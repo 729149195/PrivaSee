@@ -712,6 +712,7 @@ export const useStore = create((set, get) => ({
 
   // 清空所有 pending 信息元：供组件发送前调用
   clearAllPendingInfons() {
+    get()._ensureCurrentSession()
     const session = get().getCurrentSession()
     if (!session) return
     try {
@@ -853,6 +854,7 @@ export const useStore = create((set, get) => ({
   // ---------- 信息元提取：启动/中止 ----------
   // 停止所有 pending 目标的提取；clear=true 时同时清除结果
   abortPendingInfons(clear = false) {
+    get()._ensureCurrentSession()
     const session = get().getCurrentSession()
     if (!session) return
     const runs = (get().infonSessions?.[session.id]?.runs) || []
@@ -922,6 +924,7 @@ export const useStore = create((set, get) => ({
 
   // 启动基于 pending 输入的信息元提取
   startPendingInfons(text, imageDataUrls) {
+    get()._ensureCurrentSession()
     const session = get().getCurrentSession()
     if (!session) return
     // 输入为空不启动
@@ -1759,12 +1762,6 @@ export const useStore = create((set, get) => ({
     try {
       console.log(`[Privacy Inference] 使用 ${allInfons.length} 个信息元进行推理`)
       
-      // 构建推理提示词
-      const { fillPromptTemplate } = await import('./templates/inference.js')
-      const prompt = fillPromptTemplate(allInfons, selectedLaw.data)
-      
-      console.log(`[Privacy Inference] Prompt 长度: ${prompt.length} 字符`)
-      
       // 使用用户配置的隐私推理模型（中文注释）：优先使用配置，回退到 DeepSeek
       const configuredModel = get().privacyInferenceModel || 'deepseek-chat'
       let provider = get().customProviders?.[configuredModel]
@@ -1781,7 +1778,13 @@ export const useStore = create((set, get) => ({
       const apiUrl = provider ? provider.baseUrl : get().baseUrl
       const apiKey = provider?.apiKey || ''
       
+      // 构建推理提示词
+      const { fillPromptTemplate } = await import('./templates/inference.js')
+      const prompt = fillPromptTemplate(allInfons, selectedLaw.data)
+      
       console.log(`[Privacy Inference] 发起推理请求到 ${apiUrl}，使用模型: ${configuredModel}`)
+      console.log(`[Privacy Inference] Prompt 长度: ${prompt.length} 字符`)
+      console.log(`[Privacy Inference] Prompt 预览 (前500字):`, prompt.slice(0, 500))
       
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
@@ -1844,15 +1847,20 @@ export const useStore = create((set, get) => ({
             if (contentDelta) {
               buffer += contentDelta
               
+              // 清理 buffer：移除 <think> 标签后再解析（中文注释）
+              let cleanedBuffer = buffer
+              // 移除 <think>...</think> 标签及其内容
+              cleanedBuffer = cleanedBuffer.replace(/<think>[\s\S]*?<\/think>/gi, '')
+              
               // 使用增量解析器逐个提取风险项（中文注释）
               const { incrementalExtractRisks } = await import('./templates/inference.js')
               const parserState = get().privacyParsers?.[session.id] || null
-              const { state: newState, yielded } = incrementalExtractRisks(buffer, parserState)
+              const { state: newState, yielded } = incrementalExtractRisks(cleanedBuffer, parserState)
               
               // 调试：记录解析器发现的内容
-              if (buffer.length < 100) {
+              if (cleanedBuffer.length < 100) {
                 console.log('[Privacy Inference] 解析状态:', {
-                  bufferLength: buffer.length,
+                  bufferLength: cleanedBuffer.length,
                   foundArray: newState.foundArray,
                   yieldedCount: yielded?.length || 0
                 })
@@ -1921,11 +1929,17 @@ export const useStore = create((set, get) => ({
       console.log(`[Privacy Inference] 流式接收完成，buffer长度: ${buffer.length}`)
       console.log(`[Privacy Inference] Buffer内容预览:`, buffer.slice(0, 500))
       
-      // 尝试清理buffer：移除可能的markdown代码块标记
+      // 尝试清理buffer：移除模型的思考过程和markdown标记
       let cleanBuffer = buffer
-      // 移除 ```json 和 ``` 标记
+      
+      // 1. 移除 <think>...</think> 标签及其内容（某些模型如 DeepSeek 会输出思考过程）
+      cleanBuffer = cleanBuffer.replace(/<think>[\s\S]*?<\/think>/gi, '')
+      
+      // 2. 移除 markdown 代码块标记
       cleanBuffer = cleanBuffer.replace(/^```json\s*/i, '').replace(/```\s*$/i, '')
-      // 查找第一个 { 和最后一个 }，提取JSON部分
+      cleanBuffer = cleanBuffer.replace(/^```\s*/i, '').replace(/```\s*$/i, '')
+      
+      // 3. 查找第一个 { 和最后一个 }，提取JSON部分
       const firstBrace = cleanBuffer.indexOf('{')
       const lastBrace = cleanBuffer.lastIndexOf('}')
       if (firstBrace >= 0 && lastBrace > firstBrace) {

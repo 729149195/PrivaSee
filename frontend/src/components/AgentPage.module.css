@@ -236,6 +236,9 @@
 
 .scroll {
     flex: 1;
+    /* 作为滚动容器，同时充当弹性容器，让下方 Splitter 自适应占满剩余空间 */
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--color-border-medium) transparent;
@@ -798,7 +801,9 @@
     white-space: nowrap;
 }
 .splitterRoot {
-    height: calc(100% - 64px);
+    /* 取消对顶部工具栏固定高度的依赖，直接占满剩余空间 */
+    flex: 1 1 auto;
+    min-height: 0; /* 允许子面板内部继续滚动，而不是挤出容器 */
 }
 
 .leftPaneScroll {

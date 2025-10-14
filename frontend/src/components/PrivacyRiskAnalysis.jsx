@@ -62,7 +62,7 @@ export default function PrivacyRiskAnalysis({
                   ) : null}
                   placement={(idx % 2 === 0) ? 'right' : 'left'}
                   mouseEnterDelay={0.1}
-                  overlayClassName={`${styles.riskTooltipOverlay} ${(idx % 2 === 0) ? styles.riskTooltipRight : styles.riskTooltipLeft}`}
+                  classNames={{ root: `${styles.riskTooltipOverlay} ${(idx % 2 === 0) ? styles.riskTooltipRight : styles.riskTooltipLeft}` }}
                   arrow={false}
                 >
                 <div 
