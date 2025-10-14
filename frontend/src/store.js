@@ -525,6 +525,20 @@ export const useStore = create((set, get) => ({
   // 用户状态标识（中文注释）：用于判断是否启用历史数据持久化
   currentUserId: null,
   
+  // 模型配置（中文注释）：用户可自定义的模型选择
+  infonExtractionModel: 'deepseek-chat', // 信息元提取模型
+  privacyInferenceModel: 'deepseek-chat', // 隐私推理模型
+  
+  // 设置信息元提取模型
+  setInfonExtractionModel: (modelId) => {
+    set({ infonExtractionModel: modelId })
+  },
+  
+  // 设置隐私推理模型
+  setPrivacyInferenceModel: (modelId) => {
+    set({ privacyInferenceModel: modelId })
+  },
+  
   // 设置当前用户（登录时调用）
   setCurrentUser: (userId) => {
     set({ currentUserId: userId })
@@ -1049,18 +1063,24 @@ export const useStore = create((set, get) => ({
     }
     get()._appendInfonRun(session.id, run)
 
-    // 文本信息元提取强制使用 DeepSeek 提供商（中文注释）：与 AgentPage 示例一致
-    const deepseekId = 'deepseek-chat'
-    let provider = get().customProviders?.[deepseekId]
-    if (!provider) {
+    // 使用用户配置的信息元提取模型（中文注释）：优先使用配置，回退到 DeepSeek
+    const configuredModel = get().infonExtractionModel || 'deepseek-chat'
+    let provider = get().customProviders?.[configuredModel]
+    
+    // 如果配置的模型是 deepseek-chat 但尚未添加，则自动添加默认配置
+    if (configuredModel === 'deepseek-chat' && !provider) {
       try {
-        get().addApiModel?.({ id: deepseekId, baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
+        get().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
       } catch (_) { }
-      provider = get().customProviders?.[deepseekId]
+      provider = get().customProviders?.[configuredModel]
     }
+    
+    // 如果有provider（自定义API模型），使用provider配置；否则使用本地baseUrl（Ollama）
     const baseUrl = provider ? provider.baseUrl : get().baseUrl
     const headers = { 'Content-Type': 'application/json' }
     if (provider?.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`
+    
+    console.log(`[Infon Extraction] 使用模型: ${configuredModel}, API: ${baseUrl}`)
 
     const nowISO = new Date().toISOString()
     const systemPrompt = buildInfonSystemPrompt(['text'], nowISO, { currentRound, existingInfons })
@@ -1076,7 +1096,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ model: deepseekId, messages, temperature: 0, stream: true }),
+        body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true }),
         signal: controller.signal,
       })
       if (!res.ok) {
@@ -1745,19 +1765,23 @@ export const useStore = create((set, get) => ({
       
       console.log(`[Privacy Inference] Prompt 长度: ${prompt.length} 字符`)
       
-      // 隐私推理强制使用 DeepSeek API（中文注释）：与信息元提取保持一致
-      const deepseekId = 'deepseek-chat'
-      let provider = get().customProviders?.[deepseekId]
-      if (!provider) {
+      // 使用用户配置的隐私推理模型（中文注释）：优先使用配置，回退到 DeepSeek
+      const configuredModel = get().privacyInferenceModel || 'deepseek-chat'
+      let provider = get().customProviders?.[configuredModel]
+      
+      // 如果配置的模型是 deepseek-chat 但尚未添加，则自动添加默认配置
+      if (configuredModel === 'deepseek-chat' && !provider) {
         try {
-          get().addApiModel?.({ id: deepseekId, baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
+          get().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
         } catch (_) { }
-        provider = get().customProviders?.[deepseekId]
+        provider = get().customProviders?.[configuredModel]
       }
-      const apiUrl = provider?.baseUrl || 'https://api.deepseek.com/v1'
+      
+      // 如果有provider（自定义API模型），使用provider配置；否则使用本地baseUrl（Ollama）
+      const apiUrl = provider ? provider.baseUrl : get().baseUrl
       const apiKey = provider?.apiKey || ''
       
-      console.log(`[Privacy Inference] 发起推理请求到 ${apiUrl}`)
+      console.log(`[Privacy Inference] 发起推理请求到 ${apiUrl}，使用模型: ${configuredModel}`)
       
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
@@ -1766,7 +1790,7 @@ export const useStore = create((set, get) => ({
           ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
         },
         body: JSON.stringify({
-          model: deepseekId,
+          model: configuredModel,
           messages: [{ role: 'user', content: prompt }],
           stream: true,
           temperature: 0.5, // 适中温度以平衡创造性和准确性
@@ -2056,7 +2080,9 @@ export const useStore = create((set, get) => ({
           currentSessionId: data.sessions[0]?.id || null,
           customPrivacyItems: data.customPrivacyItems || [],
           selectedLawIdx: data.selectedLawIdx ?? 0,
-          selectedPrivacyItems: data.selectedPrivacyItems || []
+          selectedPrivacyItems: data.selectedPrivacyItems || [],
+          infonExtractionModel: data.infonExtractionModel || 'deepseek-chat',
+          privacyInferenceModel: data.privacyInferenceModel || 'deepseek-chat'
         })
         console.log('[PrivaSee] 用户历史数据已加载')
       } else {
@@ -2080,7 +2106,7 @@ export const useStore = create((set, get) => ({
   // 内部：保存用户历史数据
   _saveUserHistory(userId) {
     try {
-      const { sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems } = get()
+      const { sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel } = get()
       
       // 清理不可序列化的字段（中文注释）：移除 abortController
       const serializableInferences = {}
@@ -2092,7 +2118,7 @@ export const useStore = create((set, get) => ({
         }
       })
       
-      saveUserSessions(userId, sessions, infonSessions, serializableInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems)
+      saveUserSessions(userId, sessions, infonSessions, serializableInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel)
     } catch (error) {
       console.error('[PrivaSee] 保存用户历史失败:', error)
     }

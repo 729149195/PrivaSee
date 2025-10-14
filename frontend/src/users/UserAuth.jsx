@@ -2,12 +2,14 @@ import React, { useState } from 'react'
 import { Modal, Input, Button, Tabs, message, Avatar, Dropdown } from 'antd'
 import { UserOutlined, LoginOutlined, LogoutOutlined, SettingOutlined } from '@ant-design/icons'
 import { useUserStore, validateLogin } from './userStore'
+import SettingsModal from './SettingsModal'
 import styles from './UserAuth.module.css'
 
 export default function UserAuth() {
   const { currentUser, isLoggedIn, login, logout, register } = useUserStore()
   const [modalOpen, setModalOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('login')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   
   // 登录表单
   const [loginUsername, setLoginUsername] = useState('')
@@ -138,7 +140,7 @@ export default function UserAuth() {
       icon: <SettingOutlined />,
       label: '设置',
       onClick: () => {
-        message.info('设置功能开发中...')
+        setSettingsOpen(true)
       }
     },
     {
@@ -289,6 +291,12 @@ export default function UserAuth() {
           ]}
         />
       </Modal>
+      
+      {/* 设置 Modal */}
+      <SettingsModal 
+        open={settingsOpen} 
+        onClose={() => setSettingsOpen(false)} 
+      />
     </>
   )
 }
