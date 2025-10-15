@@ -206,6 +206,8 @@ export default function AgentPage() {
   const pendingTimerRef = useRef(null)
   // 追踪是否正在等待防抖（中文注释）：用于锁定发送按钮
   const [isWaitingForDebounce, setIsWaitingForDebounce] = useState(false)
+  // 标记是否正在发送消息（正在采纳pending信息元）
+  const isAdoptingPendingRef = useRef(false)
   // 记录上次推断时的 message run IDs（中文注释）：用于检测新的信息元提取完成
   const lastInferenceRunCountRef = useRef('')
   // 图片预览 Modal（中文注释）
@@ -873,7 +875,8 @@ export default function AgentPage() {
       .map(r => r.id)
       .sort()
     
-    // 注意：先完成 adopt，再清空输入，避免触发新的 pending 提取
+    // 设置标志，防止useEffect清空pending
+    isAdoptingPendingRef.current = true
     
     if (hasImages) {
       const userId = await useStore.getState().sendMessageWithImages(text, imgs)
@@ -892,6 +895,7 @@ export default function AgentPage() {
         }
       } catch (_) {}
       // 清空输入和图片（中文注释）
+      isAdoptingPendingRef.current = false
       setInput('')
       setSelectedImages([])
     } else {
@@ -911,6 +915,7 @@ export default function AgentPage() {
         }
       } catch (_) {}
       // 清空输入和图片（中文注释）
+      isAdoptingPendingRef.current = false
       setInput('')
       setSelectedImages([])
     }
@@ -934,6 +939,9 @@ export default function AgentPage() {
       .map(r => r.id)
       .sort()
     
+    // 设置标志，防止useEffect清空pending
+    isAdoptingPendingRef.current = true
+    
     if (hasImages) {
       const userId = await useStore.getState().sendMessageWithImages(text, imgs)
       try {
@@ -951,6 +959,7 @@ export default function AgentPage() {
         }
       } catch (_) {}
       // 清空输入和图片（中文注释）
+      isAdoptingPendingRef.current = false
       setLandingInput('')
       setSelectedImages([])
     } else {
@@ -970,6 +979,7 @@ export default function AgentPage() {
         }
       } catch (_) {}
       // 清空输入和图片（中文注释）
+      isAdoptingPendingRef.current = false
       setLandingInput('')
       setSelectedImages([])
     }
@@ -1134,6 +1144,9 @@ export default function AgentPage() {
       .map(r => r.id)
       .sort()
     
+    // 设置标志，防止useEffect清空pending
+    isAdoptingPendingRef.current = true
+    
     // 发送新消息
     if (editingImages.length > 0) {
       const userId = await useStore.getState().sendMessageWithImages(text, editingImages)
@@ -1169,7 +1182,8 @@ export default function AgentPage() {
       } catch (_) {}
     }
 
-    // 清理编辑状态
+    // 清除标志并清理编辑状态
+    isAdoptingPendingRef.current = false
     handleCancelEdit()
     
     antdMessage.success('消息已更新并重新生成')
@@ -1322,9 +1336,12 @@ export default function AgentPage() {
     }
     
     // 若无输入也无图片，则清空旧的 pending 并返回（中文注释）
+    // 但如果正在采纳pending信息元（发送消息过程中），则不清空
     if (!textToUse && imgs.length === 0) {
       setIsWaitingForDebounce(false)
-      try { clearAllPendingInfons?.() } catch (_) {}
+      if (!isAdoptingPendingRef.current) {
+        try { clearAllPendingInfons?.() } catch (_) {}
+      }
       return
     }
     
