@@ -108,7 +108,20 @@ export default function MarkdownMessage({ content = '' }) {
     code({ inline, className, children, ...props }) {
       const match = /language-(\w+)/.exec(className || '')
       const lang = match ? match[1] : ''
-      const codeText = String(children || '')
+      
+      // 正确提取文本内容，处理 children 可能是数组或对象的情况
+      const extractText = (node) => {
+        if (typeof node === 'string') return node
+        if (typeof node === 'number') return String(node)
+        if (Array.isArray(node)) return node.map(extractText).join('')
+        if (node && typeof node === 'object' && node.props && node.props.children) {
+          return extractText(node.props.children)
+        }
+        return ''
+      }
+      
+      const codeText = extractText(children) || ''
+      
       const handleCopy = async () => {
         try {
           await navigator.clipboard.writeText(codeText)
@@ -126,7 +139,7 @@ export default function MarkdownMessage({ content = '' }) {
             <button className={styles.copyBtn} onClick={handleCopy}>Copy</button>
           </div>
           <pre className={clsx('hljs', styles.pre)}>
-            <code className={className} {...props}>{codeText}</code>
+            <code className={className} {...props}>{children}</code>
           </pre>
         </div>
       )
