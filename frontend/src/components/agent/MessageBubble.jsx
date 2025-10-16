@@ -8,6 +8,9 @@ import RelationTags from './RelationTags'
 import MessageEditor from './MessageEditor'
 import AudioTag from './AudioTag'
 
+// 导入 vite.svg 图标
+const ViteIcon = '/vite.svg'
+
 /**
  * 消息气泡组件
  * @param {object} message - 消息对象
@@ -157,7 +160,13 @@ const MessageBubble = ({
   // 助手消息
   return (
     <div className={`${styles.msgRow} ${styles.rowAssistant}`}>
-      <div className={styles.avatar}>A</div>
+      <div className={styles.avatar} style={{ 
+        backgroundImage: `url(${ViteIcon})`, 
+        backgroundSize: 'contain', 
+        backgroundPosition: 'center', 
+        backgroundRepeat: 'no-repeat',
+        backgroundColor: 'transparent'
+      }}></div>
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
         <div className={`${styles.msgBubble} ${styles.msgBubbleAssistant}`} style={{ position: 'relative' }}>
           {messageRelations.length > 0 && (
@@ -173,7 +182,7 @@ const MessageBubble = ({
           )}
           <div className={styles.msgContent}>
             <div className={styles.assistantTextHighlight} style={{ position: 'relative', zIndex: 2 }}>
-              {renderHighlightedText(message.content, message.id)}
+              <MarkdownMessage content={message.content} />
             </div>
           </div>
           {/* 关系标签 */}
