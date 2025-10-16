@@ -18,6 +18,7 @@ const AudioRecorder = ({ onAudioAdded, disabled = false }) => {
   const chunksRef = useRef([])
   const timerRef = useRef(null)
   const streamRef = useRef(null)
+  const isCancelledRef = useRef(false) // 用于标记是否是用户取消的
 
   // 清理录音资源
   const cleanupRecording = () => {
@@ -51,6 +52,7 @@ const AudioRecorder = ({ onAudioAdded, disabled = false }) => {
       const mediaRecorder = new MediaRecorder(stream)
       mediaRecorderRef.current = mediaRecorder
       chunksRef.current = []
+      isCancelledRef.current = false // 重置取消标志
       
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
@@ -59,8 +61,11 @@ const AudioRecorder = ({ onAudioAdded, disabled = false }) => {
       }
       
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' })
-        await processAudio(audioBlob)
+        // 只有在非取消状态下才处理音频
+        if (!isCancelledRef.current) {
+          const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' })
+          await processAudio(audioBlob)
+        }
         cleanupRecording()
       }
       
@@ -90,6 +95,7 @@ const AudioRecorder = ({ onAudioAdded, disabled = false }) => {
 
   // 取消录音
   const cancelRecording = () => {
+    isCancelledRef.current = true // 标记为取消状态
     cleanupRecording()
     setIsRecording(false)
     message.info('已取消录音')

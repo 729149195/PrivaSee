@@ -1112,9 +1112,22 @@ export const useStore = create((set, get) => ({
     try {
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
-        headers,
-        body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true }),
+        headers: {
+          ...headers,
+          'Connection': 'keep-alive'
+        },
+        body: JSON.stringify({ 
+          model: configuredModel, 
+          messages, 
+          temperature: 0,
+          stream: true,
+          max_tokens: 4096, // 限制输出长度
+          top_p: 0.95, // 核采样
+          frequency_penalty: 0.0,
+          presence_penalty: 0.0,
+        }),
         signal: controller.signal,
+        keepalive: true // 启用连接复用
       })
       if (!res.ok) {
         const errText = await res.text().catch(() => '')
@@ -1127,69 +1140,85 @@ export const useStore = create((set, get) => ({
         return
       }
 
+      // Debounce配置：减少解析频率
+      let parseTimer = null
+      let lastParseTime = 0
+      const PARSE_DEBOUNCE_MS = 100
+
       await streamOpenAIResponse(reader, async ({ content, finish }) => {
         if (typeof content === 'string' && content.length) {
-          // 流式增量解析（中文注释）：逐步提取infons
+          // 更新buffer
           const currentRun = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)
           const buffer = (currentRun?.buffer || '') + content
-          
-          // 更新buffer
           get()._updateInfonRun(session.id, runId, (r) => ({ ...r, buffer }))
           
-          // 使用增量解析器逐个提取infons
-          const parserState = get().infonParsers?.[runId] || null
-          const { state: newState, yielded } = incrementalExtractInfons(buffer, parserState)
-          
-          // 更新解析器状态
-          set(state => ({
-            infonParsers: {
-              ...state.infonParsers,
-              [runId]: newState
-            }
-          }))
-          
-          // 如果有新的infons被解析出来，立即添加到结果中（流式显示）
-          if (yielded && yielded.length > 0) {
-            get()._updateInfonRun(session.id, runId, (r) => {
-              const currentInfons = r.resultJson?.infons || []
-              
-              // 智能合并：根据_objIndex更新现有对象或添加新对象
-              const updatedInfons = [...currentInfons]
-              
-              yielded.forEach(newInfon => {
-                const objIndex = newInfon._objIndex
+          // Debounce解析逻辑
+          const performParsing = () => {
+            const currentRun = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)
+            if (!currentRun) return
+            
+            const buffer = currentRun.buffer || ''
+            const parserState = get().infonParsers?.[runId] || null
+            const { state: newState, yielded } = incrementalExtractInfons(buffer, parserState)
+            
+            set(state => ({
+              infonParsers: {
+                ...state.infonParsers,
+                [runId]: newState
+              }
+            }))
+            
+            if (yielded && yielded.length > 0) {
+              get()._updateInfonRun(session.id, runId, (r) => {
+                const currentInfons = r.resultJson?.infons || []
+                const updatedInfons = [...currentInfons]
                 
-                if (objIndex !== undefined) {
-                  const existingIndex = updatedInfons.findIndex(inf => inf._objIndex === objIndex)
+                yielded.forEach(newInfon => {
+                  const objIndex = newInfon._objIndex
                   
-                  if (existingIndex >= 0) {
-                    // 更新现有对象
-                    updatedInfons[existingIndex] = {
-                      ...updatedInfons[existingIndex],
-                      ...newInfon
+                  if (objIndex !== undefined) {
+                    const existingIndex = updatedInfons.findIndex(inf => inf._objIndex === objIndex)
+                    if (existingIndex >= 0) {
+                      updatedInfons[existingIndex] = {
+                        ...updatedInfons[existingIndex],
+                        ...newInfon
+                      }
+                    } else {
+                      updatedInfons.push(newInfon)
                     }
                   } else {
-                    // 添加新对象
                     updatedInfons.push(newInfon)
                   }
-                } else {
-                  // 没有objIndex，直接添加
-                  updatedInfons.push(newInfon)
+                })
+                
+                return {
+                  ...r,
+                  status: 'running',
+                  resultJson: {
+                    ...r.resultJson,
+                    infons: updatedInfons
+                  }
                 }
               })
-              
-              return {
-                ...r,
-                status: 'running',
-                resultJson: {
-                  ...r.resultJson,
-                  infons: updatedInfons
-                }
-              }
-            })
+            }
+            
+            lastParseTime = Date.now()
+          }
+          
+          // Debounce策略
+          const now = Date.now()
+          const timeSinceLastParse = now - lastParseTime
+          
+          if (parseTimer) clearTimeout(parseTimer)
+          
+          if (timeSinceLastParse >= PARSE_DEBOUNCE_MS) {
+            performParsing()
+          } else {
+            parseTimer = setTimeout(performParsing, PARSE_DEBOUNCE_MS)
           }
         }
         if (finish) {
+          if (parseTimer) clearTimeout(parseTimer)
           const raw = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)?.buffer || ''
           const sliced = extractFirstJSONObject(raw) || raw
           const { ok, value } = tryParseJSON(sliced)
@@ -1495,9 +1524,22 @@ export const useStore = create((set, get) => ({
     try {
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
-        headers,
-        body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true }),
+        headers: {
+          ...headers,
+          'Connection': 'keep-alive'
+        },
+        body: JSON.stringify({ 
+          model: configuredModel, 
+          messages, 
+          temperature: 0,
+          stream: true,
+          max_tokens: 4096, // 限制输出长度
+          top_p: 0.95, // 核采样
+          frequency_penalty: 0.0,
+          presence_penalty: 0.0,
+        }),
         signal: controller.signal,
+        keepalive: true // 启用连接复用
       })
       if (!res.ok) {
         const errText = await res.text().catch(() => '')
@@ -1510,69 +1552,85 @@ export const useStore = create((set, get) => ({
         return
       }
 
+      // Debounce配置：减少解析频率
+      let parseTimer = null
+      let lastParseTime = 0
+      const PARSE_DEBOUNCE_MS = 100
+
       await streamOpenAIResponse(reader, async ({ content, finish }) => {
         if (typeof content === 'string' && content.length) {
-          // 流式增量解析（中文注释）：逐步提取infons
+          // 更新buffer
           const currentRun = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)
           const buffer = (currentRun?.buffer || '') + content
-          
-          // 更新buffer
           get()._updateInfonRun(session.id, runId, (r) => ({ ...r, buffer }))
           
-          // 使用增量解析器逐个提取infons
-          const parserState = get().infonParsers?.[runId] || null
-          const { state: newState, yielded } = incrementalExtractInfons(buffer, parserState)
-          
-          // 更新解析器状态
-          set(state => ({
-            infonParsers: {
-              ...state.infonParsers,
-              [runId]: newState
-            }
-          }))
-          
-          // 如果有新的infons被解析出来，立即添加到结果中（流式显示）
-          if (yielded && yielded.length > 0) {
-            get()._updateInfonRun(session.id, runId, (r) => {
-              const currentInfons = r.resultJson?.infons || []
-              
-              // 智能合并：根据_objIndex更新现有对象或添加新对象
-              const updatedInfons = [...currentInfons]
-              
-              yielded.forEach(newInfon => {
-                const objIndex = newInfon._objIndex
+          // Debounce解析逻辑
+          const performParsing = () => {
+            const currentRun = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)
+            if (!currentRun) return
+            
+            const buffer = currentRun.buffer || ''
+            const parserState = get().infonParsers?.[runId] || null
+            const { state: newState, yielded } = incrementalExtractInfons(buffer, parserState)
+            
+            set(state => ({
+              infonParsers: {
+                ...state.infonParsers,
+                [runId]: newState
+              }
+            }))
+            
+            if (yielded && yielded.length > 0) {
+              get()._updateInfonRun(session.id, runId, (r) => {
+                const currentInfons = r.resultJson?.infons || []
+                const updatedInfons = [...currentInfons]
                 
-                if (objIndex !== undefined) {
-                  const existingIndex = updatedInfons.findIndex(inf => inf._objIndex === objIndex)
+                yielded.forEach(newInfon => {
+                  const objIndex = newInfon._objIndex
                   
-                  if (existingIndex >= 0) {
-                    // 更新现有对象
-                    updatedInfons[existingIndex] = {
-                      ...updatedInfons[existingIndex],
-                      ...newInfon
+                  if (objIndex !== undefined) {
+                    const existingIndex = updatedInfons.findIndex(inf => inf._objIndex === objIndex)
+                    if (existingIndex >= 0) {
+                      updatedInfons[existingIndex] = {
+                        ...updatedInfons[existingIndex],
+                        ...newInfon
+                      }
+                    } else {
+                      updatedInfons.push(newInfon)
                     }
                   } else {
-                    // 添加新对象
                     updatedInfons.push(newInfon)
                   }
-                } else {
-                  // 没有objIndex，直接添加
-                  updatedInfons.push(newInfon)
+                })
+                
+                return {
+                  ...r,
+                  status: 'running',
+                  resultJson: {
+                    ...r.resultJson,
+                    infons: updatedInfons
+                  }
                 }
               })
-              
-              return {
-                ...r,
-                status: 'running',
-                resultJson: {
-                  ...r.resultJson,
-                  infons: updatedInfons
-                }
-              }
-            })
+            }
+            
+            lastParseTime = Date.now()
+          }
+          
+          // Debounce策略
+          const now = Date.now()
+          const timeSinceLastParse = now - lastParseTime
+          
+          if (parseTimer) clearTimeout(parseTimer)
+          
+          if (timeSinceLastParse >= PARSE_DEBOUNCE_MS) {
+            performParsing()
+          } else {
+            parseTimer = setTimeout(performParsing, PARSE_DEBOUNCE_MS)
           }
         }
         if (finish) {
+          if (parseTimer) clearTimeout(parseTimer)
           const raw = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)?.buffer || ''
           const sliced = extractFirstJSONObject(raw) || raw
           const { ok, value } = tryParseJSON(sliced)
@@ -1670,14 +1728,22 @@ export const useStore = create((set, get) => ({
 
         const res = await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
-          headers,
+          headers: {
+            ...headers,
+            'Connection': 'keep-alive'
+          },
           body: JSON.stringify({
             model: get().model,
             messages: payloadMessages,
             temperature: 0.7,
             stream: true,
+            max_tokens: 4096, // 限制输出长度
+            top_p: 0.9, // 核采样
+            frequency_penalty: 0.0,
+            presence_penalty: 0.0,
           }),
           signal: controller.signal,
+          keepalive: true // 启用连接复用
         })
 
         if (!res.ok) {
@@ -2014,6 +2080,7 @@ export const useStore = create((set, get) => ({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Connection': 'keep-alive',
           ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
         },
         body: JSON.stringify({
@@ -2021,8 +2088,13 @@ export const useStore = create((set, get) => ({
           messages: [{ role: 'user', content: prompt }],
           stream: true,
           temperature: 0.5, // 适中温度以平衡创造性和准确性
+          max_tokens: 4096, // 限制最大输出tokens，避免过长响应
+          top_p: 0.9, // 核采样，提升生成速度和质量
+          frequency_penalty: 0.0,
+          presence_penalty: 0.0,
         }),
-        signal: abortController.signal
+        signal: abortController.signal,
+        keepalive: true // 启用连接复用
       })
       
       console.log(`[Privacy Inference] API响应状态: ${response.status}`)
@@ -2037,7 +2109,74 @@ export const useStore = create((set, get) => ({
       const decoder = new TextDecoder('utf-8')
       let buffer = ''
       
-      // 流式接收并逐个解析风险项（中文注释）
+      // Debounce配置：减少解析频率，提升性能
+      let parseTimer = null
+      let lastParseTime = 0
+      const PARSE_DEBOUNCE_MS = 100 // 100ms debounce间隔
+      
+      // 定义解析函数（复用逻辑）
+      const performParsing = async () => {
+        // 清理 buffer：移除 <think> 标签后再解析
+        let cleanedBuffer = buffer
+        cleanedBuffer = cleanedBuffer.replace(/<think>[\s\S]*?<\/think>/gi, '')
+        
+        // 使用增量解析器逐个提取风险项
+        const { incrementalExtractRisks } = await import('./templates/inference.js')
+        const parserState = get().privacyParsers?.[session.id] || null
+        const { state: newState, yielded } = incrementalExtractRisks(cleanedBuffer, parserState)
+        
+        // 更新解析器状态
+        set(state => ({
+          privacyParsers: {
+            ...state.privacyParsers,
+            [session.id]: newState
+          }
+        }))
+        
+        // 如果有新的风险项被解析出来，立即添加到结果中
+        if (yielded && yielded.length > 0) {
+          set(state => {
+            const currentRisks = state.privacyInferences?.[session.id]?.risks || []
+            const updatedRisks = [...currentRisks]
+            
+            yielded.forEach(newRisk => {
+              const objIndex = newRisk._objIndex
+              
+              if (objIndex !== undefined) {
+                const existingIndex = updatedRisks.findIndex(r => r._objIndex === objIndex)
+                
+                if (existingIndex >= 0) {
+                  updatedRisks[existingIndex] = {
+                    ...updatedRisks[existingIndex],
+                    ...newRisk
+                  }
+                } else {
+                  updatedRisks.push(newRisk)
+                }
+              } else {
+                updatedRisks.push(newRisk)
+              }
+            })
+            
+            return {
+              privacyInferences: {
+                ...state.privacyInferences,
+                [session.id]: {
+                  ...state.privacyInferences[session.id],
+                  status: 'running',
+                  risks: updatedRisks,
+                  buffer: buffer,
+                  updatedAt: Date.now()
+                }
+              }
+            }
+          })
+        }
+        
+        lastParseTime = Date.now()
+      }
+      
+      // 流式接收并逐个解析风险项（使用debounce优化）
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -2053,7 +2192,6 @@ export const useStore = create((set, get) => ({
           try {
             const parsed = JSON.parse(data)
             const delta = parsed?.choices?.[0]?.delta || {}
-            // 兼容多种字段：content / reasoning_content / reasoning / thoughts / inner_thoughts
             const contentDelta = (
               delta?.content ||
               delta?.reasoning_content ||
@@ -2071,77 +2209,20 @@ export const useStore = create((set, get) => ({
             if (contentDelta) {
               buffer += contentDelta
               
-              // 清理 buffer：移除 <think> 标签后再解析（中文注释）
-              let cleanedBuffer = buffer
-              // 移除 <think>...</think> 标签及其内容
-              cleanedBuffer = cleanedBuffer.replace(/<think>[\s\S]*?<\/think>/gi, '')
+              // 使用debounce策略：只在间隔足够长或首次接收时解析
+              const now = Date.now()
+              const timeSinceLastParse = now - lastParseTime
               
-              // 使用增量解析器逐个提取风险项（中文注释）
-              const { incrementalExtractRisks } = await import('./templates/inference.js')
-              const parserState = get().privacyParsers?.[session.id] || null
-              const { state: newState, yielded } = incrementalExtractRisks(cleanedBuffer, parserState)
+              if (parseTimer) clearTimeout(parseTimer)
               
-              // 调试：记录解析器发现的内容
-              if (cleanedBuffer.length < 100) {
-                console.log('[Privacy Inference] 解析状态:', {
-                  bufferLength: cleanedBuffer.length,
-                  foundArray: newState.foundArray,
-                  yieldedCount: yielded?.length || 0
-                })
-              }
-              
-              // 更新解析器状态
-              set(state => ({
-                privacyParsers: {
-                  ...state.privacyParsers,
-                  [session.id]: newState
-                }
-              }))
-              
-              // 如果有新的风险项被解析出来，立即添加到结果中（流式显示）
-              if (yielded && yielded.length > 0) {
-                set(state => {
-                  const currentRisks = state.privacyInferences?.[session.id]?.risks || []
-                  
-                  // 智能合并：根据_objIndex更新现有对象或添加新对象
-                  const updatedRisks = [...currentRisks]
-                  
-                  yielded.forEach(newRisk => {
-                    const objIndex = newRisk._objIndex
-                    
-                    if (objIndex !== undefined) {
-                      // 查找是否已存在相同objIndex的risk
-                      const existingIndex = updatedRisks.findIndex(r => r._objIndex === objIndex)
-                      
-                      if (existingIndex >= 0) {
-                        // 更新现有对象（合并字段，保留新数据）
-                        updatedRisks[existingIndex] = {
-                          ...updatedRisks[existingIndex],
-                          ...newRisk
-                        }
-                      } else {
-                        // 添加新对象
-                        updatedRisks.push(newRisk)
-                      }
-                    } else {
-                      // 没有objIndex，直接添加（兜底逻辑）
-                      updatedRisks.push(newRisk)
-                    }
-                  })
-                  
-                  return {
-                    privacyInferences: {
-                      ...state.privacyInferences,
-                      [session.id]: {
-                        ...state.privacyInferences[session.id],
-                        status: 'running',
-                        risks: updatedRisks,
-                        buffer: buffer,
-                        updatedAt: Date.now()
-                      }
-                    }
-                  }
-                })
+              // 如果距离上次解析超过debounce间隔，立即解析
+              if (timeSinceLastParse >= PARSE_DEBOUNCE_MS) {
+                await performParsing()
+              } else {
+                // 否则设置定时器，延迟解析
+                parseTimer = setTimeout(async () => {
+                  await performParsing()
+                }, PARSE_DEBOUNCE_MS)
               }
             }
           } catch (err) {
@@ -2149,6 +2230,10 @@ export const useStore = create((set, get) => ({
           }
         }
       }
+      
+      // 流结束后，清除定时器并执行最后一次解析
+      if (parseTimer) clearTimeout(parseTimer)
+      await performParsing()
       
       console.log(`[Privacy Inference] 流式接收完成，buffer长度: ${buffer.length}`)
       console.log(`[Privacy Inference] Buffer内容预览:`, buffer.slice(0, 500))

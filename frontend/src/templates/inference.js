@@ -85,6 +85,7 @@ Output ONLY valid JSON (no markdown, no explanation):
 9. **Prioritize Sensitivity** - Treat health, beliefs, children, biometrics as HIGH risk
 10. **Sort Properly** - HIGH risks first
 11. **Verify Before Output** - Before outputting each risk, find the [LEAF NODE - USE THIS] entry in the provided law tree and copy its exact name. If you cannot find an exact leaf node match, choose the closest leaf node from the tree.
+12. **LANGUAGE CONSISTENCY** - Write privacy_exposure and inference_chain in the SAME language as the input information elements. If the input data is in Chinese, write your analysis in Chinese. If in English, write in English. Match the language of the user's data.
 
 ## Example Output Format
 When you find a privacy risk, you MUST:
@@ -141,7 +142,7 @@ export function extractInfonsSummary(infons) {
   }).join('\n')
 }
 
-// Extract law tree summary (for filling template)
+// Extract law tree summary (for filling template) - 优化版：只提取叶子节点
 export function extractLawTreeSummary(lawData) {
   if (!lawData) {
     return 'No legal structure available'
@@ -151,66 +152,36 @@ export function extractLawTreeSummary(lawData) {
   if (lawData.isCustom) {
     const customItems = lawData.customItems || []
     if (customItems.length === 0) {
-      return 'Custom Privacy Items:\n- (No items selected - cannot perform analysis)'
+      return 'No items selected'
     }
     
-    const lines = [
-      '=== CUSTOM PRIVACY ANALYSIS MODE ===',
-      '',
-      '⚠️ CRITICAL CONSTRAINT: The user has ONLY selected the following specific privacy items for analysis.',
-      'You MUST analyze ONLY these items. Do NOT analyze or report any privacy risks outside this list.',
-      '',
-      '✅ SELECTED PRIVACY ITEMS (analyze these):',
-      ''
-    ]
-    
-    customItems.forEach(item => {
-      // item 现在包含 { id, label, category }
-      const itemLabel = item.label || item.id || 'Unknown'
-      const itemCategory = item.category || 'General'
-      lines.push(`  ✓ "${itemLabel}" (Category: ${itemCategory}) [LEAF NODE - USE THIS]`)
-    })
-    
-    lines.push('')
-    lines.push('📋 STRICT MATCHING RULES:')
-    lines.push('1. The law_node_name field MUST be EXACTLY one of the selected item labels listed above.')
-    lines.push('2. Copy the exact label text (including capitalization and spacing).')
-    lines.push('3. If you infer a privacy exposure that does NOT match any selected item above, SKIP IT entirely.')
-    lines.push('4. Example: If you infer "Religious Belief" but it is NOT in the selected list above, do NOT report it.')
-    lines.push('5. Example: If "Health Data" IS selected and you infer health conditions from diet preferences, report it with law_node_name="Health Data".')
-    lines.push('')
-    lines.push('❌ DO NOT report risks for privacy categories not in the selected list above, even if you can infer them from the data.')
-    
-    return lines.join('\n')
+    // 极简模式：只列出选中的项
+    const itemNames = customItems.map(item => item.label || item.id).filter(Boolean)
+    return `CUSTOM MODE - Selected items: ${itemNames.join(', ')}`
   }
   
-  // 标准法律树模式
+  // 标准法律树模式：只提取叶子节点名称
   if (!lawData.name) {
     return 'No legal structure available'
   }
   
-  const lines = []
+  const leafNodes = []
   
-  function traverse(node, depth = 0, path = []) {
-    const indent = '  '.repeat(depth)
-    const currentPath = [...path, node.name]
+  // 递归收集所有叶子节点
+  function collectLeafNodes(node) {
     const isLeaf = !Array.isArray(node.children) || node.children.length === 0
     
-    // 标记叶子节点，并显示完整路径
     if (isLeaf) {
-      const fullPath = currentPath.join(' > ')
-      lines.push(`${indent}- ${node.name} [LEAF NODE - USE THIS] (Path: ${fullPath})`)
-    } else {
-      lines.push(`${indent}- ${node.name} [PARENT NODE - DO NOT USE]`)
-    }
-    
-    if (Array.isArray(node.children) && node.children.length > 0) {
-      node.children.forEach(child => traverse(child, depth + 1, currentPath))
+      leafNodes.push(node.name)
+    } else if (Array.isArray(node.children)) {
+      node.children.forEach(child => collectLeafNodes(child))
     }
   }
   
-  traverse(lawData)
-  return lines.join('\n')
+  collectLeafNodes(lawData)
+  
+  // 返回简洁的叶子节点列表
+  return `Privacy Categories (${leafNodes.length} items):\n${leafNodes.join(', ')}`
 }
 
 // Fill prompt template
@@ -251,6 +222,7 @@ CRITICAL RULES:
 - If you see "CUSTOM PRIVACY ANALYSIS MODE", ONLY analyze the selected items marked with ✓
 - Deep inference: infer health conditions, beliefs from behaviors (e.g., gluten-free → celiac disease)
 - Sort by risk_level: HIGH first
+- LANGUAGE CONSISTENCY: Write privacy_exposure and inference_chain in the SAME language as the input data (if input is in Chinese, respond in Chinese; if in English, respond in English)
 
 NOW OUTPUT THE JSON:`
   
