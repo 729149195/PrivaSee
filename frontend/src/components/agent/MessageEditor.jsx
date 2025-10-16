@@ -1,9 +1,10 @@
 import React from 'react'
-import { Button, Upload } from 'antd'
+import { Button, Upload, message } from 'antd'
 import { SendOutlined, CloseOutlined, CameraOutlined } from '@ant-design/icons'
 import styles from '../AgentPage.module.css'
 import HighlightInput from '../HighlightInput'
 import RelationTags from './RelationTags'
+import { compressImage, checkFileSize, getFileSizeText } from '../../utils/imageCompression'
 
 /**
  * 消息编辑器组件
@@ -78,10 +79,33 @@ const MessageEditor = ({
             multiple
             accept="image/*"
             showUploadList={false}
-            beforeUpload={(file) => {
-              const reader = new FileReader()
-              reader.onload = () => setEditingImages((prev) => [...prev, reader.result])
-              reader.readAsDataURL(file)
+            beforeUpload={async (file) => {
+              // 检查文件大小
+              if (!checkFileSize(file, 20)) {
+                message.error(`图片 "${file.name}" 过大 (${getFileSizeText(file)})，最大支持20MB`)
+                return Upload.LIST_IGNORE
+              }
+              
+              try {
+                // 显示加载提示
+                const hideLoading = message.loading(`压缩图片中... (${getFileSizeText(file)})`, 0)
+                
+                // 压缩图片
+                const compressed = await compressImage(file, {
+                  maxWidth: 1920,
+                  maxHeight: 1080,
+                  quality: 0.8,
+                  maxSizeMB: 2
+                })
+                
+                hideLoading()
+                setEditingImages((prev) => [...prev, compressed])
+                message.success('图片上传成功')
+              } catch (error) {
+                message.error(`图片处理失败: ${error.message}`)
+                console.error('[ImageUpload]', error)
+              }
+              
               return Upload.LIST_IGNORE
             }}
           >
