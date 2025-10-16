@@ -923,84 +923,93 @@ export const useStore = create((set, get) => ({
   },
 
   // 启动基于 pending 输入的信息元提取
-  startPendingInfons(text, imageDataUrls) {
+  startPendingInfons(text, imageDataUrls, audioData) {
     get()._ensureCurrentSession()
     const session = get().getCurrentSession()
     if (!session) return
     // 输入为空不启动
     const t = (text || '').trim()
     const imgs = Array.isArray(imageDataUrls) ? imageDataUrls.filter(Boolean) : []
-    if (!t && imgs.length === 0) return
+    const audios = Array.isArray(audioData) ? audioData.filter(Boolean) : []
+    if (!t && imgs.length === 0 && audios.length === 0) return
 
     // 计算哈希
     const textHash = t ? computeHashId(t) : null
     const imageHashes = imgs.map((u) => computeHashId(u))
+    const audioHashes = audios.map((a) => computeHashId(a.id + (a.transcript || '')))
 
-    // 文本：只有 hash 改变才重提；若改变则移除旧文本 pending 结果
-    if (t) {
-      if (textHash !== get().lastPendingTextHash) {
-        // 先中止旧的 pending 文本 run，再移除
-        try {
-          const currentRuns = (get().infonSessions?.[session.id]?.runs) || []
-          currentRuns.forEach((r) => {
-            if (r.targetType === 'pending' && r.modality === 'text' && r.status === 'running') {
-              try { r.controller?.abort?.() } catch (_) {}
-            }
-          })
-        } catch (_) {}
-        set((state) => {
-          const box = state.infonSessions?.[session.id] || { runs: [] }
-          const nextRuns = box.runs.filter(r => !(r.targetType === 'pending' && r.modality === 'text'))
-          return { infonSessions: { ...(state.infonSessions || {}), [session.id]: { runs: nextRuns } }, lastPendingTextHash: textHash }
-        })
-        get()._startTextInfonRun({ targetType: 'pending', targetKey: 'pending', text: t })
-      }
-    } else {
-      // 没有文本则中止并清理所有 pending 文本 run
-      try {
-        const currentRuns = (get().infonSessions?.[session.id]?.runs) || []
-        currentRuns.forEach((r) => {
-          if (r.targetType === 'pending' && r.modality === 'text' && r.status === 'running') {
-            try { r.controller?.abort?.() } catch (_) {}
-          }
-        })
-      } catch (_) {}
-      set((state) => {
-        const box = state.infonSessions?.[session.id]
-        if (!box) return {}
-        const nextRuns = box.runs.filter(r => !(r.targetType === 'pending' && r.modality === 'text'))
-        return { infonSessions: { ...state.infonSessions, [session.id]: { runs: nextRuns } }, lastPendingTextHash: null }
-      })
-    }
-
-    // 图片：新增只为新 hash 启动；移除消失的 hash 的 run
-    // 中止并移除不再存在的图片 pending runs
+    // 检查哪些需要更新
+    const textNeedsUpdate = t && textHash !== get().lastPendingTextHash
+    const textNeedsRemove = !t && get().lastPendingTextHash !== null
+    
+    // 一次性中止需要更新的 runs
     try {
-      const box = get().infonSessions?.[session.id] || { runs: [] }
-      const currentHashes = new Set(imageHashes)
-      box.runs.forEach((r) => {
-        if (r.targetType === 'pending' && r.modality === 'image' && !currentHashes.has(r._hash) && r.status === 'running') {
+      const currentRuns = (get().infonSessions?.[session.id]?.runs) || []
+      const imageHashSet = new Set(imageHashes)
+      const audioHashSet = new Set(audioHashes)
+      
+      currentRuns.forEach((r) => {
+        if (r.targetType !== 'pending' || r.status !== 'running') return
+        
+        // 中止需要更新的文本 run
+        if ((textNeedsUpdate || textNeedsRemove) && r.modality === 'text') {
+          try { r.controller?.abort?.() } catch (_) {}
+        }
+        // 中止不再存在的图片 run
+        else if (r.modality === 'image' && !imageHashSet.has(r._hash)) {
+          try { r.controller?.abort?.() } catch (_) {}
+        }
+        // 中止不再存在的音频 run
+        else if (r.modality === 'audio' && !audioHashSet.has(r._hash)) {
           try { r.controller?.abort?.() } catch (_) {}
         }
       })
     } catch (_) {}
+
+    // 一次性更新所有模态的 runs
     set((state) => {
       const box = state.infonSessions?.[session.id] || { runs: [] }
-      const currentHashes = new Set(imageHashes)
-      let nextRuns = box.runs.filter(r => !(r.targetType === 'pending' && r.modality === 'image' && !currentHashes.has(r._hash)))
-      // 再为新增的 hash 启动 run
-      const existing = new Set(nextRuns.filter(r => r.targetType === 'pending' && r.modality === 'image').map(r => r._hash))
-      const toStart = []
-      imageHashes.forEach((h, idx) => { if (!existing.has(h)) toStart.push(idx) })
-      // 写回 runs（暂不加入新 run，这里只清理；启动在 set 之后执行）
-      return { infonSessions: { ...(state.infonSessions || {}), [session.id]: { runs: nextRuns } }, lastPendingImageHashes: imageHashes }
+      let nextRuns = [...box.runs]
+      
+      // 移除需要更新的文本 run
+      if (textNeedsUpdate || textNeedsRemove) {
+        nextRuns = nextRuns.filter(r => !(r.targetType === 'pending' && r.modality === 'text'))
+      }
+      
+      // 移除不再存在的图片 run
+      const imageHashSet = new Set(imageHashes)
+      nextRuns = nextRuns.filter(r => !(r.targetType === 'pending' && r.modality === 'image' && !imageHashSet.has(r._hash)))
+      
+      // 移除不再存在的音频 run
+      const audioHashSet = new Set(audioHashes)
+      nextRuns = nextRuns.filter(r => !(r.targetType === 'pending' && r.modality === 'audio' && !audioHashSet.has(r._hash)))
+      
+      return {
+        infonSessions: { ...(state.infonSessions || {}), [session.id]: { runs: nextRuns } },
+        lastPendingTextHash: t ? textHash : null,
+        lastPendingImageHashes: imageHashes,
+        lastPendingAudioHashes: audioHashes
+      }
     })
 
+    // 启动新的文本提取
+    if (textNeedsUpdate) {
+      get()._startTextInfonRun({ targetType: 'pending', targetKey: 'pending', text: t })
+    }
+
     // 启动新增图片的 run
-    const existingHashes = new Set(((get().infonSessions?.[session.id]?.runs) || []).filter(r => r.targetType === 'pending' && r.modality === 'image').map(r => r._hash))
+    const existingImageHashes = new Set(((get().infonSessions?.[session.id]?.runs) || []).filter(r => r.targetType === 'pending' && r.modality === 'image').map(r => r._hash))
     imageHashes.forEach((h, idx) => {
-      if (!existingHashes.has(h)) {
+      if (!existingImageHashes.has(h)) {
         get()._startImageInfonRun({ targetType: 'pending', targetKey: 'pending', dataUrl: imgs[idx], imageIndex: idx, _hash: h })
+      }
+    })
+
+    // 启动新增音频的 run
+    const existingAudioHashes = new Set(((get().infonSessions?.[session.id]?.runs) || []).filter(r => r.targetType === 'pending' && r.modality === 'audio').map(r => r._hash))
+    audioHashes.forEach((h, idx) => {
+      if (!existingAudioHashes.has(h)) {
+        get()._startAudioInfonRun({ targetType: 'pending', targetKey: 'pending', audio: audios[idx], audioIndex: idx, _hash: h })
       }
     })
   },
@@ -1013,6 +1022,7 @@ export const useStore = create((set, get) => ({
     if (!m) return
     const t = (m.content || '').trim()
     const imgs = Array.isArray(m.images) ? m.images.filter(Boolean) : []
+    const audios = Array.isArray(m.audios) ? m.audios.filter(Boolean) : []
     // 先中止旧的该 message 的运行，再清理
     try {
       const runs = (get().infonSessions?.[session.id]?.runs) || []
@@ -1030,6 +1040,10 @@ export const useStore = create((set, get) => ({
     })
     if (t) get()._startTextInfonRun({ targetType: 'message', targetKey: messageId, text: t })
     if (imgs.length) imgs.forEach((dataUrl, idx) => get()._startImageInfonRun({ targetType: 'message', targetKey: messageId, dataUrl, imageIndex: idx }))
+    if (audios.length) audios.forEach((audio, idx) => {
+      const audioHash = computeHashId(audio.id + (audio.transcript || ''))
+      get()._startAudioInfonRun({ targetType: 'message', targetKey: messageId, audio, audioIndex: idx, _hash: audioHash })
+    })
   },
 
   // 内部：文本信息元提取（/v1/chat/completions）
@@ -1370,6 +1384,210 @@ export const useStore = create((set, get) => ({
             const normalized = normalizeInfonOutput(value, {
               recordTimeISO: nowISO,
               defaultModality: 'image',
+              sessionId: session.id,
+              messageRound,
+              infonIndex,
+              infonType: 'desc'
+            })
+            
+            // 应用增量更新逻辑：去重和冲突解决（中文注释）
+            const deduplicated = deduplicateAndMergeInfons(normalized.infons || [], existingInfons)
+            const finalResult = { ...normalized, infons: deduplicated }
+            
+            get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'done', progress: 100, resultJson: finalResult }))
+          } else {
+            get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
+          }
+        }
+      })
+    } catch (err) {
+      const aborted = err && err.name === 'AbortError'
+      get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: aborted ? 'aborted' : 'error', error: aborted ? undefined : 'Network error' }))
+    }
+  },
+
+  // 内部：音频信息元提取（基于转录文本）
+  async _startAudioInfonRun({ targetType, targetKey, audio, audioIndex, _hash }) {
+    const session = get().getCurrentSession()
+    if (!session) return
+
+    const transcript = (audio.transcript || '').trim()
+    if (!transcript) {
+      // 如果没有转录文本，标记为error
+      const runId = generateId()
+      const run = {
+        id: runId,
+        targetType,
+        targetKey,
+        modality: 'audio',
+        audioIndex,
+        _hash,
+        status: 'error',
+        error: 'No transcript available',
+        progress: 0,
+        buffer: '',
+        resultJson: null,
+        createdAt: Date.now(),
+        controller: null,
+      }
+      get()._appendInfonRun(session.id, run)
+      return
+    }
+
+    // 计算当前对话轮次（中文注释）：基于消息数量
+    const messageCount = (session.messages || []).length
+    const currentRound = Math.floor(messageCount / 2) + 1
+    
+    // 获取已有的所有信息元（中文注释）：用于模型参考，避免重复和建立跨轮关系
+    const currentRuns = get().getCurrentInfonRuns()
+    const completedRuns = currentRuns.filter(r => r.status === 'done')
+    const existingInfons = []
+    completedRuns.forEach(r => {
+      if (r.resultJson?.infons) {
+        existingInfons.push(...r.resultJson.infons)
+      }
+    })
+
+    const runId = generateId()
+    const run = {
+      id: runId,
+      targetType,
+      targetKey,
+      modality: 'audio',
+      audioIndex,
+      _hash,
+      status: 'running',
+      progress: 0,
+      buffer: '',
+      resultJson: null,
+      createdAt: Date.now(),
+      controller: null,
+    }
+    get()._appendInfonRun(session.id, run)
+
+    // 使用用户配置的信息元提取模型（中文注释）：优先使用配置，回退到 DeepSeek
+    const configuredModel = get().infonExtractionModel || 'deepseek-chat'
+    let provider = get().customProviders?.[configuredModel]
+    
+    // 如果配置的模型是 deepseek-chat 但尚未添加，则自动添加默认配置
+    if (configuredModel === 'deepseek-chat' && !provider) {
+      try {
+        get().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
+      } catch (_) { }
+      provider = get().customProviders?.[configuredModel]
+    }
+    
+    // 如果有provider（自定义API模型），使用provider配置；否则使用本地baseUrl（Ollama）
+    const baseUrl = provider ? provider.baseUrl : get().baseUrl
+    const headers = { 'Content-Type': 'application/json' }
+    if (provider?.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`
+
+    const nowISO = new Date().toISOString()
+    const systemPrompt = buildInfonSystemPrompt(['audio'], nowISO, { currentRound, existingInfons })
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `Extract Situation Theory infons as a strict single JSON object. Input audio transcript:\n\n${transcript}` },
+    ]
+
+    const controller = new AbortController()
+    get()._updateInfonRun(session.id, runId, (r) => ({ ...r, controller }))
+
+    try {
+      const res = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true }),
+        signal: controller.signal,
+      })
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '')
+        get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'error', error: errText || 'Request failed' }))
+        return
+      }
+      const reader = res.body?.getReader()
+      if (!reader) {
+        get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'error', error: 'No stream' }))
+        return
+      }
+
+      await streamOpenAIResponse(reader, async ({ content, finish }) => {
+        if (typeof content === 'string' && content.length) {
+          // 流式增量解析（中文注释）：逐步提取infons
+          const currentRun = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)
+          const buffer = (currentRun?.buffer || '') + content
+          
+          // 更新buffer
+          get()._updateInfonRun(session.id, runId, (r) => ({ ...r, buffer }))
+          
+          // 使用增量解析器逐个提取infons
+          const parserState = get().infonParsers?.[runId] || null
+          const { state: newState, yielded } = incrementalExtractInfons(buffer, parserState)
+          
+          // 更新解析器状态
+          set(state => ({
+            infonParsers: {
+              ...state.infonParsers,
+              [runId]: newState
+            }
+          }))
+          
+          // 如果有新的infons被解析出来，立即添加到结果中（流式显示）
+          if (yielded && yielded.length > 0) {
+            get()._updateInfonRun(session.id, runId, (r) => {
+              const currentInfons = r.resultJson?.infons || []
+              
+              // 智能合并：根据_objIndex更新现有对象或添加新对象
+              const updatedInfons = [...currentInfons]
+              
+              yielded.forEach(newInfon => {
+                const objIndex = newInfon._objIndex
+                
+                if (objIndex !== undefined) {
+                  const existingIndex = updatedInfons.findIndex(inf => inf._objIndex === objIndex)
+                  
+                  if (existingIndex >= 0) {
+                    // 更新现有对象
+                    updatedInfons[existingIndex] = {
+                      ...updatedInfons[existingIndex],
+                      ...newInfon
+                    }
+                  } else {
+                    // 添加新对象
+                    updatedInfons.push(newInfon)
+                  }
+                } else {
+                  // 没有objIndex，直接添加
+                  updatedInfons.push(newInfon)
+                }
+              })
+              
+              return {
+                ...r,
+                status: 'running',
+                resultJson: {
+                  ...r.resultJson,
+                  infons: updatedInfons
+                }
+              }
+            })
+          }
+        }
+        if (finish) {
+          const raw = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)?.buffer || ''
+          const sliced = extractFirstJSONObject(raw) || raw
+          const { ok, value } = tryParseJSON(sliced)
+          if (ok) {
+            // 计算当前对话轮次和信息元次序
+            const sessionObj = get().getCurrentSession()
+            const messageCount = (sessionObj?.messages || []).length
+            const messageRound = Math.floor(messageCount / 2) + 1 // 每轮对话包含用户和助手消息
+            const currentRuns = get().getCurrentInfonRuns()
+            const completedRuns = currentRuns.filter(r => r.status === 'done')
+            const infonIndex = completedRuns.reduce((sum, r) => sum + (r.resultJson?.infons?.length || 0), 0)
+
+            const normalized = normalizeInfonOutput(value, {
+              recordTimeISO: nowISO,
+              defaultModality: 'audio',
               sessionId: session.id,
               messageRound,
               infonIndex,

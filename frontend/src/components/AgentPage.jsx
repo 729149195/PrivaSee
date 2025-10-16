@@ -706,14 +706,6 @@ export default function AgentPage() {
   }
 
 
-  // 输入变化时，立刻中止 pending 的提取（但不清除结果，等新的提取覆盖）
-  useEffect(() => {
-    try { 
-      abortPendingInfons?.(false)
-    } catch (_) {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, landingInput, editingContent, selectedAudios])
-
   // 1.5秒 防抖：在用户停止输入后启动 pending 提取（中文注释）
   // 支持主输入框和编辑框两种模式
   useEffect(() => {
@@ -722,15 +714,9 @@ export default function AgentPage() {
     
     // 编辑模式下：只响应编辑内容的变化，忽略主输入框
     if (isEditing) {
-      let textToUse = (editingContent || '').trim()
+      const textToUse = (editingContent || '').trim()
       const imgs = [...editingImages]
       const audios = [...(editingAudios || [])]
-      
-      // 将音频转录文本添加到编辑文本中
-      if (audios.length > 0) {
-        const audioTranscripts = audios.map(a => a.transcript).filter(Boolean).join(' ')
-        textToUse = textToUse ? `${textToUse} ${audioTranscripts}` : audioTranscripts
-      }
       
       if (pendingTimerRef.current) {
         clearTimeout(pendingTimerRef.current)
@@ -767,11 +753,10 @@ export default function AgentPage() {
       // 标记正在等待防抖
       setIsWaitingForDebounce(true)
       
-      // 启动新的提取
+      // 启动新的提取（不清空，让 startPendingInfons 自己处理）
       pendingTimerRef.current = setTimeout(() => {
         try { 
-          clearAllPendingInfons?.()
-          startPendingInfons?.(textToUse, imgs)
+          startPendingInfons?.(textToUse, imgs, audios)
           setIsWaitingForDebounce(false)
         } catch (_) {}
         pendingTimerRef.current = null
@@ -786,15 +771,9 @@ export default function AgentPage() {
     }
     
     // 非编辑模式：处理主输入框和landing输入框
-    let textToUse = (hasMessages ? (input || '').trim() : (landingInput || '').trim())
+    const textToUse = (hasMessages ? (input || '').trim() : (landingInput || '').trim())
     const imgs = [...selectedImages]
     const audios = [...selectedAudios]
-    
-    // 将音频转录文本添加到待提取文本中
-    if (audios.length > 0) {
-      const audioTranscripts = audios.map(a => a.transcript).filter(Boolean).join(' ')
-      textToUse = textToUse ? `${textToUse} ${audioTranscripts}` : audioTranscripts
-    }
     
     if (pendingTimerRef.current) {
       clearTimeout(pendingTimerRef.current)
@@ -814,11 +793,10 @@ export default function AgentPage() {
     // 标记正在等待防抖
     setIsWaitingForDebounce(true)
     
-    // 启动新的提取前，清除旧的 pending 结果
+    // 启动新的提取（不清空，让 startPendingInfons 自己处理）
     pendingTimerRef.current = setTimeout(() => {
       try { 
-        clearAllPendingInfons?.() // 先清空旧结果
-        startPendingInfons?.(textToUse, imgs) // 再启动新提取
+        startPendingInfons?.(textToUse, imgs, audios) // 启动新提取
         setIsWaitingForDebounce(false) // 防抖结束
       } catch (_) {}
       pendingTimerRef.current = null

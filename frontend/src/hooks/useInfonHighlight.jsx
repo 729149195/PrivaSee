@@ -11,15 +11,17 @@ import { getInfonColor, getMatchKeywords, buildInfonIndex, getRelatedInfons } fr
 export function useInfonHighlight(currentSession, infonSessions) {
   /**
    * 获取消息的所有信息元（排除即将过期的）
+   * 包含文本和音频模态的信息元，因为音频转录也需要在文本中高亮
    */
   const getMessageInfons = (messageId) => {
     if (!currentSession?.id) return []
     const runs = (infonSessions?.[currentSession.id]?.runs) || []
     // 排除即将过期的信息元
+    // 包含text和audio模态，因为音频转录文本也需要高亮
     const messageRuns = runs.filter(r => 
       r.targetType === 'message' && 
       r.targetKey === messageId && 
-      r.modality === 'text' && 
+      (r.modality === 'text' || r.modality === 'audio') && 
       !r.expiring
     )
     const allInfons = messageRuns.flatMap(r => {
@@ -39,11 +41,13 @@ export function useInfonHighlight(currentSession, infonSessions) {
 
   /**
    * 获取 pending 状态的所有信息元
+   * 包含文本和音频模态的信息元
    */
   const getPendingInfons = useMemo(() => {
     if (!currentSession?.id) return []
     const runs = (infonSessions?.[currentSession.id]?.runs) || []
-    const pendingRuns = runs.filter(r => r.targetType === 'pending' && r.modality === 'text')
+    // 包含text和audio模态
+    const pendingRuns = runs.filter(r => r.targetType === 'pending' && (r.modality === 'text' || r.modality === 'audio'))
     const allInfons = pendingRuns.flatMap(r => {
       const infons = Array.isArray(r?.resultJson?.infons) ? r.resultJson.infons : []
       return infons.map(infon => ({ infon, run: r }))

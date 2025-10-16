@@ -7,7 +7,14 @@ import styles from '../AgentPage.module.css'
  * @param {object} run - 信息元提取任务对象
  */
 const InfonRunCard = ({ run }) => {
-  const title = run.modality === 'text' ? 'Text' : `Image${Number.isFinite(run.imageIndex) ? ` #${run.imageIndex + 1}` : ''}`
+  let title = 'Text'
+  if (run.modality === 'text') {
+    title = 'Text'
+  } else if (run.modality === 'image') {
+    title = `Image${Number.isFinite(run.imageIndex) ? ` #${run.imageIndex + 1}` : ''}`
+  } else if (run.modality === 'audio') {
+    title = `Audio${Number.isFinite(run.audioIndex) ? ` #${run.audioIndex + 1}` : ''}`
+  }
   const status = run.status
   const allInfons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
   const isExpiring = run.expiring === true // 检查是否即将过期
