@@ -28,6 +28,7 @@ import MessageEditor from './MessageEditor'
  * @param {Array} pendingHighlights - 待处理的高亮
  * @param {Array} pendingRelations - 待处理的关系
  * @param {object} pendingInfonIndex - 待处理的信息元索引
+ * @param {boolean} currentModelIsMultimodal - 当前模型是否支持多模态
  */
 const MessageBubble = ({
   message,
@@ -51,7 +52,8 @@ const MessageBubble = ({
   pendingHighlights,
   pendingRelations,
   pendingInfonIndex,
-  sendLockState
+  sendLockState,
+  currentModelIsMultimodal
 }) => {
   const isEditing = editingMessageId === message.id
 
@@ -73,6 +75,7 @@ const MessageBubble = ({
               pendingRelations={pendingRelations}
               pendingInfonIndex={pendingInfonIndex}
               sendLockState={sendLockState}
+              currentModelIsMultimodal={currentModelIsMultimodal}
             />
           ) : (
             <>

@@ -1,6 +1,6 @@
 import React from 'react'
-import { Button } from 'antd'
-import { SendOutlined, CloseOutlined } from '@ant-design/icons'
+import { Button, Upload } from 'antd'
+import { SendOutlined, CloseOutlined, CameraOutlined } from '@ant-design/icons'
 import styles from '../AgentPage.module.css'
 import HighlightInput from '../HighlightInput'
 import RelationTags from './RelationTags'
@@ -19,6 +19,7 @@ import RelationTags from './RelationTags'
  * @param {object} sendLockState - 发送锁定状态
  * @param {string} originalContent - 原始内容
  * @param {Array} originalImages - 原始图片
+ * @param {boolean} currentModelIsMultimodal - 当前模型是否支持多模态
  */
 const MessageEditor = ({
   editingContent,
@@ -32,7 +33,8 @@ const MessageEditor = ({
   pendingInfonIndex,
   sendLockState,
   originalContent,
-  originalImages
+  originalImages,
+  currentModelIsMultimodal
 }) => {
   // 检查内容是否发生变化
   const hasContentChanged = 
@@ -60,7 +62,7 @@ const MessageEditor = ({
           ))}
         </div>
       )}
-      {/* 输入框 */}
+      {/* 输入框和按钮 */}
       <div className={styles.composerRow}>
         <HighlightInput
           className={styles.composerInput}
@@ -70,6 +72,41 @@ const MessageEditor = ({
           highlights={pendingHighlights}
           autoSize={{ minRows: 2, maxRows: 10 }}
         />
+        <div className={styles.composerButtons}>
+          <Upload
+            disabled={!currentModelIsMultimodal}
+            multiple
+            accept="image/*"
+            showUploadList={false}
+            beforeUpload={(file) => {
+              const reader = new FileReader()
+              reader.onload = () => setEditingImages((prev) => [...prev, reader.result])
+              reader.readAsDataURL(file)
+              return Upload.LIST_IGNORE
+            }}
+          >
+            <Button 
+              icon={<CameraOutlined />} 
+              disabled={!currentModelIsMultimodal} 
+              title={currentModelIsMultimodal ? '上传图片' : '当前模型不支持图片'} 
+            />
+          </Upload>
+          <Button 
+            icon={<CloseOutlined />} 
+            onClick={onCancel}
+            title="取消编辑"
+          />
+          <Button 
+            type={sendLockState.locked ? "default" : "primary"}
+            icon={sendLockState.stage === 'ready' && !sendLockState.locked ? <SendOutlined /> : null}
+            onClick={onSave}
+            disabled={isSaveDisabled}
+            loading={sendLockState.locked}
+            className={sendLockState.locked ? styles.sendButtonLocked : ''}
+          >
+            {sendLockState.locked ? sendLockState.label : ''}
+          </Button>
+        </div>
       </div>
       {/* Pending关系标签显示 */}
       {pendingRelations.length > 0 && (
@@ -79,23 +116,6 @@ const MessageEditor = ({
           style={{ marginTop: 8 }} 
         />
       )}
-      {/* 操作按钮 */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
-        <Button 
-          icon={<CloseOutlined />} 
-          onClick={onCancel}
-        />
-        <Button 
-          type={sendLockState.locked ? "default" : "primary"}
-          icon={sendLockState.stage === 'ready' && !sendLockState.locked ? <SendOutlined /> : null}
-          onClick={onSave}
-          disabled={isSaveDisabled}
-          loading={sendLockState.locked}
-          className={sendLockState.locked ? styles.sendButtonLocked : ''}
-        >
-          {sendLockState.locked ? sendLockState.label : ''}
-        </Button>
-      </div>
     </div>
   )
 }

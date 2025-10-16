@@ -901,6 +901,7 @@ export default function AgentPage() {
                           pendingRelations={pendingRelations}
                           pendingInfonIndex={pendingInfonIndex}
                           sendLockState={sendLockState}
+                          currentModelIsMultimodal={currentModelIsMultimodal}
                         />
                       )
                     })}
