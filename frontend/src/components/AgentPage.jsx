@@ -1,116 +1,36 @@
-import React, { useEffect, useRef, useState, useMemo, useLayoutEffect } from 'react'
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { useStore } from '../store'
 import styles from './AgentPage.module.css'
-import MarkdownMessage from './MarkdownMessage'
-import { Splitter, Select, Button, Upload, Progress, Spin, Input, Modal, Popconfirm, message as antdMessage, Tooltip } from 'antd'
-import { SendOutlined, StopOutlined, CameraOutlined, PlusOutlined, EditOutlined, DeleteOutlined, CopyOutlined, RedoOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons'
+import { Splitter, Progress, Spin } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
 import WordCloud from './WordCloud'
 import LawTree from './LawTree'
 import Timeline from './Timeline'
-import HighlightInput from './HighlightInput'
 import PrivacyRiskAnalysis from './PrivacyRiskAnalysis'
 import UserAuth from '../users/UserAuth'
 import { useUserStore } from '../users/userStore'
 import PrivacyModeIndicator from '../users/PrivacyModeIndicator'
 
-// 连线组件（中文注释）：根据关系信息元画连线连接标签和高亮文本
-const RelationConnections = ({ messageId, relations, infonIndex }) => {
-  const [connections, setConnections] = useState([])
-  const containerRef = useRef(null)
+// 导入提取的工具函数
+import { estimateTokens } from '../utils/tokenEstimation'
+import { isModelMultimodal as checkModelMultimodal } from '../utils/modelUtils'
+import { buildInfonIndex } from '../utils/infonUtils'
 
-  useLayoutEffect(() => {
-    if (!containerRef.current || !relations.length) return
+// 导入提取的组件
+import InfonLegend from './agent/InfonLegend'
+import ImagePreviewModal from './agent/ImagePreviewModal'
+import InfonRunCard from './agent/InfonRunCard'
+import ChatSessionItem from './agent/ChatSessionItem'
+import ModelPickerToolbar from './agent/ModelPickerToolbar'
+import MessageBubble from './agent/MessageBubble'
+import LandingView from './agent/LandingView'
+import MessageComposer from './agent/MessageComposer'
 
-    const container = containerRef.current.parentElement
-    if (!container) return
-
-    const newConnections = []
-    const containerRect = container.getBoundingClientRect()
-
-    relations.forEach(({ infon }, relIdx) => {
-      const relatedInfons = infon.arg_refs || []
-      
-      // 找到关系标签的位置（中文注释）
-      const tagSelector = `.${styles.relationTag}`
-      const allTags = container.querySelectorAll(tagSelector)
-      const tagEl = allTags[relIdx]
-      if (!tagEl) return
-
-      const tagRect = tagEl.getBoundingClientRect()
-      const tagX = tagRect.left - containerRect.left + tagRect.width / 2
-      const tagY = tagRect.bottom - containerRect.top
-
-      relatedInfons.forEach((argRef) => {
-        // 查找对应的高亮元素（中文注释）
-        const highlightEl = container.querySelector(`[data-infon-id="${argRef}"][data-relation-id="${infon.iid}"]`)
-        if (!highlightEl) return
-
-        const highlightRect = highlightEl.getBoundingClientRect()
-        const highlightX = highlightRect.left - containerRect.left + highlightRect.width / 2
-        const highlightY = highlightRect.top - containerRect.top
-
-        // 计算贝塞尔曲线控制点（中文注释）
-        const dx = highlightX - tagX
-        const dy = highlightY - tagY
-        const controlY = tagY + dy * 0.5
-
-        newConnections.push({
-          relationId: infon.iid,
-          argRef: argRef,
-          startX: tagX,
-          startY: tagY,
-          endX: highlightX,
-          endY: highlightY,
-          controlY: controlY,
-        })
-      })
-    })
-
-    setConnections(newConnections)
-  }, [relations, infonIndex, messageId])
-
-  if (!connections.length) return null
-
-  return (
-    <svg 
-      ref={containerRef}
-      className={styles.relationConnections} 
-      style={{ 
-        position: 'absolute', 
-        top: 0, 
-        left: 0, 
-        width: '100%', 
-        height: '100%', 
-        pointerEvents: 'none',
-        zIndex: 1,
-        overflow: 'visible'
-      }}
-    >
-      {connections.map((conn, i) => {
-        const path = `M ${conn.startX} ${conn.startY} Q ${conn.startX} ${conn.controlY}, ${conn.endX} ${conn.endY}`
-        return (
-          <g key={i}>
-            <path 
-              d={path}
-              fill="none"
-              stroke="rgba(91, 141, 239, 0.3)"
-              strokeWidth="1.5"
-              strokeDasharray="3,3"
-            />
-            <circle 
-              cx={conn.endX} 
-              cy={conn.endY} 
-              r={3}
-              fill="rgba(91, 141, 239, 0.4)"
-              stroke="rgba(91, 141, 239, 0.6)"
-              strokeWidth="1"
-            />
-          </g>
-        )
-      })}
-    </svg>
-  )
-}
+// 导入提取的 Hook
+import { useImageSelection } from '../hooks/useImageSelection'
+import { useInfonHighlight } from '../hooks/useInfonHighlight.jsx'
+import { useSessionDragDrop } from '../hooks/useSessionDragDrop'
+import { useMessageHandlers } from '../hooks/useMessageHandlers'
 
 
 export default function AgentPage() {
@@ -130,31 +50,84 @@ export default function AgentPage() {
     getCurrentSession,
     sendMessage,
     stopGenerating,
-    regenerateLast,
     _ensureCurrentSession,
     fetchModels,
     setModel,
-    // 信息元提取（中文注释）
+    // 信息元提取
     startPendingInfons,
     abortPendingInfons,
     startMessageInfons,
     clearAllPendingInfons,
     infonSessions,
-    // 隐私推理（中文注释）
+    // 隐私推理
     privacyInferences,
     startPrivacyInference,
     abortPrivacyInference,
     selectedLaw,
   } = useStore()
 
-  // 用户状态（中文注释）：从用户 store 获取
+  // 用户状态：从用户 store 获取
   const { currentUser, isLoggedIn } = useUserStore()
   const { setCurrentUser, clearCurrentUser } = useStore()
 
-  // 当前会话对象（中文注释）：需在引用它的 useMemo 之前定义
+  // 当前会话对象
   const currentSession = getCurrentSession()
+  
+  // 使用提取的 Hook
+  const {
+    selectedImages,
+    setSelectedImages,
+    previewImage,
+    setPreviewImage,
+    handlePickImages,
+    removeSelectedImage,
+  } = useImageSelection()
 
-  // 同步用户登录状态到主 store（中文注释）：用于控制历史数据持久化
+  const {
+    getMessageInfons,
+    getMessageRelations,
+    getPendingInfons,
+    pendingHighlights,
+    pendingRelations,
+    pendingInfonIndex,
+    renderHighlightedText
+  } = useInfonHighlight(currentSession, infonSessions)
+
+  const {
+    draggingSessionId,
+    reorderedSessions,
+    handleDragStartSession,
+    handleDragOverSession,
+    handleDropSession,
+    handleDragEndSession,
+    setSessionRef
+  } = useSessionDragDrop()
+  
+  const lastInferenceRunCountRef = useRef('')
+
+  const {
+    editingMessageId,
+    editingContent,
+    setEditingContent,
+    editingImages,
+    setEditingImages,
+    isAdoptingPendingRef,
+    handleCopyMessage,
+    handleEditMessage,
+    handleCancelEdit,
+    handleSaveEdit,
+    handleRetry
+  } = useMessageHandlers(
+    getCurrentSession,
+    infonSessions,
+    privacyInferences,
+    sendMessage,
+    startMessageInfons,
+    clearAllPendingInfons,
+    lastInferenceRunCountRef
+  )
+
+  // 同步用户登录状态到主 store：用于控制历史数据持久化
   useEffect(() => {
     if (isLoggedIn && currentUser?.id) {
       setCurrentUser(currentUser.id)
@@ -163,109 +136,42 @@ export default function AgentPage() {
     }
   }, [isLoggedIn, currentUser, setCurrentUser, clearCurrentUser])
 
-  // 多模态能力检测（中文注释）：基于模型 ID 关键词 + 自定义提供商回退
-  const isModelMultimodal = React.useCallback((id) => {
-    try {
-      if (!id) return false
-      // 先基于模型 ID 关键词判断（中文注释）：优先识别已知多模态家族
-      const s = String(id).toLowerCase()
-      if (/(vision|vl|multi.?modal|llava|idefics|qwen[-_]?vl|gpt-?4o|xcomposer|internvl|minicpm-?v|pixtral|gemma[-_]?3)/.test(s)) return true
-      // 自定义提供商（OpenAI 兼容 API）通常不支持图片；若上面未命中则认为是文本（中文注释）
-      if (customProviders?.[id]) return false
-      return false
-    } catch (_) {
-      return false
-    }
-  }, [customProviders])
+  // 多模态能力检测（使用提取的工具函数）
+  const isModelMultimodal = useCallback((id) => checkModelMultimodal(id, customProviders), [customProviders])
 
-  // 当前模型是否多模态（中文注释）
+  // 当前模型是否多模态
   const currentModelIsMultimodal = useMemo(() => isModelMultimodal(model), [model, isModelMultimodal])
 
-  // 上下文是否已含图片（中文注释）
+  // 上下文是否已含图片
   const contextHasImages = useMemo(() => {
     const msgs = currentSession?.messages || []
     return msgs.some((m) => Array.isArray(m?.images) && m.images.length > 0)
   }, [currentSession?.messages])
 
-  // 初始化当前会话（中文注释）：确保存在 currentSessionId
+  // 初始化当前会话：确保存在 currentSessionId
   useEffect(() => { _ensureCurrentSession() }, [_ensureCurrentSession])
 
   const [input, setInput] = useState('')
   const [landingInput, setLandingInput] = useState('')
-  // 图片选择状态（中文注释）：保存 data URL 用于预览与发送
-  const [selectedImages, setSelectedImages] = useState([])
-  const mainScrollRef = useRef(null) // 主滚动区域（中文注释）
-  const leftPaneScrollRef = useRef(null) // 左侧面板滚动区域（中文注释）
+  const mainScrollRef = useRef(null) // 主滚动区域
+  const leftPaneScrollRef = useRef(null) // 左侧面板滚动区域
   const [maxContextTokens, setMaxContextTokens] = useState(null)
-  // 属性级展示不再需要画像索引（中文注释）
-  const [apiModalOpen, setApiModalOpen] = useState(false)
-  const [apiModelId, setApiModelId] = useState('')
-  const [apiBaseUrl, setApiBaseUrl] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  // 1.5秒 防抖计时器（中文注释）
+  // 1.5秒 防抖计时器
   const pendingTimerRef = useRef(null)
-  // 追踪是否正在等待防抖（中文注释）：用于锁定发送按钮
+  // 追踪是否正在等待防抖：用于锁定发送按钮
   const [isWaitingForDebounce, setIsWaitingForDebounce] = useState(false)
-  // 标记是否正在发送消息（正在采纳pending信息元）
-  const isAdoptingPendingRef = useRef(false)
-  // 记录上次推断时的 message run IDs（中文注释）：用于检测新的信息元提取完成
-  const lastInferenceRunCountRef = useRef('')
-  // 图片预览 Modal（中文注释）
-  const [previewImage, setPreviewImage] = useState(null)
-  // 时间线选中的时间（中文注释）：用于筛选 WordCloud 中的信息元
+  // 时间线选中的时间：用于筛选 WordCloud 中的信息元
   const [selectedTime, setSelectedTime] = useState(null)
   
-  // 消息编辑状态（中文注释）
-  const [editingMessageId, setEditingMessageId] = useState(null)
-  const [editingContent, setEditingContent] = useState('')
-  const [editingImages, setEditingImages] = useState([])
-  const [savedMessageInfons, setSavedMessageInfons] = useState(null) // 保存被编辑消息的信息元
-  
-  // Pending 信息元提取的状态（用于编辑时的实时提取）
-  const [editingPendingInfonIndex, setEditingPendingInfonIndex] = useState({})
-  // 左侧栏编辑状态（中文注释）：用于追踪正在编辑的 session 和编辑的标题
+  // 左侧栏编辑状态：用于追踪正在编辑的 session 和编辑的标题
   const [editingSessionId, setEditingSessionId] = useState(null)
   const [editingTitle, setEditingTitle] = useState('')
-  // 左侧会话拖拽排序（中文注释）
-  const [draggingSessionId, setDraggingSessionId] = useState(null)
-  const [reorderedSessions, setReorderedSessions] = useState(null)
-  const chatItemRefs = useRef({}) // { [sessionId]: HTMLElement }
-  const lastReorderRef = useRef({ fromId: null, index: -1 })
-  const measureRects = () => {
-    const result = {}
-    try {
-      const entries = Object.entries(chatItemRefs.current || {})
-      for (const [id, el] of entries) {
-        if (el && el.getBoundingClientRect) result[id] = el.getBoundingClientRect()
-      }
-    } catch (_) {}
-    return result
-  }
-  const animateFLIP = (prevRects, nextRects) => {
-    try {
-      const ids = Object.keys(nextRects || {})
-      for (const id of ids) {
-        const el = chatItemRefs.current[id]
-        const prev = prevRects?.[id]
-        const next = nextRects?.[id]
-        if (!el || !prev || !next) continue
-        const dy = prev.top - next.top
-        if (!dy) continue
-        el.style.transition = 'transform 0s'
-        el.style.transform = `translateY(${dy}px)`
-        requestAnimationFrame(() => {
-          el.style.transition = 'transform 150ms ease'
-          el.style.transform = ''
-        })
-      }
-    } catch (_) {}
-  }
   
-  // 记录上次推理时使用的法律key（中文注释）：用于检测法律切换
+  // 记录上次推理时使用的法律key：用于检测法律切换
   const lastInferenceLawKeyRef = useRef(null)
-  // 记录上次推理完成的时间戳（中文注释）：用于防止频繁触发
+  // 记录上次推理完成的时间戳：用于防止频繁触发
   const lastInferenceCompleteTimeRef = useRef(0)
-  // 记录上次推理时的活跃信息元签名（中文注释）：用于检测“数量未变但内容替换”的情况
+  // 记录上次推理时的活跃信息元签名：用于检测"数量未变但内容替换"的情况
   const lastInferenceInfonSignatureRef = useRef('')
   
   // 会话切换时重置时间选择和推理记录（中文注释）
@@ -443,63 +349,12 @@ export default function AgentPage() {
   // 获取当前会话的隐私推理结果（中文注释）
   const inference = useMemo(() => (currentSession ? privacyInferences?.[currentSession.id] : null), [currentSession, privacyInferences])
 
-  // 默认注册 DeepSeek 示例（中文注释）：仅添加一次，已存在则跳过
+  // 默认注册 DeepSeek 示例：仅添加一次，已存在则跳过
   useEffect(() => {
     try {
       useStore.getState().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
     } catch (_) { }
   }, [])
-
-  // 估算文本 token（中文注释）：CJK≈1/字，拉丁≈1/4 字符，Emoji≈2/个
-  const estimateTextTokens = (text) => {
-    try {
-      const s = String(text || '')
-      if (!s) return 0
-      const cjkRegex = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu
-      const emojiRegex = /\p{Extended_Pictographic}/gu
-      const cjkCount = (s.match(cjkRegex) || []).length
-      const emojiCount = (s.match(emojiRegex) || []).length
-      const rest = s.replace(cjkRegex, '').replace(emojiRegex, '')
-      const latinCount = rest.length
-      const tokens = cjkCount + Math.ceil(latinCount / 4) + emojiCount * 2
-      return Math.max(0, tokens)
-    } catch (_) {
-      // 回退：按拉丁字符近似
-      return Math.ceil(String(text || '').length / 4)
-    }
-  }
-
-  // 根据模型估算单张图片 token（中文注释）：按常见多模态模型族粗略估算
-  const getImageTokenEstimate = (modelId) => {
-    try {
-      const s = String(modelId || '').toLowerCase()
-      if (/gpt-?4o|gpt-?4-?vision|4o-mini/.test(s)) return 120
-      if (/qwen[-_]?vl/.test(s)) return 256
-      if (/pixtral/.test(s)) return 256
-      if (/llava|minicpm-?v|internvl|idefics|xcomposer/.test(s)) return 384
-      if (/gemma3|gemma[-_]?3/.test(s)) return 256
-      return 512
-    } catch (_) {
-      return 512
-    }
-  }
-
-  // 估算上下文 token（中文注释）：消息包装开销 + 文本 + 图片
-  const estimateTokens = (messages, modelId) => {
-    if (!Array.isArray(messages)) return 0
-    let sum = 0
-    const perImage = getImageTokenEstimate(modelId)
-    for (const m of messages) {
-      if (!m) continue
-      // Chat message 包装开销（经验值）
-      sum += 4
-      if (typeof m.content === 'string') sum += estimateTextTokens(m.content)
-      if (Array.isArray(m.images)) sum += m.images.length * perImage
-    }
-    // 结尾 priming（经验值）
-    sum += 2
-    return sum
-  }
   const contextTokensUsed = useMemo(() => estimateTokens(currentSession?.messages || [], model), [currentSession?.messages, model])
   const contextPercent = useMemo(() => {
     if (typeof maxContextTokens !== 'number' || maxContextTokens <= 0) return 0
@@ -632,183 +487,6 @@ export default function AgentPage() {
     return `${contextTokensUsed} est.`
   }, [contextTokensUsed, maxContextTokens])
 
-  // 信息元类型对应的高亮颜色（中文注释）
-  const getInfonColor = (infonType) => {
-    const colors = {
-      DESC: '#3b82f6',  // 描述（实体+属性）：蓝色
-      SCEN: '#10b981',  // 场景（时间+位置）：翠绿色
-      REL: '#8b5cf6',   // 关系：紫色
-      SIT: '#f59e0b',   // 情景：琥珀色
-    }
-    return colors[String(infonType).toUpperCase()] || '#64748b'
-  }
-
-  // 从信息元中提取用于匹配的关键词（中文注释）
-  const getMatchKeywords = (infon) => {
-    if (!infon || typeof infon !== 'object') return []
-    const keywords = []
-    const t = String(infon.infon_type || '').toUpperCase()
-    
-    if (t === 'DESC') {
-      // 描述：提取实体和属性作为关键词（优先属性，因为属性是实际值）
-      if (infon.attribute) keywords.push(String(infon.attribute))
-      if (infon.entity) keywords.push(String(infon.entity))
-    } else if (t === 'SCEN') {
-      // 场景：提取时间和空间作为关键词（优先时间）
-      if (infon.temporal) keywords.push(String(infon.temporal))
-      if (infon.spatial) keywords.push(String(infon.spatial))
-    } else if (t === 'REL' && infon.relation_name) {
-      keywords.push(String(infon.relation_name))
-    }
-    // SIT 不提取关键词用于高亮
-    
-    return keywords.filter(k => k && k.trim())
-  }
-
-  // 获取消息的所有信息元（中文注释）：包括该消息对应的所有 run 的所有 infons
-  const getMessageInfons = (messageId) => {
-    if (!currentSession?.id) return []
-    const runs = (infonSessions?.[currentSession.id]?.runs) || []
-    const messageRuns = runs.filter(r => r.targetType === 'message' && r.targetKey === messageId && r.modality === 'text')
-    const allInfons = messageRuns.flatMap(r => {
-      const infons = Array.isArray(r?.resultJson?.infons) ? r.resultJson.infons : []
-      return infons.map(infon => ({ infon, run: r }))
-    })
-    return allInfons
-  }
-
-  // 构建信息元索引（中文注释）：用于快速查找 iid 对应的信息元
-  const buildInfonIndex = (infonList) => {
-    const index = {}
-    infonList.forEach(({ infon }) => {
-      if (infon.iid) index[infon.iid] = infon
-    })
-    return index
-  }
-
-  // 收集关系信息元关联的所有信息元（中文注释）
-  const getRelatedInfons = (infon, infonIndex) => {
-    const related = []
-    if (String(infon.infon_type || '').toUpperCase() === 'REL' && Array.isArray(infon.arg_refs)) {
-      infon.arg_refs.forEach(ref => {
-        if (infonIndex[ref]) related.push(infonIndex[ref])
-      })
-    }
-    return related
-  }
-
-  // 渲染带高亮的文本（中文注释）：自动高亮所有信息元
-  const renderHighlightedText = (text, messageId) => {
-    const textStr = String(text || '')
-    const infonList = getMessageInfons(messageId)
-    if (!infonList.length) return textStr
-    
-    const infonIndex = buildInfonIndex(infonList)
-    
-    // 收集所有需要高亮的关键词及其颜色（中文注释）
-    const highlights = []
-    infonList.forEach(({ infon }) => {
-      const keywords = getMatchKeywords(infon)
-      const color = getInfonColor(infon.infon_type)
-      keywords.forEach(kw => {
-        highlights.push({ keyword: kw, color, infon })
-      })
-      
-      // 如果是关系信息元，也高亮其关联的信息元（中文注释）
-      const related = getRelatedInfons(infon, infonIndex)
-      related.forEach(relInfon => {
-        const relKeywords = getMatchKeywords(relInfon)
-        const relColor = getInfonColor(relInfon.infon_type)
-        relKeywords.forEach(kw => {
-          highlights.push({ keyword: kw, color: relColor, infon: relInfon, fromRelation: infon.iid })
-        })
-      })
-    })
-    
-    if (!highlights.length) return textStr
-    
-    // 按关键词长度降序排序，优先匹配长关键词（中文注释）
-    highlights.sort((a, b) => b.keyword.length - a.keyword.length)
-    
-    // 构建正则表达式：匹配所有关键词（中文注释）
-    const uniqueKeywords = [...new Set(highlights.map(h => h.keyword))]
-    const pattern = uniqueKeywords.map(kw => kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
-    if (!pattern) return textStr
-    
-    const regex = new RegExp(`(${pattern})`, 'gi')
-    const parts = textStr.split(regex)
-    
-    return parts.map((part, i) => {
-      if (i % 2 === 1) {
-        // 匹配的部分：找到对应的颜色（中文注释）
-        const match = highlights.find(h => h.keyword.toLowerCase() === part.toLowerCase())
-        if (match) {
-          // 为关联的信息元添加 data 属性，用于连线（中文注释）
-          const dataAttrs = match.fromRelation ? { 'data-infon-id': match.infon.iid, 'data-relation-id': match.fromRelation } : { 'data-infon-id': match.infon.iid }
-          return <mark key={i} className={styles.infonHighlight} style={{ backgroundColor: match.color + '20', color: match.color }} {...dataAttrs}>{part}</mark>
-        }
-      }
-      return part
-    })
-  }
-
-  // 获取消息的关系信息元（中文注释）
-  const getMessageRelations = (messageId) => {
-    const infonList = getMessageInfons(messageId)
-    return infonList.filter(({ infon }) => String(infon.infon_type || '').toUpperCase() === 'REL')
-  }
-
-  // 获取 pending 状态的所有信息元（中文注释）：用于输入框实时高亮
-  const getPendingInfons = useMemo(() => {
-    if (!currentSession?.id) return []
-    const runs = (infonSessions?.[currentSession.id]?.runs) || []
-    const pendingRuns = runs.filter(r => r.targetType === 'pending' && r.modality === 'text')
-    const allInfons = pendingRuns.flatMap(r => {
-      const infons = Array.isArray(r?.resultJson?.infons) ? r.resultJson.infons : []
-      return infons.map(infon => ({ infon, run: r }))
-    })
-    return allInfons
-  }, [currentSession?.id, infonSessions])
-
-  // 构建 pending 高亮数据（中文注释）：转换为 HighlightInput 需要的格式
-  const pendingHighlights = useMemo(() => {
-    if (!getPendingInfons.length) return []
-    
-    const infonIndex = buildInfonIndex(getPendingInfons)
-    const highlights = []
-    
-    getPendingInfons.forEach(({ infon }) => {
-      const keywords = getMatchKeywords(infon)
-      const color = getInfonColor(infon.infon_type)
-      keywords.forEach(kw => {
-        highlights.push({ keyword: kw, color })
-      })
-      
-      // 关系信息元的关联高亮（中文注释）
-      const related = getRelatedInfons(infon, infonIndex)
-      related.forEach(relInfon => {
-        const relKeywords = getMatchKeywords(relInfon)
-        const relColor = getInfonColor(relInfon.infon_type)
-        relKeywords.forEach(kw => {
-          highlights.push({ keyword: kw, color: relColor })
-        })
-      })
-    })
-    
-    return highlights
-  }, [getPendingInfons])
-
-  // 获取 pending 的关系信息元（中文注释）
-  const pendingRelations = useMemo(() => {
-    return getPendingInfons.filter(({ infon }) => String(infon.infon_type || '').toUpperCase() === 'REL')
-  }, [getPendingInfons])
-
-  // 获取 pending 的 infon 索引（中文注释）
-  const pendingInfonIndex = useMemo(() => {
-    return buildInfonIndex(getPendingInfons)
-  }, [getPendingInfons])
-
-  // 属性级展示（中文注释）：不需要默认选择
 
   // 发送锁定状态与阶段检测（中文注释）：计算当前隐私保护流程进度
   const sendLockState = useMemo(() => {
@@ -987,330 +665,6 @@ export default function AgentPage() {
     // 注意：adoptPendingInfonsToMessage 已经处理了 pending infons，无需再清空
   }
 
-  // 复制消息内容（中文注释）
-  const handleCopyMessage = (content) => {
-    navigator.clipboard.writeText(content).then(() => {
-      antdMessage.success('已复制到剪贴板')
-    }).catch(() => {
-      antdMessage.error('复制失败')
-    })
-  }
-
-  // 开始编辑消息（中文注释）：暂时移除该消息的信息元
-  const handleEditMessage = (messageId, content, images) => {
-    setEditingMessageId(messageId)
-    setEditingContent(content || '')
-    setEditingImages(images || [])
-    
-    // 保存并暂时移除该消息的信息元
-    const session = getCurrentSession()
-    if (session) {
-      const currentInfonSession = infonSessions?.[session.id]
-      if (currentInfonSession?.runs) {
-        // 找到该消息的所有信息元runs
-        const messageRuns = currentInfonSession.runs.filter(run => 
-          run.targetType === 'message' && run.targetKey === messageId
-        )
-        
-        if (messageRuns.length > 0) {
-          // 保存
-          setSavedMessageInfons({ messageId, runs: messageRuns })
-          
-          // 从infonSessions中移除
-          const filteredRuns = currentInfonSession.runs.filter(run => 
-            !(run.targetType === 'message' && run.targetKey === messageId)
-          )
-          
-          useStore.setState({
-            infonSessions: {
-              ...infonSessions,
-              [session.id]: { ...currentInfonSession, runs: filteredRuns }
-            }
-          })
-        }
-      }
-    }
-    
-    // 信息元提取会由useEffect自动触发
-  }
-
-  // 取消编辑（中文注释）：恢复原消息的信息元
-  const handleCancelEdit = () => {
-    // 恢复之前保存的信息元
-    if (savedMessageInfons) {
-      const session = getCurrentSession()
-      if (session) {
-        const currentInfonSession = infonSessions?.[session.id]
-        if (currentInfonSession) {
-          useStore.setState({
-            infonSessions: {
-              ...infonSessions,
-              [session.id]: {
-                ...currentInfonSession,
-                runs: [...currentInfonSession.runs, ...savedMessageInfons.runs]
-              }
-            }
-          })
-        }
-      }
-      setSavedMessageInfons(null)
-    }
-    
-    setEditingMessageId(null)
-    setEditingContent('')
-    setEditingImages([])
-    // 清除 pending 信息元
-    clearAllPendingInfons?.()
-  }
-
-  // 保存编辑（中文注释）
-  const handleSaveEdit = async () => {
-    if (!editingMessageId) return
-    
-    const text = editingContent.trim()
-    if (!text && editingImages.length === 0) {
-      antdMessage.warning('消息内容不能为空')
-      return
-    }
-
-    // 获取当前 session
-    const session = getCurrentSession()
-    if (!session) return
-
-    // 找到要编辑的消息及其后续消息
-    const messageIndex = session.messages.findIndex(m => m.id === editingMessageId)
-    if (messageIndex === -1) return
-
-    // 删除该消息及其后续的所有消息
-    const newMessages = session.messages.slice(0, messageIndex)
-    const deletedMessages = session.messages.slice(messageIndex) // 被删除的消息
-    const deletedMessageIds = new Set(deletedMessages.map(m => m.id))
-    
-    // 更新 session 的消息列表
-    const updatedSessions = sessions.map(s => {
-      if (s.id === session.id) {
-        return { ...s, messages: newMessages }
-      }
-      return s
-    })
-    
-    // 清理被删除消息的信息元（中文注释）
-    const currentInfonSession = infonSessions?.[session.id]
-    if (currentInfonSession?.runs) {
-      const filteredRuns = currentInfonSession.runs.filter(run => {
-        // 保留不属于被删除消息的 runs
-        if (run.targetType === 'message' && deletedMessageIds.has(run.targetKey)) {
-          return false // 删除这个 run
-        }
-        return true // 保留这个 run
-      })
-      
-      useStore.setState({
-        infonSessions: {
-          ...infonSessions,
-          [session.id]: { ...currentInfonSession, runs: filteredRuns }
-        }
-      })
-    }
-    
-    // 清空隐私推理结果（中文注释）：因为消息改变了，需要重新推理
-    const currentPrivacyInference = privacyInferences?.[session.id]
-    if (currentPrivacyInference) {
-      useStore.setState({
-        privacyInferences: {
-          ...privacyInferences,
-          [session.id]: {
-            status: 'idle',
-            risks: [],
-            buffer: '',
-            abortController: null,
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-          }
-        }
-      })
-    }
-    
-    // 更新 store 的 sessions
-    useStore.setState({ sessions: updatedSessions })
-
-    // 采纳 pending 信息元
-    // 注意：这里我们将 pending 信息元转移到即将发送的新消息
-    
-    // 在发送前，先获取当前的 pending runs 用于后续签名计算
-    const currentRuns = infonSessions?.[session.id]?.runs || []
-    const pendingRunIds = currentRuns
-      .filter(run => run.targetType === 'pending' && run.status === 'done')
-      .map(r => r.id)
-      .sort()
-    
-    // 设置标志，防止useEffect清空pending
-    isAdoptingPendingRef.current = true
-    
-    // 发送新消息
-    if (editingImages.length > 0) {
-      const userId = await useStore.getState().sendMessageWithImages(text, editingImages)
-      try {
-        // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
-        if (pendingRunIds.length > 0) {
-          const messageSignature = pendingRunIds.join('|')
-          lastInferenceRunCountRef.current = messageSignature
-          console.log('[SaveEdit] 提前更新签名，避免重复推理', { signature: messageSignature })
-        }
-        
-        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0) {
-          // 没有 pending infons，需要重新提取
-          startMessageInfons?.(userId)
-        }
-      } catch (_) {}
-    } else {
-      const userId = await sendMessage(text)
-      try {
-        // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
-        if (pendingRunIds.length > 0) {
-          const messageSignature = pendingRunIds.join('|')
-          lastInferenceRunCountRef.current = messageSignature
-          console.log('[SaveEdit] 提前更新签名，避免重复推理', { signature: messageSignature })
-        }
-        
-        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0) {
-          // 没有 pending infons，需要重新提取
-          startMessageInfons?.(userId)
-        }
-      } catch (_) {}
-    }
-
-    // 清除标志并清理编辑状态
-    isAdoptingPendingRef.current = false
-    handleCancelEdit()
-    
-    antdMessage.success('消息已更新并重新生成')
-  }
-
-  // 重试生成（中文注释）：保存用户消息的信息元，删除用户和助手消息，重新发送，然后迁移信息元
-  const handleRetry = async () => {
-    const session = getCurrentSession()
-    if (!session || !session.messages || session.messages.length === 0) return
-
-    const messages = session.messages
-    const lastUserIndex = [...messages].reverse().findIndex(m => m.role === 'user')
-    if (lastUserIndex === -1) return
-
-    const actualIndex = messages.length - 1 - lastUserIndex
-    const lastUserMessage = messages[actualIndex]
-    const oldUserMessageId = lastUserMessage.id
-
-    // 保存该用户消息的信息元
-    const currentInfonSession = infonSessions?.[session.id]
-    let savedUserInfonRuns = []
-    if (currentInfonSession?.runs) {
-      savedUserInfonRuns = currentInfonSession.runs.filter(run => 
-        run.targetType === 'message' && run.targetKey === oldUserMessageId
-      )
-    }
-
-    // 删除从用户消息开始的所有消息（包括用户和助手消息）
-    const updatedMessages = messages.slice(0, actualIndex)
-    const deletedMessages = messages.slice(actualIndex)
-    const deletedMessageIds = deletedMessages.map(m => m.id)
-
-    // 清理被删除消息的信息元（暂时）
-    if (currentInfonSession?.runs) {
-      const filteredRuns = currentInfonSession.runs.filter(run => {
-        if (run.targetType === 'message' && deletedMessageIds.includes(run.targetKey)) {
-          return false
-        }
-        return true
-      })
-      
-      useStore.setState({
-        infonSessions: {
-          ...infonSessions,
-          [session.id]: { ...currentInfonSession, runs: filteredRuns }
-        }
-      })
-    }
-    
-    // 清空隐私推理结果
-    const currentPrivacyInference = privacyInferences?.[session.id]
-    if (currentPrivacyInference) {
-      useStore.setState({
-        privacyInferences: {
-          ...privacyInferences,
-          [session.id]: {
-            status: 'idle',
-            risks: [],
-            buffer: '',
-            abortController: null,
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-          }
-        }
-      })
-    }
-
-    // 更新 session
-    const updatedSessions = sessions.map(s => {
-      if (s.id === session.id) {
-        return { ...s, messages: updatedMessages }
-      }
-      return s
-    })
-    useStore.setState({ sessions: updatedSessions })
-
-    // 重新发送用户消息
-    const hasImages = Array.isArray(lastUserMessage.images) && lastUserMessage.images.length > 0
-    let newUserMessageId
-    if (hasImages) {
-      newUserMessageId = await useStore.getState().sendMessageWithImages(lastUserMessage.content, lastUserMessage.images)
-    } else {
-      newUserMessageId = await sendMessage(lastUserMessage.content)
-    }
-
-    // 迁移信息元到新的用户消息（如果有保存的信息元）
-    if (savedUserInfonRuns.length > 0 && newUserMessageId) {
-      const updatedRuns = savedUserInfonRuns.map(run => ({
-        ...run,
-        targetKey: newUserMessageId // 更新到新的消息ID
-      }))
-      
-      const latestInfonSession = useStore.getState().infonSessions?.[session.id]
-      if (latestInfonSession) {
-        useStore.setState({
-          infonSessions: {
-            ...useStore.getState().infonSessions,
-            [session.id]: {
-              ...latestInfonSession,
-              runs: [...latestInfonSession.runs, ...updatedRuns]
-            }
-          }
-        })
-      }
-    }
-  }
-
-  // 处理图片选择（中文注释）：将文件读取为 data URL 后加入队列
-  const handlePickImages = async (e) => {
-    const files = Array.from(e.target.files || [])
-    if (!files.length) return
-    const toDataUrl = (file) => new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result)
-      reader.onerror = reject
-      reader.readAsDataURL(file)
-    })
-    try {
-      const urls = await Promise.all(files.map(toDataUrl))
-      setSelectedImages((prev) => [...prev, ...urls])
-    } catch (_) { }
-    e.target.value = ''
-  }
-
-  const removeSelectedImage = (idx) => {
-    setSelectedImages((prev) => prev.filter((_, i) => i !== idx))
-  }
 
   // 输入变化时，立刻中止 pending 的提取（但不清除结果，等新的提取覆盖）
   useEffect(() => {
@@ -1367,75 +721,13 @@ export default function AgentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, landingInput, selectedImages, hasMessages, editingMessageId, editingContent, editingImages])
 
-  // 会话拖拽排序事件（中文注释）
-  const handleDragStartSession = (id) => (e) => {
-    try {
-      setDraggingSessionId(id)
-      setReorderedSessions([...sessions])
-      if (e?.dataTransfer) {
-        e.dataTransfer.effectAllowed = 'move'
-        // 兼容获取来源
-        e.dataTransfer.setData('text/plain', id)
-      }
-    } catch (_) {}
-  }
-
-  const handleDragOverSession = (id) => (e) => {
-    // 允许放置
-    e.preventDefault()
-    if (e?.dataTransfer) e.dataTransfer.dropEffect = 'move'
-    const fromId = draggingSessionId
-    if (!fromId) return
-    const targetEl = e.currentTarget
-    const rect = targetEl?.getBoundingClientRect?.()
-    if (!rect) return
-    const y = e.clientY
-    const ratio = (y - rect.top) / Math.max(1, rect.height)
-    // 40%/60% 阈值（中文注释）：避免在中间区域频繁抖动
-    const beforeZone = ratio < 0.4
-    const afterZone = ratio > 0.6
-    if (!beforeZone && !afterZone) return
-
-    const list = Array.isArray(reorderedSessions) ? [...reorderedSessions] : [...sessions]
-    const fromIdx = list.findIndex((s) => s.id === fromId)
-    const targetIdx = list.findIndex((s) => s.id === id)
-    if (fromIdx === -1 || targetIdx === -1) return
-
-    // 计算期望插入索引（中文注释）：在目标项前或后
-    let desiredIndex = beforeZone ? targetIdx : targetIdx + 1
-    desiredIndex = Math.max(0, Math.min(desiredIndex, list.length))
-    // 移除源项后索引校正（中文注释）
-    const shiftAdjustedIndex = desiredIndex - (fromIdx < desiredIndex ? 1 : 0)
-    if (shiftAdjustedIndex === fromIdx) return
-    // 重复目标去重（中文注释）：同一 fromId + index 不重复执行
-    if (lastReorderRef.current.fromId === fromId && lastReorderRef.current.index === shiftAdjustedIndex) return
-    lastReorderRef.current = { fromId, index: shiftAdjustedIndex }
-
-    const prevRects = measureRects()
-    const [moved] = list.splice(fromIdx, 1)
-    list.splice(shiftAdjustedIndex, 0, moved)
-    setReorderedSessions(list)
-    requestAnimationFrame(() => {
-      const nextRects = measureRects()
-      animateFLIP(prevRects, nextRects)
-    })
-  }
-
-  const handleDropSession = (id) => (e) => {
-    e.preventDefault()
-    const fromId = draggingSessionId || (e?.dataTransfer ? e.dataTransfer.getData('text/plain') : null)
-    setDraggingSessionId(null)
-    if (!fromId) { setReorderedSessions(null); return }
-    const list = Array.isArray(reorderedSessions) ? reorderedSessions : sessions
-    // 提交重排（中文注释）
-    useStore.setState({ sessions: list })
-    setReorderedSessions(null)
-  }
-
-  const handleDragEndSession = () => {
-    setDraggingSessionId(null)
-    setReorderedSessions(null)
-    lastReorderRef.current = { fromId: null, index: -1 }
+  // 会话拖拽排序事件处理（包装 Hook 函数以提交状态）
+  const onDropSession = (id) => (e) => {
+    const list = handleDropSession(sessions)(id)(e)
+    if (list) {
+      // 提交重排
+      useStore.setState({ sessions: list })
+    }
   }
 
   return (
@@ -1452,93 +744,31 @@ export default function AgentPage() {
         <PrivacyModeIndicator />
         <div className={styles.sidebarScroll}>
           {(reorderedSessions || sessions).map((s) => (
-            <div
+            <ChatSessionItem
               key={s.id}
-              className={`${styles.chatItem} ${s.id === currentSessionId ? styles.chatItemActive : ''}`}
-              onClick={() => {
-                if (editingSessionId !== s.id) {
-                  switchSession(s.id)
-                }
+              session={s}
+              currentSessionId={currentSessionId}
+              editingSessionId={editingSessionId}
+              editingTitle={editingTitle}
+              draggingSessionId={draggingSessionId}
+              onSwitch={switchSession}
+              onRename={renameSession}
+              onDelete={deleteSession}
+              onEditStart={(id, title) => {
+                setEditingSessionId(id)
+                setEditingTitle(title)
               }}
-              title={editingSessionId === s.id ? '' : s.title}
-              draggable
-              onDragStart={handleDragStartSession(s.id)}
-              onDragOver={handleDragOverSession(s.id)}
-              onDrop={handleDropSession(s.id)}
+              onEditEnd={() => {
+                setEditingSessionId(null)
+                setEditingTitle('')
+              }}
+              setEditingTitle={setEditingTitle}
+              onDragStart={handleDragStartSession(sessions)}
+              onDragOver={handleDragOverSession(sessions)}
+              onDrop={onDropSession}
               onDragEnd={handleDragEndSession}
-              ref={(el) => { if (el) chatItemRefs.current[s.id] = el; else delete chatItemRefs.current[s.id] }}
-              style={{ opacity: draggingSessionId === s.id ? 0.8 : 1 }}
-            >
-              <div className={styles.chatItemHeader}>
-                <div className={styles.chatItemInfo}>
-                  {editingSessionId === s.id ? (
-                    <Input
-                      className={styles.chatNameInput}
-                      value={editingTitle}
-                      onChange={(e) => setEditingTitle(e.target.value)}
-                      onPressEnter={(e) => {
-                        e.stopPropagation()
-                        const newTitle = editingTitle.trim()
-                        if (newTitle && newTitle !== s.title) {
-                          renameSession(s.id, newTitle)
-                        }
-                        setEditingSessionId(null)
-                        setEditingTitle('')
-                      }}
-                      onBlur={() => {
-                        const newTitle = editingTitle.trim()
-                        if (newTitle && newTitle !== s.title) {
-                          renameSession(s.id, newTitle)
-                        }
-                        setEditingSessionId(null)
-                        setEditingTitle('')
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      autoFocus
-                      size="small"
-                    />
-                  ) : (
-                    <div className={styles.chatName}>{s.title}</div>
-                  )}
-                  {editingSessionId !== s.id && (
-                    <div className={styles.chatMeta}>{new Date(s.updatedAt).toLocaleString()}</div>
-                  )}
-                </div>
-                <div className={styles.chatActions}>
-                  <button 
-                    className={styles.iconBtn} 
-                    onClick={(e) => { 
-                      e.stopPropagation()
-                      setEditingSessionId(s.id)
-                      setEditingTitle(s.title)
-                    }} 
-                    title="Rename"
-                  >
-                    <EditOutlined />
-                  </button>
-                  <Popconfirm
-                    title="删除对话"
-                    description="确定要删除这个对话吗？"
-                    onConfirm={(e) => {
-                      e?.stopPropagation()
-                      deleteSession(s.id)
-                    }}
-                    onCancel={(e) => e?.stopPropagation()}
-                    okText="删除"
-                    cancelText="取消"
-                    placement="right"
-                  >
-                    <button 
-                      className={styles.iconBtn} 
-                      onClick={(e) => e.stopPropagation()} 
-                      title="Delete"
-                    >
-                      <DeleteOutlined />
-                    </button>
-                  </Popconfirm>
-                </div>
-              </div>
-            </div>
+              setRef={setSessionRef}
+            />
           ))}
         </div>
         <div className={styles.sidebarBottom}>
@@ -1563,67 +793,19 @@ export default function AgentPage() {
       <section className={styles.main}>
         <div className={styles.scroll} ref={mainScrollRef}>
           {/* 顶部：左上角模型选择器 */}
-          <div className={styles.toolbar}>
-            <div className={styles.modelPicker}>
-              <Select
-                style={{ minWidth: 220 }}
-                value={model}
-                onChange={(v) => {
-                  const requireMultimodal = Boolean(contextHasImages || (selectedImages.length > 0))
-                  if (requireMultimodal && !isModelMultimodal(v)) {
-                    message.warning('Cannot switch to a non-multimodal model when images exist in context or pending')
-                    return
-                  }
-                  setModel?.(v)
-                }}
-                options={(() => {
-                  const requireMultimodal = Boolean(contextHasImages || (selectedImages.length > 0))
-                  return [model, ...(models || [])]
-                    .filter((v, i, a) => v && a.indexOf(v) === i)
-                    .map((v) => ({
-                      label: `${v}${isModelMultimodal(v) ? ' (multimodal)' : ' (text-only)'}`,
-                      value: v,
-                      disabled: (requireMultimodal && !isModelMultimodal(v))
-                    }))
-                })()}
-              />
-              <Button onClick={() => setApiModalOpen(true)}>Add API model</Button>
-            </div>
-          </div>
-          <Modal
-            title="Add API model"
-            open={apiModalOpen}
-            onCancel={() => setApiModalOpen(false)}
-            onOk={() => {
-              try {
-                useStore.getState().addApiModel({ id: apiModelId.trim(), baseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim() })
-                setApiModalOpen(false)
-              } catch (_) { }
-            }}
-          >
-            <div style={{ display: 'grid', gap: 8 }}>
-              <Input placeholder="Model ID" value={apiModelId} onChange={(e) => setApiModelId(e.target.value)} />
-              <Input placeholder="Base URL" value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} />
-              <Input.Password placeholder="API Key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-            </div>
-          </Modal>
+          <ModelPickerToolbar
+            model={model}
+            models={models}
+            customProviders={customProviders}
+            setModel={setModel}
+            addApiModel={addApiModel}
+            contextHasImages={contextHasImages}
+            selectedImagesCount={selectedImages.length}
+          />
           <Splitter className={styles.splitterRoot}>
             <Splitter.Panel style={{ overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-              {/* 信息元类型图例（中文注释） */}
-              <div className={styles.infonLegend}>
-                <div className={styles.legendItem}>
-                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('DESC') }}></span>
-                  <span className={styles.legendLabel}>Description (DESC)</span>
-                </div>
-                <div className={styles.legendItem}>
-                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('SCEN') }}></span>
-                  <span className={styles.legendLabel}>Scenario (SCEN)</span>
-                </div>
-                <div className={styles.legendItem}>
-                  <span className={styles.legendDot} style={{ backgroundColor: getInfonColor('REL') }}></span>
-                  <span className={styles.legendLabel}>Relation (REL)</span>
-                </div>
-              </div>
+              {/* 信息元类型图例 */}
+              <InfonLegend />
               <div className={styles.leftPaneScroll} ref={leftPaneScrollRef} style={{ flex: 1, overflow: 'auto' }}>
                 {hasMessages ? (
                   <div className={styles.column}>
@@ -1634,438 +816,67 @@ export default function AgentPage() {
                       const infonIndex = buildInfonIndex(infonList)
                       
                       return (
-                        <div key={m.id} className={`${styles.msgRow} ${isUser ? styles.rowUser : styles.rowAssistant}`}>
-                          {isUser ? (
-                            <>
-                              <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-                                {editingMessageId === m.id ? (
-                                  // 编辑模式（中文注释）：使用和主输入框相同的样式
-                                  <div className={styles.editingComposer}>
-                                    {/* 图片预览 */}
-                                    {editingImages.length > 0 && (
-                                      <div className={styles.composerPreviews}>
-                                        {editingImages.map((src, imgIdx) => (
-                                          <div key={imgIdx} className={styles.composerPreviewItem}>
-                                            <img src={src} alt={`img-${imgIdx}`} className={styles.composerPreviewImg} />
-                                            <button
-                                              className={styles.composerPreviewRemove}
-                                              onClick={() => setEditingImages(editingImages.filter((_, i) => i !== imgIdx))}
-                                            >✕</button>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                    {/* 输入框 */}
-                                    <div className={styles.composerRow}>
-                                      <HighlightInput
-                                        className={styles.composerInput}
-                                        value={editingContent}
-                                        onChange={setEditingContent}
-                                        placeholder="编辑消息..."
-                                        highlights={pendingHighlights}
-                                        autoSize={{ minRows: 2, maxRows: 10 }}
-                                      />
-                                    </div>
-                                    {/* Pending关系标签显示 */}
-                                    {pendingRelations.length > 0 && (
-                                      <div className={styles.relationTags} style={{ marginTop: 8 }}>
-                                        {pendingRelations.map(({ infon }, idx) => {
-                                          const relatedInfons = getRelatedInfons(infon, pendingInfonIndex)
-                                          const color = getInfonColor('REL')
-                                          
-                                          return (
-                                            <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
-                                              <span className={styles.relationTagName} style={{ color: color }}>
-                                                {infon.relation_name || 'Relation'}
-                                              </span>
-                                              <span className={styles.relationTagArgs}>
-                                                {relatedInfons.map((rel, ri) => {
-                                                  const relColor = getInfonColor(rel.infon_type)
-                                                  const keywords = getMatchKeywords(rel)
-                                                  const label = keywords[0] || rel.iid
-                                                  return (
-                                                    <React.Fragment key={ri}>
-                                                      {ri > 0 && <span className={styles.relationTagSep}>→</span>}
-                                                      <span className={styles.relationTagArg} style={{ color: relColor }}>
-                                                        {label}
-                                                      </span>
-                                                    </React.Fragment>
-                                                  )
-                                                })}
-                                              </span>
-                                            </div>
-                                          )
-                                        })}
-                                      </div>
-                                    )}
-                                    {/* 操作按钮 */}
-                                    <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
-                                      <Button size="small" icon={<CheckOutlined />} onClick={handleSaveEdit} type="primary">保存并重新生成</Button>
-                                      <Button size="small" icon={<CloseOutlined />} onClick={handleCancelEdit}>取消</Button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  // 正常显示模式（中文注释）
-                                  <>
-                                    <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`} style={{ position: 'relative' }}>
-                                      {messageRelations.length > 0 && (
-                                        <RelationConnections messageId={m.id} relations={messageRelations} infonIndex={infonIndex} />
-                                      )}
-                                      <div className={styles.msgContent} style={{ position: 'relative', zIndex: 2 }}>{renderHighlightedText(m.content, m.id)}</div>
-                                      {Array.isArray(m.images) && m.images.length > 0 && (
-                                        <div className={styles.msgImages}>
-                                          {m.images.map((src, imgIdx) => (
-                                            <img key={imgIdx} src={src} alt={`img-${imgIdx}`} className={styles.msgImage} />
-                                          ))}
-                                        </div>
-                                      )}
-                                      {/* 关系标签（中文注释） */}
-                                      {messageRelations.length > 0 && (
-                                        <div className={styles.relationTags}>
-                                          {messageRelations.map(({ infon }, idx) => {
-                                            const relatedInfons = getRelatedInfons(infon, infonIndex)
-                                            const color = getInfonColor('REL')
-                                            
-                                            return (
-                                              <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
-                                                <span className={styles.relationTagName} style={{ color: color }}>
-                                                  {infon.relation_name || 'Relation'}
-                                                </span>
-                                                <span className={styles.relationTagArgs}>
-                                                  {relatedInfons.map((rel, ri) => {
-                                                    const relColor = getInfonColor(rel.infon_type)
-                                                    const keywords = getMatchKeywords(rel)
-                                                    const label = keywords[0] || rel.iid
-                                                    return (
-                                                      <React.Fragment key={ri}>
-                                                        {ri > 0 && <span className={styles.relationTagSep}>→</span>}
-                                                        <span className={styles.relationTagArg} style={{ color: relColor }}>
-                                                          {label}
-                                                        </span>
-                                                      </React.Fragment>
-                                                    )
-                                                  })}
-                                                </span>
-                                              </div>
-                                            )
-                                          })}
-                                        </div>
-                                      )}
-                                    </div>
-                                    {/* 用户消息操作按钮（中文注释） */}
-                                    <div className={styles.messageActions} style={{ justifyContent: 'flex-end' }}>
-                                      <Tooltip title="复制">
-                                        <Button 
-                                          type="text" 
-                                          size="small" 
-                                          icon={<CopyOutlined />}
-                                          onClick={() => handleCopyMessage(m.content)}
-                                          className={styles.messageActionBtn}
-                                        />
-                                      </Tooltip>
-                                      <Tooltip title="编辑">
-                                        <Button 
-                                          type="text" 
-                                          size="small" 
-                                          icon={<EditOutlined />}
-                                          onClick={() => handleEditMessage(m.id, m.content, m.images)}
-                                          className={styles.messageActionBtn}
-                                          disabled={isGenerating}
-                                        />
-                                      </Tooltip>
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                              <div className={styles.avatar}>U</div>
-                            </>
-                          ) : (
-                            <>
-                              <div className={styles.avatar}>A</div>
-                              <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-                                <div className={`${styles.msgBubble} ${styles.msgBubbleAssistant}`} style={{ position: 'relative' }}>
-                                  {messageRelations.length > 0 && (
-                                    <RelationConnections messageId={m.id} relations={messageRelations} infonIndex={infonIndex} />
-                                  )}
-                                  {m.reasoning && (
-                                    <div className={styles.reasoningBox}>
-                                      <div className={styles.reasoningTitle}>Thinking</div>
-                                      <div className={styles.reasoningBody}>
-                                        <MarkdownMessage content={m.reasoning} />
-                                      </div>
-                                    </div>
-                                  )}
-                                  <div className={styles.msgContent}>
-                                    <div className={styles.assistantTextHighlight} style={{ position: 'relative', zIndex: 2 }}>
-                                      {renderHighlightedText(m.content, m.id)}
-                                    </div>
-                                  </div>
-                                  {/* 关系标签（中文注释） */}
-                                  {messageRelations.length > 0 && (
-                                    <div className={styles.relationTags}>
-                                      {messageRelations.map(({ infon }, idx) => {
-                                        const relatedInfons = getRelatedInfons(infon, infonIndex)
-                                        const color = getInfonColor('REL')
-                                        
-                                        return (
-                                          <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
-                                            <span className={styles.relationTagName} style={{ color: color }}>
-                                              {infon.relation_name || 'Relation'}
-                                            </span>
-                                            <span className={styles.relationTagArgs}>
-                                              {relatedInfons.map((rel, ri) => {
-                                                const relColor = getInfonColor(rel.infon_type)
-                                                const keywords = getMatchKeywords(rel)
-                                                const label = keywords[0] || rel.iid
-                                                return (
-                                                  <React.Fragment key={ri}>
-                                                    {ri > 0 && <span className={styles.relationTagSep}>→</span>}
-                                                    <span className={styles.relationTagArg} style={{ color: relColor }}>
-                                                      {label}
-                                                    </span>
-                                                  </React.Fragment>
-                                                )
-                                              })}
-                                            </span>
-                                          </div>
-                                        )
-                                      })}
-                                    </div>
-                                  )}
-                                  {m.streaming ? <div className={styles.cursor}>▍</div> : null}
-                                  {m.error ? <div className={styles.error}>Error: {m.error}</div> : null}
-                                </div>
-                                {/* 助手消息操作按钮（中文注释） */}
-                                {!m.streaming && (
-                                  <div className={styles.messageActions}>
-                                    <Tooltip title="复制">
-                                      <Button 
-                                        type="text" 
-                                        size="small" 
-                                        icon={<CopyOutlined />}
-                                        onClick={() => handleCopyMessage(m.content)}
-                                        className={styles.messageActionBtn}
-                                      />
-                                    </Tooltip>
-                                    <Tooltip title="重新生成">
-                                      <Button 
-                                        type="text" 
-                                        size="small" 
-                                        icon={<RedoOutlined />}
-                                        onClick={handleRetry}
-                                        className={styles.messageActionBtn}
-                                        disabled={isGenerating}
-                                      />
-                                    </Tooltip>
-                                  </div>
-                                )}
-                              </div>
-                            </>
-                          )}
-                        </div>
+                        <MessageBubble
+                          key={m.id}
+                          message={m}
+                          isUser={isUser}
+                          editingMessageId={editingMessageId}
+                          editingContent={editingContent}
+                          setEditingContent={setEditingContent}
+                          editingImages={editingImages}
+                          setEditingImages={setEditingImages}
+                          onCopy={handleCopyMessage}
+                          onEdit={handleEditMessage}
+                          onSaveEdit={handleSaveEdit}
+                          onCancelEdit={handleCancelEdit}
+                          onRetry={handleRetry}
+                          isGenerating={isGenerating}
+                          renderHighlightedText={renderHighlightedText}
+                          messageRelations={messageRelations}
+                          infonIndex={infonIndex}
+                          pendingHighlights={pendingHighlights}
+                          pendingRelations={pendingRelations}
+                          pendingInfonIndex={pendingInfonIndex}
+                        />
                       )
                     })}
                   </div>
                 ) : (
-                  <div className={styles.landing}>
-                    <div className={styles.landingTitle}>How can I help you today?</div>
-                    <div className={styles.landingSearch}>
-                      {selectedImages.length > 0 && (
-                        <div className={styles.composerPreviews}>
-                          {selectedImages.map((src, i) => (
-                            <div key={i} className={styles.composerPreviewItem}>
-                              <img 
-                                src={src} 
-                                alt={`preview-${i}`} 
-                                className={styles.composerPreviewImg} 
-                                onClick={() => setPreviewImage(src)}
-                                style={{ cursor: 'pointer' }}
-                              />
-                              <button className={styles.composerPreviewRemove} onClick={(e) => { e.stopPropagation(); removeSelectedImage(i); }}>✕</button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <div className={styles.landingInputArea}>
-                        <div className={styles.landingControls}>
-                          <Upload
-                            disabled={!currentModelIsMultimodal}
-                            multiple
-                            accept="image/*"
-                            showUploadList={false}
-                            beforeUpload={(file) => {
-                              const reader = new FileReader()
-                              reader.onload = () => setSelectedImages((prev) => [...prev, reader.result])
-                              reader.readAsDataURL(file)
-                              return Upload.LIST_IGNORE
-                            }}
-                          >
-                            <Button icon={<CameraOutlined />} disabled={!currentModelIsMultimodal} title={currentModelIsMultimodal ? '' : 'Current model does not support images'} />
-                          </Upload>
-                          <HighlightInput
-                            className={styles.landingInput}
-                            placeholder="Type your question..."
-                            value={landingInput}
-                            onChange={setLandingInput}
-                            onPressEnter={handleLandingSend}
-                            highlights={pendingHighlights}
-                            autoSize={{ minRows: 1, maxRows: 6 }}
-                          />
-                          <Button 
-                            type={sendLockState.locked ? "default" : "primary"}
-                            icon={sendLockState.stage === 'ready' ? <SendOutlined /> : null}
-                            onClick={handleLandingSend} 
-                            disabled={!landingInput.trim() && selectedImages.length === 0}
-                            loading={sendLockState.locked}
-                            className={sendLockState.locked ? styles.sendButtonLocked : ''}
-                          >
-                            {sendLockState.locked ? sendLockState.label : ''}
-                          </Button>
-                        </div>
-                        {/* Pending 关系标签（中文注释） */}
-                        {pendingRelations.length > 0 && (
-                          <div className={styles.relationTags} style={{ marginTop: '8px' }}>
-                            {pendingRelations.map(({ infon }, idx) => {
-                              const relatedInfons = getRelatedInfons(infon, pendingInfonIndex)
-                              const color = getInfonColor('REL')
-                              
-                              return (
-                                <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
-                                  <span className={styles.relationTagName} style={{ color: color }}>
-                                    {infon.relation_name || 'Relation'}
-                                  </span>
-                                  <span className={styles.relationTagArgs}>
-                                    {relatedInfons.map((rel, ri) => {
-                                      const relColor = getInfonColor(rel.infon_type)
-                                      const keywords = getMatchKeywords(rel)
-                                      const label = keywords[0] || rel.iid
-                                      return (
-                                        <React.Fragment key={ri}>
-                                          {ri > 0 && <span className={styles.relationTagSep}>→</span>}
-                                          <span className={styles.relationTagArg} style={{ color: relColor }}>
-                                            {label}
-                                          </span>
-                                        </React.Fragment>
-                                      )
-                                    })}
-                                  </span>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  <LandingView
+                    landingInput={landingInput}
+                    setLandingInput={setLandingInput}
+                    onSend={handleLandingSend}
+                    selectedImages={selectedImages}
+                    setSelectedImages={setSelectedImages}
+                    onRemoveImage={removeSelectedImage}
+                    onImageClick={setPreviewImage}
+                    sendLockState={sendLockState}
+                    pendingHighlights={pendingHighlights}
+                    pendingRelations={pendingRelations}
+                    pendingInfonIndex={pendingInfonIndex}
+                    currentModelIsMultimodal={currentModelIsMultimodal}
+                  />
                 )}
               </div>
 
-              {/* 底部输入条（中文注释）：固定于左侧面板底部 */}
+              {/* 底部输入条：固定于左侧面板底部 */}
               {(currentSession && (currentSession.messages || []).length > 0) && (
-                <div className={styles.composerDock}>
-                  <div className={styles.composer}>
-                    {/* 隐藏的图片选择器（中文注释）：通过按钮触发 */}
-                    <input
-                      id="image-picker"
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      style={{ display: 'none' }}
-                      onChange={handlePickImages}
-                    />
-                    {/* 预览总在输入框上方（中文注释） */}
-                    {selectedImages.length > 0 && (
-                      <div className={styles.composerPreviews}>
-                        {selectedImages.map((src, i) => (
-                          <div key={i} className={styles.composerPreviewItem}>
-                            <img 
-                              src={src} 
-                              alt={`preview-${i}`} 
-                              className={styles.composerPreviewImg} 
-                              onClick={() => setPreviewImage(src)}
-                              style={{ cursor: 'pointer' }}
-                            />
-                            <button className={styles.composerPreviewRemove} onClick={(e) => { e.stopPropagation(); removeSelectedImage(i); }}>✕</button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <div className={styles.composerRow}>
-                      <HighlightInput
-                        className={styles.composerInput}
-                        placeholder="Message ChatGPT"
-                        value={input}
-                        onChange={setInput}
-                        onPressEnter={handleSend}
-                        highlights={pendingHighlights}
-                        autoSize={{ minRows: 1, maxRows: 6 }}
-                      />
-                      <div className={styles.composerButtons}>
-                        <Upload
-                          disabled={!currentModelIsMultimodal}
-                          multiple
-                          accept="image/*"
-                          showUploadList={false}
-                          beforeUpload={(file) => {
-                            const reader = new FileReader()
-                            reader.onload = () => setSelectedImages((prev) => [...prev, reader.result])
-                            reader.readAsDataURL(file)
-                            return Upload.LIST_IGNORE
-                          }}
-                        >
-                          <Button icon={<CameraOutlined />} disabled={!currentModelIsMultimodal} title={currentModelIsMultimodal ? '' : 'Current model does not support images'} />
-                        </Upload>
-                        {!isGenerating ? (
-                          <Button 
-                            type={sendLockState.locked ? "default" : "primary"}
-                            icon={sendLockState.stage === 'ready' ? <SendOutlined /> : null}
-                            disabled={(!input.trim() && selectedImages.length === 0) || sendLockState.locked}
-                            onClick={handleSend}
-                            loading={sendLockState.locked}
-                            className={sendLockState.locked ? styles.sendButtonLocked : ''}
-                          >
-                            {sendLockState.locked ? sendLockState.label : ''}
-                          </Button>
-                        ) : (
-                          <Button danger icon={<StopOutlined />} onClick={stopGenerating}>Stop</Button>
-                        )}
-                      </div>
-                    </div>
-                    {/* Pending 关系标签（中文注释） */}
-                    {pendingRelations.length > 0 && (
-                      <div className={styles.relationTags} style={{ marginTop: '8px' }}>
-                        {pendingRelations.map(({ infon }, idx) => {
-                          const relatedInfons = getRelatedInfons(infon, pendingInfonIndex)
-                          const color = getInfonColor('REL')
-                          
-                          return (
-                            <div key={idx} className={styles.relationTag} style={{ borderColor: color }}>
-                              <span className={styles.relationTagName} style={{ color: color }}>
-                                {infon.relation_name || 'Relation'}
-                              </span>
-                              <span className={styles.relationTagArgs}>
-                                {relatedInfons.map((rel, ri) => {
-                                  const relColor = getInfonColor(rel.infon_type)
-                                  const keywords = getMatchKeywords(rel)
-                                  const label = keywords[0] || rel.iid
-                                  return (
-                                    <React.Fragment key={ri}>
-                                      {ri > 0 && <span className={styles.relationTagSep}>→</span>}
-                                      <span className={styles.relationTagArg} style={{ color: relColor }}>
-                                        {label}
-                                      </span>
-                                    </React.Fragment>
-                                  )
-                                })}
-                              </span>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                  <div className={styles.disclaimer}>Model streams responses. Context comes from this chat history.</div>
-                </div>
+                <MessageComposer
+                  input={input}
+                  setInput={setInput}
+                  onSend={handleSend}
+                  selectedImages={selectedImages}
+                  setSelectedImages={setSelectedImages}
+                  onRemoveImage={removeSelectedImage}
+                  onImageClick={setPreviewImage}
+                  isGenerating={isGenerating}
+                  onStop={stopGenerating}
+                  sendLockState={sendLockState}
+                  pendingHighlights={pendingHighlights}
+                  pendingRelations={pendingRelations}
+                  pendingInfonIndex={pendingInfonIndex}
+                  currentModelIsMultimodal={currentModelIsMultimodal}
+                />
               )}
             </Splitter.Panel>
             <Splitter.Panel defaultSize="35%" min="25%" max="50%">
@@ -2093,49 +904,8 @@ export default function AgentPage() {
                       {(() => {
                         const runs = (infonSessions?.[currentSession?.id]?.runs) || []
                         if (!runs.length) return <div className={styles.infonEmpty}>No infons yet</div>
-                      const sorted = [...runs].sort((a, b) => b.createdAt - a.createdAt)
-                      return sorted.map((r) => {
-                        const title = r.modality === 'text' ? 'Text' : `Image${Number.isFinite(r.imageIndex) ? ` #${r.imageIndex + 1}` : ''}`
-                        const status = r.status
-                        const percent = status === 'done' ? 100 : (status === 'running' ? 66 : (status === 'error' ? 0 : 0))
-                        const allInfons = Array.isArray(r?.resultJson?.infons) ? r.resultJson.infons : []
-                        return (
-                          <div key={r.id} className={styles.infonRunCard}>
-                            <div className={styles.infonRunHeader}>
-                              <div className={styles.infonRunTitle}>
-                                {title}
-                                <span style={{ marginLeft: '8px', fontSize: '12px' }}>
-                                  {status === 'running' && <Spin size="small" />}
-                                  {status === 'done' && <span style={{ color: '#52c41a' }}>✓</span>}
-                                  {status === 'error' && <span style={{ color: '#ff4d4f' }}>✕</span>}
-                                  {status === 'aborted' && <span style={{ color: '#faad14' }}>⏸</span>}
-                                </span>
-                              </div>
-                              <div className={styles.infonRunMeta}>{r.targetType}</div>
-                            </div>
-                            {status === 'error' && r.error ? (
-                              <div className={styles.infonError}>{r.error}</div>
-                            ) : null}
-                            {allInfons.length > 0 ? (
-                              <details className={styles.infonDetails}>
-                                <summary className={styles.infonDetailsSummary}>Infons ({allInfons.length})</summary>
-                                <div className={styles.infonJsonList}>
-                                  {allInfons.map((infon, idx) => (
-                                    <div key={idx} className={styles.infonItem}>
-                                      <div className={styles.infonType}>{infon.infon_type || 'Unknown'}</div>
-                                      <pre className={styles.infonJsonCode}>{JSON.stringify(infon, null, 2)}</pre>
-                                    </div>
-                                  ))}
-                                </div>
-                              </details>
-                            ) : null}
-                            <details className={styles.infonDetails}>
-                              <summary className={styles.infonDetailsSummary}>Raw stream</summary>
-                              <pre className={styles.infonJsonCode}>{r.buffer || ''}</pre>
-                            </details>
-                          </div>
-                        )
-                        })
+                        const sorted = [...runs].sort((a, b) => b.createdAt - a.createdAt)
+                        return sorted.map((r) => <InfonRunCard key={r.id} run={r} />)
                       })()}
                     </div>
                   </div>
@@ -2146,21 +916,8 @@ export default function AgentPage() {
         </div>
       </section>
 
-      {/* 图片预览 Modal（中文注释） */}
-      <Modal
-        open={!!previewImage}
-        onCancel={() => setPreviewImage(null)}
-        footer={null}
-        width="90vw"
-        centered
-        className={styles.imagePreviewModal}
-      >
-        {previewImage && (
-          <div className={styles.imagePreviewContainer}>
-            <img src={previewImage} alt="Preview" className={styles.imagePreviewImg} />
-          </div>
-        )}
-      </Modal>
+      {/* 图片预览 Modal */}
+      <ImagePreviewModal previewImage={previewImage} onClose={() => setPreviewImage(null)} />
     </div>
   )
 }
