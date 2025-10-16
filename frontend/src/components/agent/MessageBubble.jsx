@@ -37,6 +37,8 @@ const MessageBubble = ({
   setEditingContent,
   editingImages,
   setEditingImages,
+  originalEditingContent,
+  originalEditingImages,
   onCopy,
   onEdit,
   onSaveEdit,
@@ -48,7 +50,8 @@ const MessageBubble = ({
   infonIndex,
   pendingHighlights,
   pendingRelations,
-  pendingInfonIndex
+  pendingInfonIndex,
+  sendLockState
 }) => {
   const isEditing = editingMessageId === message.id
 
@@ -62,11 +65,14 @@ const MessageBubble = ({
               setEditingContent={setEditingContent}
               editingImages={editingImages}
               setEditingImages={setEditingImages}
+              originalContent={originalEditingContent}
+              originalImages={originalEditingImages}
               onSave={onSaveEdit}
               onCancel={onCancelEdit}
               pendingHighlights={pendingHighlights}
               pendingRelations={pendingRelations}
               pendingInfonIndex={pendingInfonIndex}
+              sendLockState={sendLockState}
             />
           ) : (
             <>

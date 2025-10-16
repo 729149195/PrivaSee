@@ -9,7 +9,8 @@ export default function HighlightInput({
   placeholder,
   className,
   highlights = [], // [{ keyword, color }]
-  autoSize = { minRows: 1, maxRows: 6 }
+  autoSize = { minRows: 1, maxRows: 6 },
+  disabled = false
 }) {
   const editorRef = useRef(null)
   const [isFocused, setIsFocused] = useState(false)
@@ -165,16 +166,17 @@ export default function HighlightInput({
     <div className={`${styles.container} ${className || ''}`}>
       <div
         ref={editorRef}
-        contentEditable
-        className={styles.editor}
-        onInput={handleInput}
-        onKeyDown={handleKeyDown}
-        onCompositionStart={handleCompositionStart}
-        onCompositionEnd={handleCompositionEnd}
-        onFocus={handleFocus}
-        onBlur={handleBlur}
+        contentEditable={!disabled}
+        className={`${styles.editor} ${disabled ? styles.disabled : ''}`}
+        onInput={disabled ? undefined : handleInput}
+        onKeyDown={disabled ? undefined : handleKeyDown}
+        onCompositionStart={disabled ? undefined : handleCompositionStart}
+        onCompositionEnd={disabled ? undefined : handleCompositionEnd}
+        onFocus={disabled ? undefined : handleFocus}
+        onBlur={disabled ? undefined : handleBlur}
         data-placeholder={placeholder}
         suppressContentEditableWarning
+        style={disabled ? { cursor: 'not-allowed', opacity: 0.6 } : undefined}
       />
     </div>
   )

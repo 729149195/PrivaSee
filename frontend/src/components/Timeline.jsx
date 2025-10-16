@@ -27,11 +27,12 @@ export default function Timeline({ onTimeSelect }) {
   
   // 从所有信息元中提取时间点（中文注释）
   const timelineData = useMemo(() => {
-    const timeMap = new Map() // key: record_time, value: { time, count, infons: [] }
+    const timeMap = new Map() // key: record_time, value: { time, count, infons: [], hasExpiring }
     
     for (const run of runs) {
       if (!run || (run.status !== 'done' && run.status !== 'running')) continue
       const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
+      const isExpiring = run.expiring === true // 检查run是否即将过期
       
       infons.forEach((infon) => {
         const recordTime = infon.record_time
@@ -42,13 +43,18 @@ export default function Timeline({ onTimeSelect }) {
           timeMap.set(timeKey, {
             time: recordTime,
             count: 0,
-            infons: []
+            infons: [],
+            hasExpiring: false
           })
         }
         
         const timeData = timeMap.get(timeKey)
         timeData.count += 1
         timeData.infons.push(infon)
+        // 如果这个时间点包含任何即将过期的信息元，标记为hasExpiring
+        if (isExpiring) {
+          timeData.hasExpiring = true
+        }
       })
     }
     
@@ -190,18 +196,20 @@ export default function Timeline({ onTimeSelect }) {
             {timelineData.map((timeData) => {
               const isSelected = selectedTime === timeData.time
               const isNew = timeData.isNew
+              const isExpiring = timeData.hasExpiring
               const { date, time } = formatTime(timeData.time)
               return (
                 <div
                   key={String(timeData.time)}
-                  className={`${styles.timelineNode} ${isSelected ? styles.timelineNodeActive : ''} ${isNew ? styles.timelineNodeNew : ''}`}
+                  className={`${styles.timelineNode} ${isSelected ? styles.timelineNodeActive : ''} ${isNew ? styles.timelineNodeNew : ''} ${isExpiring ? styles.timelineNodeExpiring : ''}`}
                   onClick={(e) => {
                     e.stopPropagation()
                     if (!isDragging) {
                       handleTimeClick(timeData)
                     }
                   }}
-                  title={`${timeData.time} (${timeData.count} infons)`}
+                  title={`${timeData.time} (${timeData.count} infons)${isExpiring ? ' - 即将过期' : ''}`}
+                  style={isExpiring ? { opacity: 0.4, filter: 'grayscale(80%)' } : undefined}
                 >
                   <div className={styles.timelineDot}>
                     <div className={styles.timelineDotCount}>{timeData.count}</div>

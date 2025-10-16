@@ -10,12 +10,18 @@ import { getInfonColor, getMatchKeywords, buildInfonIndex, getRelatedInfons } fr
  */
 export function useInfonHighlight(currentSession, infonSessions) {
   /**
-   * 获取消息的所有信息元
+   * 获取消息的所有信息元（排除即将过期的）
    */
   const getMessageInfons = (messageId) => {
     if (!currentSession?.id) return []
     const runs = (infonSessions?.[currentSession.id]?.runs) || []
-    const messageRuns = runs.filter(r => r.targetType === 'message' && r.targetKey === messageId && r.modality === 'text')
+    // 排除即将过期的信息元
+    const messageRuns = runs.filter(r => 
+      r.targetType === 'message' && 
+      r.targetKey === messageId && 
+      r.modality === 'text' && 
+      !r.expiring
+    )
     const allInfons = messageRuns.flatMap(r => {
       const infons = Array.isArray(r?.resultJson?.infons) ? r.resultJson.infons : []
       return infons.map(infon => ({ infon, run: r }))

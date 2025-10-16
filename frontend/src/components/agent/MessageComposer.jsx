@@ -21,6 +21,7 @@ import RelationTags from './RelationTags'
  * @param {Array} pendingRelations - 待处理的关系
  * @param {object} pendingInfonIndex - 待处理的信息元索引
  * @param {boolean} currentModelIsMultimodal - 当前模型是否支持多模态
+ * @param {boolean} isEditingMessage - 是否正在编辑消息
  */
 const MessageComposer = ({
   input,
@@ -36,7 +37,8 @@ const MessageComposer = ({
   pendingHighlights,
   pendingRelations,
   pendingInfonIndex,
-  currentModelIsMultimodal
+  currentModelIsMultimodal,
+  isEditingMessage
 }) => {
   return (
     <div className={styles.composerDock}>
@@ -71,12 +73,13 @@ const MessageComposer = ({
             value={input}
             onChange={setInput}
             onPressEnter={onSend}
-            highlights={pendingHighlights}
+            highlights={isEditingMessage ? [] : pendingHighlights}
             autoSize={{ minRows: 1, maxRows: 6 }}
+            disabled={isEditingMessage}
           />
           <div className={styles.composerButtons}>
             <Upload
-              disabled={!currentModelIsMultimodal}
+              disabled={!currentModelIsMultimodal || isEditingMessage}
               multiple
               accept="image/*"
               showUploadList={false}
@@ -89,7 +92,7 @@ const MessageComposer = ({
             >
               <Button 
                 icon={<CameraOutlined />} 
-                disabled={!currentModelIsMultimodal} 
+                disabled={!currentModelIsMultimodal || isEditingMessage} 
                 title={currentModelIsMultimodal ? '' : 'Current model does not support images'} 
               />
             </Upload>
@@ -109,8 +112,8 @@ const MessageComposer = ({
             )}
           </div>
         </div>
-        {/* Pending 关系标签 */}
-        {pendingRelations.length > 0 && (
+        {/* Pending 关系标签（编辑模式下不显示） */}
+        {!isEditingMessage && pendingRelations.length > 0 && (
           <RelationTags 
             relations={pendingRelations} 
             infonIndex={pendingInfonIndex} 

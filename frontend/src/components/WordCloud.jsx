@@ -101,6 +101,8 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
       // 允许 running 状态参与可视化（中文注释）：实现流式显示
       if (!run || (run.status !== 'done' && run.status !== 'running')) continue
       const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
+      const isExpiring = run.expiring === true // 检查run是否即将过期
+      
       infons.forEach((infon) => {
         const type = String(infon.infon_type || '').toUpperCase()
         const iid = infon.iid
@@ -143,6 +145,7 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
             isPending: run.targetType === 'pending',
             iid: iid,
             isRelation: true,
+            isExpiring: isExpiring, // 标记是否即将过期
             count: 1,
             infons: [infon],
             iids: [iid]
@@ -160,7 +163,8 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
           targetType: run.targetType,
           isPending: run.targetType === 'pending',
           iid: iid,
-          isRelation: false
+          isRelation: false,
+          isExpiring: isExpiring // 标记是否即将过期
         })
       })
     }
@@ -179,7 +183,8 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
           infons: [item.infon],
           isPending: item.isPending,
           iids: item.iid ? [item.iid] : [],
-          isRelation: false
+          isRelation: false,
+          isExpiring: item.isExpiring // 传递isExpiring标记
         })
       } else {
         const existing = grouped.get(key)
@@ -187,6 +192,7 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
         existing.confidence = Math.max(existing.confidence, item.confidence)
         existing.infons.push(item.infon)
         existing.isPending = existing.isPending || item.isPending
+        existing.isExpiring = existing.isExpiring || item.isExpiring // 如果有任何信息元即将过期，标记整组
         if (item.iid) existing.iids.push(item.iid)
       }
     })
@@ -406,7 +412,7 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
       .attr('rx', d => d.isRelation ? 8 : 4)
       .attr('ry', d => d.isRelation ? 8 : 4)
       .attr('fill', d => d.isRelation ? 'rgba(255, 255, 255, 0.95)' : d.color)
-      .attr('fill-opacity', d => d.isRelation ? 1 : 0.15)
+      .attr('fill-opacity', d => d.isExpiring ? 0.05 : (d.isRelation ? 1 : 0.15))
       .attr('stroke', d => d.color)
       .attr('stroke-width', d => d.isRelation ? 1.2 : 1)
       .attr('stroke-dasharray', d => d.isRelation ? '3,3' : '0')
@@ -414,6 +420,8 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
       .attr('height', d => d.actualTextHeight + 12)
       .attr('x', d => -(d.actualTextWidth + 12) / 2)
       .attr('y', d => -(d.actualTextHeight + 12) / 2)
+      .style('opacity', d => d.isExpiring ? 0.4 : 1)
+      .style('filter', d => d.isExpiring ? 'grayscale(80%)' : 'none')
 
     // 文本（中文注释）
     wordGroups.append('text')
@@ -423,7 +431,10 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
       .attr('fill', d => d.color)
       .attr('font-size', d => d.isRelation ? Math.max(9, d.fontSize * 0.8) : d.fontSize)
       .attr('font-weight', d => d.isRelation ? 700 : 600)
-      .attr('opacity', d => d.isRelation ? 1 : (0.7 + d.confidence * 0.3))
+      .attr('opacity', d => {
+        if (d.isExpiring) return 0.3
+        return d.isRelation ? 1 : (0.7 + d.confidence * 0.3)
+      })
       .text(d => d.keyword)
 
     // 计数标记（右上角小徽章）（中文注释）：仅用于普通节点

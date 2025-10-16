@@ -1,6 +1,6 @@
 import React from 'react'
 import { Button } from 'antd'
-import { CheckOutlined, CloseOutlined } from '@ant-design/icons'
+import { SendOutlined, CloseOutlined } from '@ant-design/icons'
 import styles from '../AgentPage.module.css'
 import HighlightInput from '../HighlightInput'
 import RelationTags from './RelationTags'
@@ -16,6 +16,9 @@ import RelationTags from './RelationTags'
  * @param {Array} pendingHighlights - 待处理的高亮
  * @param {Array} pendingRelations - 待处理的关系
  * @param {object} pendingInfonIndex - 待处理的信息元索引
+ * @param {object} sendLockState - 发送锁定状态
+ * @param {string} originalContent - 原始内容
+ * @param {Array} originalImages - 原始图片
  */
 const MessageEditor = ({
   editingContent,
@@ -26,8 +29,21 @@ const MessageEditor = ({
   onCancel,
   pendingHighlights,
   pendingRelations,
-  pendingInfonIndex
+  pendingInfonIndex,
+  sendLockState,
+  originalContent,
+  originalImages
 }) => {
+  // 检查内容是否发生变化
+  const hasContentChanged = 
+    editingContent !== originalContent || 
+    JSON.stringify(editingImages) !== JSON.stringify(originalImages)
+  
+  // 按钮是否应该禁用
+  const isSaveDisabled = 
+    !hasContentChanged || // 内容未修改
+    (!editingContent.trim() && editingImages.length === 0) || // 内容为空
+    sendLockState.locked // 正在处理中
   return (
     <div className={styles.editingComposer}>
       {/* 图片预览 */}
@@ -65,8 +81,20 @@ const MessageEditor = ({
       )}
       {/* 操作按钮 */}
       <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
-        <Button size="small" icon={<CheckOutlined />} onClick={onSave} type="primary">保存并重新生成</Button>
-        <Button size="small" icon={<CloseOutlined />} onClick={onCancel}>取消</Button>
+        <Button 
+          icon={<CloseOutlined />} 
+          onClick={onCancel}
+        />
+        <Button 
+          type={sendLockState.locked ? "default" : "primary"}
+          icon={sendLockState.stage === 'ready' && !sendLockState.locked ? <SendOutlined /> : null}
+          onClick={onSave}
+          disabled={isSaveDisabled}
+          loading={sendLockState.locked}
+          className={sendLockState.locked ? styles.sendButtonLocked : ''}
+        >
+          {sendLockState.locked ? sendLockState.label : ''}
+        </Button>
       </div>
     </div>
   )

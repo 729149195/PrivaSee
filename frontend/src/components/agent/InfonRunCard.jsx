@@ -10,9 +10,18 @@ const InfonRunCard = ({ run }) => {
   const title = run.modality === 'text' ? 'Text' : `Image${Number.isFinite(run.imageIndex) ? ` #${run.imageIndex + 1}` : ''}`
   const status = run.status
   const allInfons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
+  const isExpiring = run.expiring === true // 检查是否即将过期
 
   return (
-    <div className={styles.infonRunCard}>
+    <div 
+      className={styles.infonRunCard}
+      style={isExpiring ? { 
+        opacity: 0.4, 
+        filter: 'grayscale(80%)',
+        position: 'relative'
+      } : undefined}
+      title={isExpiring ? '即将过期' : undefined}
+    >
       <div className={styles.infonRunHeader}>
         <div className={styles.infonRunTitle}>
           {title}

@@ -25,7 +25,8 @@ export function useMessageHandlers(
   const [editingMessageId, setEditingMessageId] = useState(null)
   const [editingContent, setEditingContent] = useState('')
   const [editingImages, setEditingImages] = useState([])
-  const [savedMessageInfons, setSavedMessageInfons] = useState(null)
+  const [originalEditingContent, setOriginalEditingContent] = useState('') // 保存原始内容
+  const [originalEditingImages, setOriginalEditingImages] = useState([]) // 保存原始图片
   const isAdoptingPendingRef = useRef(false)
 
   /**
@@ -40,70 +41,98 @@ export function useMessageHandlers(
   }
 
   /**
-   * 开始编辑消息：暂时移除该消息的信息元
+   * 开始编辑消息：进入编辑模式（不立即标记expiring）
    */
   const handleEditMessage = (messageId, content, images) => {
     setEditingMessageId(messageId)
     setEditingContent(content || '')
     setEditingImages(images || [])
+    // 保存原始内容和图片，用于判断是否发生变化
+    setOriginalEditingContent(content || '')
+    setOriginalEditingImages(images || [])
     
-    // 保存并暂时移除该消息的信息元
+    console.log('[EditMessage] 进入编辑模式', { messageId })
+  }
+  
+  /**
+   * 标记即将过期的信息元：在开始提取pending信息元时调用
+   */
+  const markExpiringInfons = () => {
+    if (!editingMessageId) return
+    
     const session = getCurrentSession()
     if (session) {
       const currentInfonSession = infonSessions?.[session.id]
       if (currentInfonSession?.runs) {
-        // 找到该消息的所有信息元runs
-        const messageRuns = currentInfonSession.runs.filter(run => 
-          run.targetType === 'message' && run.targetKey === messageId
-        )
-        
-        if (messageRuns.length > 0) {
-          // 保存
-          setSavedMessageInfons({ messageId, runs: messageRuns })
+        // 找到该消息的索引
+        const messageIndex = session.messages.findIndex(m => m.id === editingMessageId)
+        if (messageIndex !== -1) {
+          // 获取该消息及后续消息的ID
+          const affectedMessageIds = session.messages.slice(messageIndex).map(m => m.id)
           
-          // 从infonSessions中移除
-          const filteredRuns = currentInfonSession.runs.filter(run => 
-            !(run.targetType === 'message' && run.targetKey === messageId)
+          // 检查是否已经标记过
+          const alreadyMarked = currentInfonSession.runs.some(run => 
+            run.targetType === 'message' && 
+            affectedMessageIds.includes(run.targetKey) && 
+            run.expiring
           )
           
-          useStore.setState({
-            infonSessions: {
-              ...infonSessions,
-              [session.id]: { ...currentInfonSession, runs: filteredRuns }
-            }
-          })
+          if (!alreadyMarked) {
+            // 标记这些消息的信息元为即将过期
+            const updatedRuns = currentInfonSession.runs.map(run => {
+              if (run.targetType === 'message' && affectedMessageIds.includes(run.targetKey)) {
+                return { ...run, expiring: true }
+              }
+              return run
+            })
+            
+            useStore.setState({
+              infonSessions: {
+                ...infonSessions,
+                [session.id]: { ...currentInfonSession, runs: updatedRuns }
+              }
+            })
+            
+            console.log('[MarkExpiring] 标记即将过期的信息元', { affectedMessageIds })
+          }
         }
       }
     }
   }
 
   /**
-   * 取消编辑：恢复原消息的信息元
+   * 取消编辑：移除"即将过期"标签，恢复原状态
    */
   const handleCancelEdit = () => {
-    // 恢复之前保存的信息元
-    if (savedMessageInfons) {
-      const session = getCurrentSession()
-      if (session) {
-        const currentInfonSession = infonSessions?.[session.id]
-        if (currentInfonSession) {
-          useStore.setState({
-            infonSessions: {
-              ...infonSessions,
-              [session.id]: {
-                ...currentInfonSession,
-                runs: [...currentInfonSession.runs, ...savedMessageInfons.runs]
-              }
-            }
-          })
-        }
+    const session = getCurrentSession()
+    if (session) {
+      const currentInfonSession = infonSessions?.[session.id]
+      if (currentInfonSession?.runs) {
+        // 移除所有即将过期的标记
+        const restoredRuns = currentInfonSession.runs.map(run => {
+          if (run.expiring) {
+            const { expiring, ...rest } = run
+            return rest
+          }
+          return run
+        })
+        
+        useStore.setState({
+          infonSessions: {
+            ...infonSessions,
+            [session.id]: { ...currentInfonSession, runs: restoredRuns }
+          }
+        })
+        
+        console.log('[CancelEdit] 恢复即将过期的信息元')
       }
-      setSavedMessageInfons(null)
     }
     
     setEditingMessageId(null)
     setEditingContent('')
     setEditingImages([])
+    setOriginalEditingContent('')
+    setOriginalEditingImages([])
     // 清除 pending 信息元
     clearAllPendingInfons?.()
   }
@@ -142,12 +171,16 @@ export function useMessageHandlers(
       return s
     })
     
-    // 清理被删除消息的信息元
+    // 清理被删除消息的信息元和所有即将过期的信息元
     const currentInfonSession = infonSessions?.[session.id]
     if (currentInfonSession?.runs) {
       const filteredRuns = currentInfonSession.runs.filter(run => {
-        // 保留不属于被删除消息的 runs
+        // 删除属于被删除消息的 runs
         if (run.targetType === 'message' && deletedMessageIds.has(run.targetKey)) {
+          return false
+        }
+        // 删除所有即将过期的 runs
+        if (run.expiring) {
           return false
         }
         return true
@@ -159,30 +192,50 @@ export function useMessageHandlers(
           [session.id]: { ...currentInfonSession, runs: filteredRuns }
         }
       })
+      
+      console.log('[SaveEdit] 删除被删除消息的信息元和即将过期的信息元')
     }
     
-    // 清空隐私推理结果
+    // 在发送前，先检查当前是否有pending信息元
+    const hasPendingInfons = currentInfonSession?.runs?.some(run => 
+      run.targetType === 'pending' && run.status === 'done'
+    ) || false
+    
+    // 检查是否有完成的推理结果
     const currentPrivacyInference = privacyInferences?.[session.id]
-    if (currentPrivacyInference) {
-      useStore.setState({
-        privacyInferences: {
-          ...privacyInferences,
-          [session.id]: {
-            status: 'idle',
-            risks: [],
-            buffer: '',
-            abortController: null,
-            createdAt: Date.now(),
-            updatedAt: Date.now()
+    const hasCompletedInference = currentPrivacyInference?.status === 'done'
+    
+    // 如果有pending信息元且推理已完成，说明用户重新编辑过并完成了推理，保持Privacy Risk Analysis状态
+    // 否则清空隐私推理结果并重置推理记录
+    if (hasPendingInfons && hasCompletedInference) {
+      console.log('[SaveEdit] 有pending信息元且推理已完成，保持Privacy Risk Analysis状态')
+    } else {
+      // 清空隐私推理结果
+      if (currentPrivacyInference) {
+        useStore.setState({
+          privacyInferences: {
+            ...privacyInferences,
+            [session.id]: {
+              status: 'idle',
+              risks: [],
+              buffer: '',
+              abortController: null,
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            }
           }
-        }
-      })
+        })
+      }
+      
+      // 重置推理记录，以便在信息元提取完成后触发自动推理
+      lastInferenceRunCountRef.current = ''
+      console.log('[SaveEdit] 清空隐私推理结果并重置推理记录')
     }
     
     // 更新 store 的 sessions
     useStore.setState({ sessions: updatedSessions })
 
-    // 在发送前，先获取当前的 pending runs 用于后续签名计算
+    // 在发送前，先获取当前的 pending runs
     const currentRuns = infonSessions?.[session.id]?.runs || []
     const pendingRunIds = currentRuns
       .filter(run => run.targetType === 'pending' && run.status === 'done')
@@ -196,40 +249,37 @@ export function useMessageHandlers(
     if (editingImages.length > 0) {
       const userId = await useStore.getState().sendMessageWithImages(text, editingImages)
       try {
-        // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
-        if (pendingRunIds.length > 0) {
-          const messageSignature = pendingRunIds.join('|')
-          lastInferenceRunCountRef.current = messageSignature
-          console.log('[SaveEdit] 提前更新签名，避免重复推理', { signature: messageSignature })
-        }
-        
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
         if (result.adopted === 0) {
           // 没有 pending infons，需要重新提取
           startMessageInfons?.(userId)
         }
+        console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0 })
       } catch (_) {}
     } else {
       const userId = await sendMessage(text)
       try {
-        // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
-        if (pendingRunIds.length > 0) {
-          const messageSignature = pendingRunIds.join('|')
-          lastInferenceRunCountRef.current = messageSignature
-          console.log('[SaveEdit] 提前更新签名，避免重复推理', { signature: messageSignature })
-        }
-        
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
         if (result.adopted === 0) {
           // 没有 pending infons，需要重新提取
           startMessageInfons?.(userId)
         }
+        console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0 })
       } catch (_) {}
     }
 
-    // 清除标志并清理编辑状态
+    // 清除标志并清理编辑状态（不调用handleCancelEdit，避免清空pending导致自动推理失败）
     isAdoptingPendingRef.current = false
-    handleCancelEdit()
+    
+    // 手动清理编辑状态
+    setEditingMessageId(null)
+    setEditingContent('')
+    setEditingImages([])
+    setOriginalEditingContent('')
+    setOriginalEditingImages([])
+    
+    // 注意：不清空pending infons，因为它们已经被adopt到message了
+    // clearAllPendingInfons?.() // 这里不调用
     
     antdMessage.success('消息已更新并重新生成')
   }
@@ -456,9 +506,12 @@ export function useMessageHandlers(
     setEditingContent,
     editingImages,
     setEditingImages,
+    originalEditingContent,
+    originalEditingImages,
     isAdoptingPendingRef,
     handleCopyMessage,
     handleEditMessage,
+    markExpiringInfons,
     handleCancelEdit,
     handleSaveEdit,
     handleRetry

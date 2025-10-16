@@ -111,9 +111,12 @@ export default function AgentPage() {
     setEditingContent,
     editingImages,
     setEditingImages,
+    originalEditingContent,
+    originalEditingImages,
     isAdoptingPendingRef,
     handleCopyMessage,
     handleEditMessage,
+    markExpiringInfons,
     handleCancelEdit,
     handleSaveEdit,
     handleRetry
@@ -196,8 +199,9 @@ export default function AgentPage() {
     const hasAnyRunningInfons = runs.some(run => run.status === 'running')
     
     // 优先使用 pending infons（输入框中），其次使用 message infons（已发送）
-    const pendingRuns = runs.filter(run => run.targetType === 'pending' && run.status === 'done')
-    const messageRuns = runs.filter(run => run.targetType === 'message' && run.status === 'done')
+    // 排除即将过期的信息元（用户正在编辑消息时）
+    const pendingRuns = runs.filter(run => run.targetType === 'pending' && run.status === 'done' && !run.expiring)
+    const messageRuns = runs.filter(run => run.targetType === 'message' && run.status === 'done' && !run.expiring)
     
     // 生成信息元签名：优先 pending，没有 pending 则用 message
     let currentSignature = ''
@@ -677,12 +681,69 @@ export default function AgentPage() {
   // 1.5秒 防抖：在用户停止输入后启动 pending 提取（中文注释）
   // 支持主输入框和编辑框两种模式
   useEffect(() => {
-    // 优先使用编辑模式的内容（如果正在编辑）
+    // 检查是否在编辑模式
     const isEditing = editingMessageId !== null
-    const textToUse = isEditing 
-      ? (editingContent || '').trim()
-      : (hasMessages ? (input || '').trim() : (landingInput || '').trim())
-    const imgs = isEditing ? [...editingImages] : [...selectedImages]
+    
+    // 编辑模式下：只响应编辑内容的变化，忽略主输入框
+    if (isEditing) {
+      const textToUse = (editingContent || '').trim()
+      const imgs = [...editingImages]
+      
+      if (pendingTimerRef.current) {
+        clearTimeout(pendingTimerRef.current)
+        pendingTimerRef.current = null
+      }
+      
+      // 检查内容是否真的修改了
+      const hasContentChanged = 
+        editingContent !== originalEditingContent || 
+        JSON.stringify(editingImages) !== JSON.stringify(originalEditingImages)
+      
+      // 如果内容未修改，清空pending并返回
+      if (!hasContentChanged) {
+        setIsWaitingForDebounce(false)
+        if (!isAdoptingPendingRef.current) {
+          try { clearAllPendingInfons?.() } catch (_) {}
+        }
+        return
+      }
+      
+      // 内容已修改：立即标记即将过期的信息元
+      markExpiringInfons?.()
+      
+      // 若无输入也无图片，清空pending并返回
+      if (!textToUse && imgs.length === 0) {
+        setIsWaitingForDebounce(false)
+        if (!isAdoptingPendingRef.current) {
+          try { clearAllPendingInfons?.() } catch (_) {}
+        }
+        return
+      }
+      
+      // 标记正在等待防抖
+      setIsWaitingForDebounce(true)
+      
+      // 启动新的提取
+      pendingTimerRef.current = setTimeout(() => {
+        try { 
+          clearAllPendingInfons?.()
+          startPendingInfons?.(textToUse, imgs)
+          setIsWaitingForDebounce(false)
+        } catch (_) {}
+        pendingTimerRef.current = null
+      }, 1500)
+      
+      return () => {
+        if (pendingTimerRef.current) {
+          clearTimeout(pendingTimerRef.current)
+          pendingTimerRef.current = null
+        }
+      }
+    }
+    
+    // 非编辑模式：处理主输入框和landing输入框
+    const textToUse = (hasMessages ? (input || '').trim() : (landingInput || '').trim())
+    const imgs = [...selectedImages]
     
     if (pendingTimerRef.current) {
       clearTimeout(pendingTimerRef.current)
@@ -719,7 +780,7 @@ export default function AgentPage() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, landingInput, selectedImages, hasMessages, editingMessageId, editingContent, editingImages])
+  }, [input, landingInput, selectedImages, hasMessages, editingMessageId, editingContent, editingImages, originalEditingContent, originalEditingImages])
 
   // 会话拖拽排序事件处理（包装 Hook 函数以提交状态）
   const onDropSession = (id) => (e) => {
@@ -825,6 +886,8 @@ export default function AgentPage() {
                           setEditingContent={setEditingContent}
                           editingImages={editingImages}
                           setEditingImages={setEditingImages}
+                          originalEditingContent={originalEditingContent}
+                          originalEditingImages={originalEditingImages}
                           onCopy={handleCopyMessage}
                           onEdit={handleEditMessage}
                           onSaveEdit={handleSaveEdit}
@@ -837,6 +900,7 @@ export default function AgentPage() {
                           pendingHighlights={pendingHighlights}
                           pendingRelations={pendingRelations}
                           pendingInfonIndex={pendingInfonIndex}
+                          sendLockState={sendLockState}
                         />
                       )
                     })}
@@ -876,6 +940,7 @@ export default function AgentPage() {
                   pendingRelations={pendingRelations}
                   pendingInfonIndex={pendingInfonIndex}
                   currentModelIsMultimodal={currentModelIsMultimodal}
+                  isEditingMessage={editingMessageId !== null}
                 />
               )}
             </Splitter.Panel>
