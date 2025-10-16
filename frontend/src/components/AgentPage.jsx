@@ -111,8 +111,11 @@ export default function AgentPage() {
     setEditingContent,
     editingImages,
     setEditingImages,
+    editingAudios,
+    setEditingAudios,
     originalEditingContent,
     originalEditingImages,
+    originalEditingAudios,
     isAdoptingPendingRef,
     handleCopyMessage,
     handleEditMessage,
@@ -156,6 +159,7 @@ export default function AgentPage() {
 
   const [input, setInput] = useState('')
   const [landingInput, setLandingInput] = useState('')
+  const [selectedAudios, setSelectedAudios] = useState([]) // 已选择的音频
   const mainScrollRef = useRef(null) // 主滚动区域
   const leftPaneScrollRef = useRef(null) // 左侧面板滚动区域
   const [maxContextTokens, setMaxContextTokens] = useState(null)
@@ -541,14 +545,38 @@ export default function AgentPage() {
     return { locked: false, stage: 'ready', label: 'Send' }
   }, [currentSession?.id, infonSessions, privacyInferences, selectedLaw, isWaitingForDebounce])
 
+  const removeSelectedAudio = (index) => {
+    setSelectedAudios((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleTranscriptChange = (audioId, newTranscript) => {
+    setSelectedAudios((prev) => 
+      prev.map(audio => 
+        audio.id === audioId ? { ...audio, transcript: newTranscript } : audio
+      )
+    )
+  }
+
+  const handleEditingTranscriptChange = (audioId, newTranscript) => {
+    setEditingAudios((prev) => 
+      prev.map(audio => 
+        audio.id === audioId ? { ...audio, transcript: newTranscript } : audio
+      )
+    )
+  }
+
   const handleSend = async () => {
     // 隐私保护流程未完成时禁止发送（中文注释）
     if (sendLockState.locked) return
     
     const text = (input || '').trim()
     const imgs = [...selectedImages]
+    const audios = [...selectedAudios]
     const hasImages = imgs.length > 0
-    if (!text && !hasImages) return
+    const hasAudios = audios.length > 0
+    
+    // 检查是否有内容（文本、图片或音频）
+    if (!text && !hasImages && !hasAudios) return
     
     // 在发送前，先获取当前的 pending runs 用于后续签名计算
     const currentRuns = infonSessions?.[currentSession.id]?.runs || []
@@ -560,8 +588,8 @@ export default function AgentPage() {
     // 设置标志，防止useEffect清空pending
     isAdoptingPendingRef.current = true
     
-    if (hasImages) {
-      const userId = await useStore.getState().sendMessageWithImages(text, imgs)
+    if (hasImages || hasAudios) {
+      const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios)
       try {
         // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
         if (pendingRunIds.length > 0) {
@@ -576,12 +604,13 @@ export default function AgentPage() {
           startMessageInfons?.(userId)
         }
       } catch (_) {}
-      // 清空输入和图片（中文注释）
+      // 清空输入、图片和音频（中文注释）
       isAdoptingPendingRef.current = false
       setInput('')
       setSelectedImages([])
+      setSelectedAudios([])
     } else {
-      const userId = await sendMessage(text)
+      const userId = await sendMessage(text, audios)
       try {
         // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
         if (pendingRunIds.length > 0) {
@@ -596,10 +625,11 @@ export default function AgentPage() {
           startMessageInfons?.(userId)
         }
       } catch (_) {}
-      // 清空输入和图片（中文注释）
+      // 清空输入、图片和音频（中文注释）
       isAdoptingPendingRef.current = false
       setInput('')
       setSelectedImages([])
+      setSelectedAudios([])
     }
     
     // 注意：adoptPendingInfonsToMessage 已经处理了 pending infons，无需再清空
@@ -611,8 +641,12 @@ export default function AgentPage() {
     
     const text = (landingInput || '').trim()
     const imgs = [...selectedImages]
+    const audios = [...selectedAudios]
     const hasImages = imgs.length > 0
-    if (!text && !hasImages) return
+    const hasAudios = audios.length > 0
+    
+    // 检查是否有内容（文本、图片或音频）
+    if (!text && !hasImages && !hasAudios) return
     
     // 在发送前，先获取当前的 pending runs 用于后续签名计算
     const currentRuns = infonSessions?.[currentSession.id]?.runs || []
@@ -624,8 +658,8 @@ export default function AgentPage() {
     // 设置标志，防止useEffect清空pending
     isAdoptingPendingRef.current = true
     
-    if (hasImages) {
-      const userId = await useStore.getState().sendMessageWithImages(text, imgs)
+    if (hasImages || hasAudios) {
+      const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios)
       try {
         // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
         if (pendingRunIds.length > 0) {
@@ -640,12 +674,13 @@ export default function AgentPage() {
           startMessageInfons?.(userId)
         }
       } catch (_) {}
-      // 清空输入和图片（中文注释）
+      // 清空输入、图片和音频（中文注释）
       isAdoptingPendingRef.current = false
       setLandingInput('')
       setSelectedImages([])
+      setSelectedAudios([])
     } else {
-      const userId = await sendMessage(text)
+      const userId = await sendMessage(text, audios)
       try {
         // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
         if (pendingRunIds.length > 0) {
@@ -660,10 +695,11 @@ export default function AgentPage() {
           startMessageInfons?.(userId)
         }
       } catch (_) {}
-      // 清空输入和图片（中文注释）
+      // 清空输入、图片和音频（中文注释）
       isAdoptingPendingRef.current = false
       setLandingInput('')
       setSelectedImages([])
+      setSelectedAudios([])
     }
     
     // 注意：adoptPendingInfonsToMessage 已经处理了 pending infons，无需再清空
@@ -676,7 +712,7 @@ export default function AgentPage() {
       abortPendingInfons?.(false)
     } catch (_) {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, landingInput, editingContent])
+  }, [input, landingInput, editingContent, selectedAudios])
 
   // 1.5秒 防抖：在用户停止输入后启动 pending 提取（中文注释）
   // 支持主输入框和编辑框两种模式
@@ -686,8 +722,15 @@ export default function AgentPage() {
     
     // 编辑模式下：只响应编辑内容的变化，忽略主输入框
     if (isEditing) {
-      const textToUse = (editingContent || '').trim()
+      let textToUse = (editingContent || '').trim()
       const imgs = [...editingImages]
+      const audios = [...(editingAudios || [])]
+      
+      // 将音频转录文本添加到编辑文本中
+      if (audios.length > 0) {
+        const audioTranscripts = audios.map(a => a.transcript).filter(Boolean).join(' ')
+        textToUse = textToUse ? `${textToUse} ${audioTranscripts}` : audioTranscripts
+      }
       
       if (pendingTimerRef.current) {
         clearTimeout(pendingTimerRef.current)
@@ -697,7 +740,8 @@ export default function AgentPage() {
       // 检查内容是否真的修改了
       const hasContentChanged = 
         editingContent !== originalEditingContent || 
-        JSON.stringify(editingImages) !== JSON.stringify(originalEditingImages)
+        JSON.stringify(editingImages) !== JSON.stringify(originalEditingImages) ||
+        JSON.stringify(editingAudios) !== JSON.stringify(originalEditingAudios)
       
       // 如果内容未修改，清空pending并返回
       if (!hasContentChanged) {
@@ -711,8 +755,8 @@ export default function AgentPage() {
       // 内容已修改：立即标记即将过期的信息元
       markExpiringInfons?.()
       
-      // 若无输入也无图片，清空pending并返回
-      if (!textToUse && imgs.length === 0) {
+      // 若无输入也无图片也无音频，清空pending并返回
+      if (!textToUse && imgs.length === 0 && audios.length === 0) {
         setIsWaitingForDebounce(false)
         if (!isAdoptingPendingRef.current) {
           try { clearAllPendingInfons?.() } catch (_) {}
@@ -742,17 +786,24 @@ export default function AgentPage() {
     }
     
     // 非编辑模式：处理主输入框和landing输入框
-    const textToUse = (hasMessages ? (input || '').trim() : (landingInput || '').trim())
+    let textToUse = (hasMessages ? (input || '').trim() : (landingInput || '').trim())
     const imgs = [...selectedImages]
+    const audios = [...selectedAudios]
+    
+    // 将音频转录文本添加到待提取文本中
+    if (audios.length > 0) {
+      const audioTranscripts = audios.map(a => a.transcript).filter(Boolean).join(' ')
+      textToUse = textToUse ? `${textToUse} ${audioTranscripts}` : audioTranscripts
+    }
     
     if (pendingTimerRef.current) {
       clearTimeout(pendingTimerRef.current)
       pendingTimerRef.current = null
     }
     
-    // 若无输入也无图片，则清空旧的 pending 并返回（中文注释）
+    // 若无输入也无图片也无音频，则清空旧的 pending 并返回（中文注释）
     // 但如果正在采纳pending信息元（发送消息过程中），则不清空
-    if (!textToUse && imgs.length === 0) {
+    if (!textToUse && imgs.length === 0 && audios.length === 0) {
       setIsWaitingForDebounce(false)
       if (!isAdoptingPendingRef.current) {
         try { clearAllPendingInfons?.() } catch (_) {}
@@ -780,7 +831,7 @@ export default function AgentPage() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, landingInput, selectedImages, hasMessages, editingMessageId, editingContent, editingImages, originalEditingContent, originalEditingImages])
+  }, [input, landingInput, selectedImages, selectedAudios, hasMessages, editingMessageId, editingContent, editingImages, editingAudios, originalEditingContent, originalEditingImages, originalEditingAudios])
 
   // 会话拖拽排序事件处理（包装 Hook 函数以提交状态）
   const onDropSession = (id) => (e) => {
@@ -886,8 +937,12 @@ export default function AgentPage() {
                           setEditingContent={setEditingContent}
                           editingImages={editingImages}
                           setEditingImages={setEditingImages}
+                          editingAudios={editingAudios}
+                          setEditingAudios={setEditingAudios}
                           originalEditingContent={originalEditingContent}
                           originalEditingImages={originalEditingImages}
+                          originalEditingAudios={originalEditingAudios}
+                          onEditingTranscriptChange={handleEditingTranscriptChange}
                           onCopy={handleCopyMessage}
                           onEdit={handleEditMessage}
                           onSaveEdit={handleSaveEdit}
@@ -915,6 +970,10 @@ export default function AgentPage() {
                     setSelectedImages={setSelectedImages}
                     onRemoveImage={removeSelectedImage}
                     onImageClick={setPreviewImage}
+                    selectedAudios={selectedAudios}
+                    setSelectedAudios={setSelectedAudios}
+                    onRemoveAudio={removeSelectedAudio}
+                    onTranscriptChange={handleTranscriptChange}
                     sendLockState={sendLockState}
                     pendingHighlights={pendingHighlights}
                     pendingRelations={pendingRelations}
@@ -934,6 +993,10 @@ export default function AgentPage() {
                   setSelectedImages={setSelectedImages}
                   onRemoveImage={removeSelectedImage}
                   onImageClick={setPreviewImage}
+                  selectedAudios={selectedAudios}
+                  setSelectedAudios={setSelectedAudios}
+                  onRemoveAudio={removeSelectedAudio}
+                  onTranscriptChange={handleTranscriptChange}
                   isGenerating={isGenerating}
                   onStop={stopGenerating}
                   sendLockState={sendLockState}

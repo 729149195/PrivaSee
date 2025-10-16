@@ -5,6 +5,11 @@ sentence-transformers==5.1.1
 scikit-learn==1.7.2
 numpy==1.26.3
 
+# 语音识别
+openai-whisper==20231117
+flask==3.0.0
+flask-cors==4.0.0
+
 # 注意：PyTorch相关包已经存在于环境中
 # torch==2.4.1+cu118
 # torchaudio==2.4.1+cu118

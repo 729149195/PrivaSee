@@ -1393,26 +1393,30 @@ export const useStore = create((set, get) => ({
   },
 
   // 发送消息：立即返回用户消息 ID，流式请求在后台进行
-  async sendMessage(text) {
+  async sendMessage(text, audioDataArray = []) {
     const state = get()
     state._ensureCurrentSession()
     const session = get().getCurrentSession()
     if (!session) return
 
-    // 如历史对话包含图片，则改走多模态 /api/chat，并将图片并入上下文
+    // 如历史对话包含图片或音频，则改走多模态 /api/chat，并将图片并入上下文
     const hasHistoricalImages = (session.messages || []).some(m => Array.isArray(m.images) && m.images.length > 0)
+    const hasHistoricalAudios = (session.messages || []).some(m => Array.isArray(m.audios) && m.audios.length > 0)
+    const hasAudios = Array.isArray(audioDataArray) && audioDataArray.length > 0
     const providerForModel = get().customProviders?.[get().model]
-    if (hasHistoricalImages && !providerForModel) {
-      // 委托到多模态路径（其本身也会“立即返回”）
-      return await get().sendMessageWithImages(text, [])
+    if ((hasHistoricalImages || hasHistoricalAudios || hasAudios) && !providerForModel) {
+      // 委托到多模态路径（其本身也会"立即返回"）
+      return await get().sendMessageWithImages(text, [], audioDataArray)
     }
 
     // 写入用户消息
     const userMsgId = generateId()
+    const audios = Array.isArray(audioDataArray) ? audioDataArray.filter(Boolean) : []
     get()._appendMessage(session.id, {
       id: userMsgId,
       role: 'user',
       content: text,
+      audios: audios, // 添加音频数据
       createdAt: Date.now(),
     })
 
@@ -1535,20 +1539,22 @@ export const useStore = create((set, get) => ({
   },
 
   // 发送带图片的多模态消息：立即返回用户消息 ID，流式在后台执行
-  async sendMessageWithImages(text, imageDataUrls) {
+  async sendMessageWithImages(text, imageDataUrls, audioDataArray = []) {
     const state = get()
     state._ensureCurrentSession()
     const session = get().getCurrentSession()
     if (!session) return
 
-    // 写入用户消息：包含图片预览（data URL）
+    // 写入用户消息：包含图片预览（data URL）和音频数据
     const userMsgId = generateId()
     const imgs = Array.isArray(imageDataUrls) ? imageDataUrls.filter(Boolean) : []
+    const audios = Array.isArray(audioDataArray) ? audioDataArray.filter(Boolean) : []
     get()._appendMessage(session.id, {
       id: userMsgId,
       role: 'user',
       content: text,
       images: imgs,
+      audios: audios, // 添加音频数据
       createdAt: Date.now(),
     })
 

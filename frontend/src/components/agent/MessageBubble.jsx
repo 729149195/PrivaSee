@@ -6,6 +6,7 @@ import MarkdownMessage from '../MarkdownMessage'
 import RelationConnections from './RelationConnections'
 import RelationTags from './RelationTags'
 import MessageEditor from './MessageEditor'
+import AudioTag from './AudioTag'
 
 /**
  * 消息气泡组件
@@ -16,6 +17,8 @@ import MessageEditor from './MessageEditor'
  * @param {function} setEditingContent - 设置编辑内容
  * @param {Array} editingImages - 编辑中的图片
  * @param {function} setEditingImages - 设置编辑图片
+ * @param {Array} editingAudios - 编辑中的音频
+ * @param {function} setEditingAudios - 设置编辑音频
  * @param {function} onCopy - 复制的回调
  * @param {function} onEdit - 编辑的回调
  * @param {function} onSaveEdit - 保存编辑的回调
@@ -38,8 +41,12 @@ const MessageBubble = ({
   setEditingContent,
   editingImages,
   setEditingImages,
+  editingAudios,
+  setEditingAudios,
   originalEditingContent,
   originalEditingImages,
+  originalEditingAudios,
+  onEditingTranscriptChange,
   onCopy,
   onEdit,
   onSaveEdit,
@@ -67,8 +74,12 @@ const MessageBubble = ({
               setEditingContent={setEditingContent}
               editingImages={editingImages}
               setEditingImages={setEditingImages}
+              editingAudios={editingAudios}
+              setEditingAudios={setEditingAudios}
               originalContent={originalEditingContent}
               originalImages={originalEditingImages}
+              originalAudios={originalEditingAudios}
+              onEditingTranscriptChange={onEditingTranscriptChange}
               onSave={onSaveEdit}
               onCancel={onCancelEdit}
               pendingHighlights={pendingHighlights}
@@ -93,6 +104,21 @@ const MessageBubble = ({
                     ))}
                   </div>
                 )}
+                {/* 音频标签 */}
+                {Array.isArray(message.audios) && message.audios.length > 0 && (
+                  <div className={styles.msgAudios}>
+                    {message.audios.map((audio, audioIdx) => (
+                      <AudioTag 
+                        key={audio.id || audioIdx} 
+                        audioData={audio} 
+                        removable={false} 
+                        variant="message"
+                        editable={false}
+                        renderHighlightedText={(text) => renderHighlightedText(text, message.id)}
+                      />
+                    ))}
+                  </div>
+                )}
                 {/* 关系标签 */}
                 {messageRelations.length > 0 && (
                   <RelationTags relations={messageRelations} infonIndex={infonIndex} />
@@ -114,7 +140,7 @@ const MessageBubble = ({
                     type="text" 
                     size="small" 
                     icon={<EditOutlined />}
-                    onClick={() => onEdit(message.id, message.content, message.images)}
+                    onClick={() => onEdit(message.id, message.content, message.images, message.audios)}
                     className={styles.messageActionBtn}
                     disabled={isGenerating}
                   />

@@ -4,6 +4,8 @@ import { SendOutlined, CloseOutlined, CameraOutlined } from '@ant-design/icons'
 import styles from '../AgentPage.module.css'
 import HighlightInput from '../HighlightInput'
 import RelationTags from './RelationTags'
+import AudioRecorder from './AudioRecorder'
+import AudioTag from './AudioTag'
 import { compressImage, checkFileSize, getFileSizeText } from '../../utils/imageCompression'
 
 /**
@@ -12,6 +14,8 @@ import { compressImage, checkFileSize, getFileSizeText } from '../../utils/image
  * @param {function} setEditingContent - 设置编辑内容
  * @param {Array} editingImages - 编辑中的图片
  * @param {function} setEditingImages - 设置编辑图片
+ * @param {Array} editingAudios - 编辑中的音频
+ * @param {function} setEditingAudios - 设置编辑音频
  * @param {function} onSave - 保存的回调
  * @param {function} onCancel - 取消的回调
  * @param {Array} pendingHighlights - 待处理的高亮
@@ -20,6 +24,7 @@ import { compressImage, checkFileSize, getFileSizeText } from '../../utils/image
  * @param {object} sendLockState - 发送锁定状态
  * @param {string} originalContent - 原始内容
  * @param {Array} originalImages - 原始图片
+ * @param {Array} originalAudios - 原始音频
  * @param {boolean} currentModelIsMultimodal - 当前模型是否支持多模态
  */
 const MessageEditor = ({
@@ -27,6 +32,9 @@ const MessageEditor = ({
   setEditingContent,
   editingImages,
   setEditingImages,
+  editingAudios = [],
+  setEditingAudios,
+  onEditingTranscriptChange,
   onSave,
   onCancel,
   pendingHighlights,
@@ -35,17 +43,27 @@ const MessageEditor = ({
   sendLockState,
   originalContent,
   originalImages,
+  originalAudios = [],
   currentModelIsMultimodal
 }) => {
+  const handleAudioAdded = (audioData) => {
+    setEditingAudios?.((prev) => [...prev, audioData])
+  }
+
+  const removeEditingAudio = (index) => {
+    setEditingAudios?.((prev) => prev.filter((_, i) => i !== index))
+  }
+
   // 检查内容是否发生变化
   const hasContentChanged = 
     editingContent !== originalContent || 
-    JSON.stringify(editingImages) !== JSON.stringify(originalImages)
+    JSON.stringify(editingImages) !== JSON.stringify(originalImages) ||
+    JSON.stringify(editingAudios) !== JSON.stringify(originalAudios)
   
   // 按钮是否应该禁用
   const isSaveDisabled = 
     !hasContentChanged || // 内容未修改
-    (!editingContent.trim() && editingImages.length === 0) || // 内容为空
+    (!editingContent.trim() && editingImages.length === 0 && editingAudios.length === 0) || // 内容为空
     sendLockState.locked // 正在处理中
   return (
     <div className={styles.editingComposer}>
@@ -60,6 +78,22 @@ const MessageEditor = ({
                 onClick={() => setEditingImages(editingImages.filter((_, i) => i !== imgIdx))}
               >✕</button>
             </div>
+          ))}
+        </div>
+      )}
+      {/* 音频预览 */}
+      {editingAudios.length > 0 && (
+        <div className={styles.composerAudios}>
+          {editingAudios.map((audio, i) => (
+            <AudioTag
+              key={audio.id}
+              audioData={audio}
+              onRemove={() => removeEditingAudio(i)}
+              onTranscriptChange={onEditingTranscriptChange}
+              removable={true}
+              variant="input"
+              editable={true}
+            />
           ))}
         </div>
       )}
@@ -115,6 +149,10 @@ const MessageEditor = ({
               title={currentModelIsMultimodal ? '上传图片' : '当前模型不支持图片'} 
             />
           </Upload>
+          <AudioRecorder 
+            onAudioAdded={handleAudioAdded}
+            disabled={false}
+          />
           <Button 
             icon={<CloseOutlined />} 
             onClick={onCancel}

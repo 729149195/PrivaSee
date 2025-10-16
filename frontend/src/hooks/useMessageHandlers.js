@@ -25,8 +25,10 @@ export function useMessageHandlers(
   const [editingMessageId, setEditingMessageId] = useState(null)
   const [editingContent, setEditingContent] = useState('')
   const [editingImages, setEditingImages] = useState([])
+  const [editingAudios, setEditingAudios] = useState([])
   const [originalEditingContent, setOriginalEditingContent] = useState('') // 保存原始内容
   const [originalEditingImages, setOriginalEditingImages] = useState([]) // 保存原始图片
+  const [originalEditingAudios, setOriginalEditingAudios] = useState([]) // 保存原始音频
   const isAdoptingPendingRef = useRef(false)
 
   /**
@@ -43,13 +45,15 @@ export function useMessageHandlers(
   /**
    * 开始编辑消息：进入编辑模式（不立即标记expiring）
    */
-  const handleEditMessage = (messageId, content, images) => {
+  const handleEditMessage = (messageId, content, images, audios) => {
     setEditingMessageId(messageId)
     setEditingContent(content || '')
     setEditingImages(images || [])
-    // 保存原始内容和图片，用于判断是否发生变化
+    setEditingAudios(audios || [])
+    // 保存原始内容、图片和音频，用于判断是否发生变化
     setOriginalEditingContent(content || '')
     setOriginalEditingImages(images || [])
+    setOriginalEditingAudios(audios || [])
     
     console.log('[EditMessage] 进入编辑模式', { messageId })
   }
@@ -131,8 +135,10 @@ export function useMessageHandlers(
     setEditingMessageId(null)
     setEditingContent('')
     setEditingImages([])
+    setEditingAudios([])
     setOriginalEditingContent('')
     setOriginalEditingImages([])
+    setOriginalEditingAudios([])
     // 清除 pending 信息元
     clearAllPendingInfons?.()
   }
@@ -275,8 +281,10 @@ export function useMessageHandlers(
     setEditingMessageId(null)
     setEditingContent('')
     setEditingImages([])
+    setEditingAudios([])
     setOriginalEditingContent('')
     setOriginalEditingImages([])
+    setOriginalEditingAudios([])
     
     // 注意：不清空pending infons，因为它们已经被adopt到message了
     // clearAllPendingInfons?.() // 这里不调用
@@ -506,8 +514,11 @@ export function useMessageHandlers(
     setEditingContent,
     editingImages,
     setEditingImages,
+    editingAudios,
+    setEditingAudios,
     originalEditingContent,
     originalEditingImages,
+    originalEditingAudios,
     isAdoptingPendingRef,
     handleCopyMessage,
     handleEditMessage,

@@ -4,6 +4,8 @@ import { SendOutlined, StopOutlined, CameraOutlined } from '@ant-design/icons'
 import styles from '../AgentPage.module.css'
 import HighlightInput from '../HighlightInput'
 import RelationTags from './RelationTags'
+import AudioRecorder from './AudioRecorder'
+import AudioTag from './AudioTag'
 import { compressImage, checkFileSize, getFileSizeText } from '../../utils/imageCompression'
 
 /**
@@ -15,6 +17,10 @@ import { compressImage, checkFileSize, getFileSizeText } from '../../utils/image
  * @param {function} setSelectedImages - 设置已选择图片
  * @param {function} onRemoveImage - 移除图片的回调
  * @param {function} onImageClick - 点击图片的回调
+ * @param {Array} selectedAudios - 已选择的音频
+ * @param {function} setSelectedAudios - 设置已选择音频
+ * @param {function} onRemoveAudio - 移除音频的回调
+ * @param {function} onTranscriptChange - 修改音频转录的回调
  * @param {boolean} isGenerating - 是否正在生成
  * @param {function} onStop - 停止生成的回调
  * @param {object} sendLockState - 发送锁定状态
@@ -32,6 +38,10 @@ const MessageComposer = ({
   setSelectedImages,
   onRemoveImage,
   onImageClick,
+  selectedAudios = [],
+  setSelectedAudios,
+  onRemoveAudio,
+  onTranscriptChange,
   isGenerating,
   onStop,
   sendLockState,
@@ -41,6 +51,10 @@ const MessageComposer = ({
   currentModelIsMultimodal,
   isEditingMessage
 }) => {
+  const handleAudioAdded = (audioData) => {
+    setSelectedAudios?.((prev) => [...prev, audioData])
+  }
+
   return (
     <div className={styles.composerDock}>
       <div className={styles.composer}>
@@ -64,6 +78,22 @@ const MessageComposer = ({
                   }}
                 >✕</button>
               </div>
+            ))}
+          </div>
+        )}
+        {/* 音频预览在输入框上方 */}
+        {selectedAudios.length > 0 && (
+          <div className={styles.composerAudios}>
+            {selectedAudios.map((audio, i) => (
+              <AudioTag
+                key={audio.id}
+                audioData={audio}
+                onRemove={() => onRemoveAudio?.(i)}
+                onTranscriptChange={onTranscriptChange}
+                removable={true}
+                variant="input"
+                editable={true}
+              />
             ))}
           </div>
         )}
@@ -120,11 +150,15 @@ const MessageComposer = ({
                 title={currentModelIsMultimodal ? '' : 'Current model does not support images'} 
               />
             </Upload>
+            <AudioRecorder 
+              onAudioAdded={handleAudioAdded}
+              disabled={isEditingMessage}
+            />
             {!isGenerating ? (
               <Button 
                 type={sendLockState.locked ? "default" : "primary"}
                 icon={sendLockState.stage === 'ready' ? <SendOutlined /> : null}
-                disabled={(!input.trim() && selectedImages.length === 0) || sendLockState.locked}
+                disabled={(!input.trim() && selectedImages.length === 0 && selectedAudios.length === 0) || sendLockState.locked}
                 onClick={onSend}
                 loading={sendLockState.locked}
                 className={sendLockState.locked ? styles.sendButtonLocked : ''}

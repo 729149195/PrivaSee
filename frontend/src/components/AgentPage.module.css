@@ -525,6 +525,14 @@
     border: 1px solid var(--color-border-light);
 }
 
+/* 消息中的音频标签容器 */
+.msgAudios {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+}
+
 .markdown :is(h1, h2, h3, h4, h5, h6) {
     margin: 12px 0 8px;
     font-weight: 700;
@@ -617,6 +625,14 @@
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+/* 音频预览容器：显示在输入框上部 */
+.composerAudios {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
     margin-bottom: 10px;
 }
 

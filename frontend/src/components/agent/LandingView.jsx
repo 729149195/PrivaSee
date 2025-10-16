@@ -4,6 +4,8 @@ import { SendOutlined, CameraOutlined } from '@ant-design/icons'
 import styles from '../AgentPage.module.css'
 import HighlightInput from '../HighlightInput'
 import RelationTags from './RelationTags'
+import AudioRecorder from './AudioRecorder'
+import AudioTag from './AudioTag'
 import { compressImage, checkFileSize, getFileSizeText } from '../../utils/imageCompression'
 
 /**
@@ -15,6 +17,9 @@ import { compressImage, checkFileSize, getFileSizeText } from '../../utils/image
  * @param {function} setSelectedImages - 设置已选择图片
  * @param {function} onRemoveImage - 移除图片的回调
  * @param {function} onImageClick - 点击图片的回调
+ * @param {Array} selectedAudios - 已选择的音频
+ * @param {function} setSelectedAudios - 设置已选择音频
+ * @param {function} onRemoveAudio - 移除音频的回调
  * @param {object} sendLockState - 发送锁定状态
  * @param {Array} pendingHighlights - 待处理的高亮
  * @param {Array} pendingRelations - 待处理的关系
@@ -29,12 +34,20 @@ const LandingView = ({
   setSelectedImages,
   onRemoveImage,
   onImageClick,
+  selectedAudios = [],
+  setSelectedAudios,
+  onRemoveAudio,
+  onTranscriptChange,
   sendLockState,
   pendingHighlights,
   pendingRelations,
   pendingInfonIndex,
   currentModelIsMultimodal
 }) => {
+  const handleAudioAdded = (audioData) => {
+    setSelectedAudios?.((prev) => [...prev, audioData])
+  }
+
   return (
     <div className={styles.landing}>
       <div className={styles.landingTitle}>How can I help you today?</div>
@@ -58,6 +71,21 @@ const LandingView = ({
                   }}
                 >✕</button>
               </div>
+            ))}
+          </div>
+        )}
+        {selectedAudios.length > 0 && (
+          <div className={styles.composerAudios}>
+            {selectedAudios.map((audio, i) => (
+              <AudioTag
+                key={audio.id}
+                audioData={audio}
+                onRemove={() => onRemoveAudio?.(i)}
+                onTranscriptChange={onTranscriptChange}
+                removable={true}
+                variant="input"
+                editable={true}
+              />
             ))}
           </div>
         )}
@@ -104,6 +132,10 @@ const LandingView = ({
                 title={currentModelIsMultimodal ? '' : 'Current model does not support images'} 
               />
             </Upload>
+            <AudioRecorder 
+              onAudioAdded={handleAudioAdded}
+              disabled={false}
+            />
             <HighlightInput
               className={styles.landingInput}
               placeholder="Type your question..."
@@ -117,7 +149,7 @@ const LandingView = ({
               type={sendLockState.locked ? "default" : "primary"}
               icon={sendLockState.stage === 'ready' ? <SendOutlined /> : null}
               onClick={onSend} 
-              disabled={!landingInput.trim() && selectedImages.length === 0}
+              disabled={!landingInput.trim() && selectedImages.length === 0 && selectedAudios.length === 0}
               loading={sendLockState.locked}
               className={sendLockState.locked ? styles.sendButtonLocked : ''}
             >

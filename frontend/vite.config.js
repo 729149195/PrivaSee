@@ -37,6 +37,12 @@ export default defineConfig({
             try { proxyReq.setHeader('host', '127.0.0.1:11434') } catch (_) {}
           })
         }
+      },
+      '/whisper': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/whisper/, '/api')
       }
     }
   }

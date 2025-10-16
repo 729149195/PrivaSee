@@ -124,13 +124,43 @@ export const IMAGE_EXTRACTION = String.raw`
 `;
 
 export const AUDIO_EXTRACTION = String.raw`
-**Audio Extraction**:
-1. **SIT**: Audio context (conversation/announcement/event)
-2. **DESC**: Speakers, entities mentioned, transcribed values
-3. **SCEN**: Time references, locations mentioned, segment timestamps
-4. **REL**: Speech acts (said, announced), speaker-content relations
+**Audio Extraction (Speech-to-Text)**:
 
-Apply text extraction rules to transcription + audio-specific context.
+⚠️ **Important**: Audio is provided as TRANSCRIBED TEXT (not raw audio). Extract as text content with audio-specific annotations.
+
+1. **SIT**: 
+   - Speech context: conversation, announcement, phone call, meeting, interview, etc.
+   - Indicate this is voice input: "语音输入", "voice message", etc.
+
+2. **DESC - Extract from transcribed speech**:
+   - Speakers mentioned ("我", "他说", "张三", etc.)
+   - All entities, names, numbers mentioned in speech
+   - Attribute = exact transcribed words (for highlighting)
+   - Mark speech-specific attributes: tone indicators, filler words ("嗯", "啊", "well", "um")
+   - Extract pronunciation cues if present
+
+3. **SCEN**: 
+   - Time/place references mentioned in speech ("昨天", "明天", "公司", "家里")
+   - Speech timestamps if available (start/end times of segments)
+   - No bbox needed (audio has no visual coordinates)
+
+4. **REL - Speech-specific relations**:
+   - Speech acts: said, stated, asked, announced, replied, confirmed
+   - Speaker-content relations: "说到", "提到", "回答"
+   - Conversational relations: question-answer, topic-response
+   - Entity relationships mentioned in speech
+
+**Key Differences from Text**:
+- Source is spoken language → may have conversational markers, repetitions, corrections
+- Apply same extraction granularity as text
+- Tag entities with speech-specific context where relevant
+- Preserve original spoken phrasing in attribute field
+
+**Example**: Transcribed "嗯，我叫王小明，今年27岁" →
+- SIT: 语音自我介绍
+- DESC: 语气词:嗯, 人称:我, 姓名:王小明, 年龄:27
+- SCEN: 今年
+- REL: 名字关系, 年龄关系
 `;
 
 
