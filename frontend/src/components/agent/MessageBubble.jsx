@@ -165,7 +165,7 @@ const MessageBubble = ({
                 type="text" 
                 size="small" 
                 icon={<RedoOutlined />}
-                onClick={onRetry}
+                onClick={() => onRetry(message.id)}
                 className={styles.messageActionBtn}
                 disabled={isGenerating}
               />

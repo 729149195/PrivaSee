@@ -235,19 +235,44 @@ export function useMessageHandlers(
   }
 
   /**
-   * 重试生成：保存用户消息的信息元，删除用户和助手消息，重新发送，然后迁移信息元
+   * 重试生成：根据点击的assistant消息进行重新生成
+   * @param {string} assistantMessageId - 要重新生成的assistant消息的ID
    */
-  const handleRetry = async () => {
+  const handleRetry = async (assistantMessageId) => {
     const session = getCurrentSession()
     if (!session || !session.messages || session.messages.length === 0) return
 
     const messages = session.messages
-    const lastUserIndex = [...messages].reverse().findIndex(m => m.role === 'user')
-    if (lastUserIndex === -1) return
-
-    const actualIndex = messages.length - 1 - lastUserIndex
-    const lastUserMessage = messages[actualIndex]
-    const oldUserMessageId = lastUserMessage.id
+    
+    // 找到该assistant消息的索引
+    const assistantIndex = messages.findIndex(m => m.id === assistantMessageId)
+    if (assistantIndex === -1) return
+    
+    // 向前查找对应的user消息（通常就是前一条）
+    let userIndex = -1
+    for (let i = assistantIndex - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        userIndex = i
+        break
+      }
+    }
+    if (userIndex === -1) return
+    
+    const userMessage = messages[userIndex]
+    const oldUserMessageId = userMessage.id
+    
+    // 判断这是否是最后一轮对话
+    // 如果该assistant消息是最后一条消息，或者该assistant消息后面只有其他assistant消息（没有user消息），则认为是最后一轮
+    const isLastRound = assistantIndex === messages.length - 1 || 
+                        !messages.slice(assistantIndex + 1).some(m => m.role === 'user')
+    
+    console.log('[Retry] 重新生成', {
+      assistantMessageId,
+      userMessageId: oldUserMessageId,
+      isLastRound,
+      assistantIndex,
+      userIndex
+    })
 
     // 保存该用户消息的信息元
     const currentInfonSession = infonSessions?.[session.id]
@@ -258,12 +283,12 @@ export function useMessageHandlers(
       )
     }
 
-    // 删除从用户消息开始的所有消息（包括用户和助手消息）
-    const updatedMessages = messages.slice(0, actualIndex)
-    const deletedMessages = messages.slice(actualIndex)
+    // 删除从用户消息开始的所有消息（包括用户和该用户后面的所有消息）
+    const updatedMessages = messages.slice(0, userIndex)
+    const deletedMessages = messages.slice(userIndex)
     const deletedMessageIds = deletedMessages.map(m => m.id)
 
-    // 清理被删除消息的信息元（暂时）
+    // 清理被删除消息的信息元
     if (currentInfonSession?.runs) {
       const filteredRuns = currentInfonSession.runs.filter(run => {
         if (run.targetType === 'message' && deletedMessageIds.includes(run.targetKey)) {
@@ -280,22 +305,31 @@ export function useMessageHandlers(
       })
     }
     
-    // 清空隐私推理结果
-    const currentPrivacyInference = privacyInferences?.[session.id]
-    if (currentPrivacyInference) {
-      useStore.setState({
-        privacyInferences: {
-          ...privacyInferences,
-          [session.id]: {
-            status: 'idle',
-            risks: [],
-            buffer: '',
-            abortController: null,
-            createdAt: Date.now(),
-            updatedAt: Date.now()
+    // 如果不是最后一轮，需要清空隐私推理结果并重新推理
+    // 如果是最后一轮，保持当前隐私推理状态不变
+    if (!isLastRound) {
+      console.log('[Retry] 不是最后一轮，清空隐私推理结果')
+      const currentPrivacyInference = privacyInferences?.[session.id]
+      if (currentPrivacyInference) {
+        useStore.setState({
+          privacyInferences: {
+            ...privacyInferences,
+            [session.id]: {
+              status: 'idle',
+              risks: [],
+              buffer: '',
+              abortController: null,
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            }
           }
-        }
-      })
+        })
+      }
+      
+      // 重置推理记录，以便自动触发新的推理
+      lastInferenceRunCountRef.current = ''
+    } else {
+      console.log('[Retry] 是最后一轮，保持隐私推理状态')
     }
 
     // 更新 session
@@ -309,12 +343,12 @@ export function useMessageHandlers(
     useStore.setState({ sessions: updatedSessions })
 
     // 重新发送用户消息
-    const hasImages = Array.isArray(lastUserMessage.images) && lastUserMessage.images.length > 0
+    const hasImages = Array.isArray(userMessage.images) && userMessage.images.length > 0
     let newUserMessageId
     if (hasImages) {
-      newUserMessageId = await useStore.getState().sendMessageWithImages(lastUserMessage.content, lastUserMessage.images)
+      newUserMessageId = await useStore.getState().sendMessageWithImages(userMessage.content, userMessage.images)
     } else {
-      newUserMessageId = await sendMessage(lastUserMessage.content)
+      newUserMessageId = await sendMessage(userMessage.content)
     }
 
     // 迁移信息元到新的用户消息（如果有保存的信息元）
@@ -335,7 +369,84 @@ export function useMessageHandlers(
             }
           }
         })
+        
+        // 如果是最后一轮，更新推理签名以避免触发自动推理
+        if (isLastRound) {
+          // 立即更新签名（user信息元已迁移）
+          const finalRuns = [...latestInfonSession.runs, ...updatedRuns]
+          const messageRuns = finalRuns.filter(
+            run => run.targetType === 'message' && run.status === 'done'
+          )
+          if (messageRuns.length > 0) {
+            const newSignature = messageRuns.map(r => r.id).sort().join('|')
+            lastInferenceRunCountRef.current = newSignature
+            console.log('[Retry] 最后一轮：迁移信息元后更新签名', { newSignature })
+          }
+        }
       }
+    }
+    
+    // 如果是最后一轮，需要持续监听信息元变化并更新签名，避免agent信息元提取完成时触发推理
+    if (isLastRound) {
+      console.log('[Retry] 最后一轮：启动信息元监听，防止触发推理')
+      
+      // 记录agent生成完成前的最后一次检查时间
+      let lastCheckTime = Date.now()
+      let stableCount = 0 // 连续稳定的次数
+      
+      const checkInterval = setInterval(() => {
+        const finalInfonSession = useStore.getState().infonSessions?.[session.id]
+        const currentSession = useStore.getState().sessions?.find(s => s.id === session.id)
+        
+        if (finalInfonSession?.runs && currentSession) {
+          // 检查是否有正在运行的信息元提取
+          const hasRunningInfons = finalInfonSession.runs.some(run => run.status === 'running')
+          // 检查是否正在生成回复
+          const isGeneratingNow = useStore.getState().isGenerating
+          
+          // 如果没有正在运行的信息元提取且不在生成中，认为稳定
+          if (!hasRunningInfons && !isGeneratingNow) {
+            stableCount++
+          } else {
+            stableCount = 0
+          }
+          
+          // 计算当前签名
+          const allMessageRuns = finalInfonSession.runs.filter(
+            run => run.targetType === 'message' && run.status === 'done'
+          )
+          if (allMessageRuns.length > 0) {
+            const newSignature = allMessageRuns.map(r => r.id).sort().join('|')
+            
+            // 如果签名与当前记录不同，更新签名
+            if (lastInferenceRunCountRef.current !== newSignature) {
+              lastInferenceRunCountRef.current = newSignature
+              console.log('[Retry] 最后一轮：检测到信息元变化，更新签名', { 
+                newSignature,
+                hasRunningInfons,
+                isGeneratingNow
+              })
+            }
+          }
+          
+          // 如果连续3次检查都稳定（没有运行中的任务），则停止监听
+          if (stableCount >= 3) {
+            console.log('[Retry] 最后一轮：信息元已稳定，停止监听')
+            clearInterval(checkInterval)
+          }
+          
+          // 超过30秒强制停止
+          if (Date.now() - lastCheckTime > 30000) {
+            console.log('[Retry] 最后一轮：超时，停止监听')
+            clearInterval(checkInterval)
+          }
+        }
+      }, 500) // 每500ms检查一次
+      
+      // 设置超时保护，避免内存泄漏
+      setTimeout(() => {
+        clearInterval(checkInterval)
+      }, 35000)
     }
   }
 
