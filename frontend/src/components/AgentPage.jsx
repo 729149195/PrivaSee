@@ -7,6 +7,7 @@ import WordCloud from './WordCloud'
 import LawTree from './LawTree'
 import Timeline from './Timeline'
 import PrivacyRiskAnalysis from './PrivacyRiskAnalysis'
+import PrivacyProtectionSuggestions from './PrivacyProtectionSuggestions'
 import UserAuth from '../users/UserAuth'
 import { useUserStore } from '../users/userStore'
 import PrivacyModeIndicator from '../users/PrivacyModeIndicator'
@@ -64,6 +65,10 @@ export default function AgentPage() {
     startPrivacyInference,
     abortPrivacyInference,
     selectedLaw,
+    // 隐私保护建议
+    protectionSuggestions,
+    generateProtectionSuggestions,
+    clearProtectionSuggestions,
   } = useStore()
 
   // 用户状态：从用户 store 获取
@@ -356,6 +361,9 @@ export default function AgentPage() {
 
   // 获取当前会话的隐私推理结果（中文注释）
   const inference = useMemo(() => (currentSession ? privacyInferences?.[currentSession.id] : null), [currentSession, privacyInferences])
+  
+  // 获取当前会话的保护建议（中文注释）
+  const suggestions = useMemo(() => (currentSession ? protectionSuggestions?.[currentSession.id] : null), [currentSession, protectionSuggestions])
 
   // 默认注册 DeepSeek 示例：仅添加一次，已存在则跳过
   useEffect(() => {
@@ -706,6 +714,59 @@ export default function AgentPage() {
   }
 
 
+  // 生成隐私保护建议（中文注释）
+  const handleGenerateSuggestions = useCallback(() => {
+    // 检查是否在编辑模式
+    const isEditing = editingMessageId !== null
+    
+    let textToUse = ''
+    if (isEditing) {
+      // 编辑模式：使用编辑框的内容
+      textToUse = (editingContent || '').trim()
+    } else {
+      // 非编辑模式：使用主输入框或landing输入框的内容
+      textToUse = (hasMessages ? (input || '').trim() : (landingInput || '').trim())
+    }
+    
+    if (!textToUse) {
+      console.warn('[Protection] 没有文本可供生成建议')
+      return
+    }
+    
+    generateProtectionSuggestions?.(textToUse, editingMessageId)
+  }, [editingMessageId, editingContent, input, landingInput, hasMessages, generateProtectionSuggestions])
+  
+  // 应用隐私保护建议（中文注释）
+  const handleApplySuggestion = useCallback((suggestion) => {
+    if (!suggestion || !suggestion.modified_text) {
+      console.warn('[Protection] 建议无效')
+      return
+    }
+    
+    const modifiedText = suggestion.modified_text
+    
+    // 检查是否在编辑模式
+    const isEditing = editingMessageId !== null
+    
+    if (isEditing) {
+      // 编辑模式：更新编辑框内容
+      setEditingContent(modifiedText)
+      console.log('[Protection] 已应用建议到编辑框')
+    } else {
+      // 非编辑模式：更新主输入框或landing输入框
+      if (hasMessages) {
+        setInput(modifiedText)
+        console.log('[Protection] 已应用建议到主输入框')
+      } else {
+        setLandingInput(modifiedText)
+        console.log('[Protection] 已应用建议到landing输入框')
+      }
+    }
+    
+    // 清除当前的建议（可选，让用户可以继续查看其他建议）
+    // clearProtectionSuggestions?.()
+  }, [editingMessageId, setEditingContent, hasMessages, setInput, setLandingInput])
+
   // 1.5秒 防抖：在用户停止输入后启动 pending 提取（中文注释）
   // 支持主输入框和编辑框两种模式
   useEffect(() => {
@@ -998,6 +1059,18 @@ export default function AgentPage() {
                   <PrivacyRiskAnalysis
                     inference={inference}
                     selectedLaw={selectedLaw}
+                  />
+                  {/* 隐私保护修改建议组件（中文注释） */}
+                  <PrivacyProtectionSuggestions
+                    suggestions={suggestions}
+                    onApplySuggestion={handleApplySuggestion}
+                    onGenerateSuggestions={handleGenerateSuggestions}
+                    hasInference={inference?.status === 'done'}
+                    hasEditingText={
+                      editingMessageId !== null 
+                        ? (editingContent || '').trim().length > 0
+                        : (hasMessages ? (input || '').trim().length > 0 : (landingInput || '').trim().length > 0)
+                    }
                   />
                   {/* 时间线组件（中文注释）：用于按时间筛选信息元 */}
                   <Timeline onTimeSelect={setSelectedTime} />

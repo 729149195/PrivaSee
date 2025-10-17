@@ -476,7 +476,7 @@ async function streamOpenAIResponse(reader, onDelta) {
   }
 }
 
-// 解析 Ollama /api/chat 流：逐行解析 JSON，并处理“全量快照”或“增量 token”两种格式
+// 解析 Ollama /api/chat 流：逐行解析 JSON，并处理"全量快照"或"增量 token"两种格式
 async function streamOllamaChatResponse(reader, onDelta) {
   const decoder = new TextDecoder('utf-8')
   let buffer = ''
@@ -600,6 +600,10 @@ export const useStore = create((set, get) => ({
   
   // 隐私推理增量解析器状态：按会话维护
   privacyParsers: {}, // { [sessionId]: parserState }
+  
+  // 隐私保护修改建议：按会话维护
+  // protectionSuggestions: { [sessionId]: { status: 'idle'|'running'|'done'|'error', suggestions: Array, error: string, abortController: AbortController|null } }
+  protectionSuggestions: {},
   
   // 选中的法律（用于推理）
   selectedLaw: null, // { key: 'PIPL', data: {...} }
@@ -2384,6 +2388,244 @@ export const useStore = create((set, get) => ({
       return { 
         privacyInferences: newInferences,
         privacyParsers: newParsers
+      }
+    })
+  },
+
+  // ========== 隐私保护修改建议方法 ==========
+  
+  // 生成隐私保护修改建议
+  async generateProtectionSuggestions(text, editingMessageId = null) {
+    const session = get().getCurrentSession()
+    if (!session) {
+      console.warn('[Protection] 没有当前会话')
+      return
+    }
+    
+    if (!text || !text.trim()) {
+      console.warn('[Protection] 文本为空')
+      return
+    }
+    
+    // 获取当前的隐私推理结果和信息元
+    const currentInference = get().privacyInferences?.[session.id]
+    if (!currentInference || currentInference.status !== 'done') {
+      console.warn('[Protection] 隐私推理未完成')
+      set(state => ({
+        protectionSuggestions: {
+          ...state.protectionSuggestions,
+          [session.id]: {
+            status: 'error',
+            error: '请先完成隐私推理分析',
+            suggestions: []
+          }
+        }
+      }))
+      return
+    }
+    
+    const privacyRisks = currentInference.risks || []
+    
+    // 获取当前的信息元
+    const runs = get().infonSessions?.[session.id]?.runs || []
+    const allInfons = []
+    const supersededIids = new Set()
+    
+    // 收集所有有效的信息元
+    runs.forEach(run => {
+      if (run.status === 'done' || run.status === 'running') {
+        const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
+        allInfons.push(...infons)
+        infons.forEach(infon => {
+          if (Array.isArray(infon._supersedes)) {
+            infon._supersedes.forEach(oldIid => supersededIids.add(oldIid))
+          }
+        })
+      }
+    })
+    
+    // 过滤掉被取代的信息元
+    const validInfons = allInfons.filter(infon => infon.iid && !supersededIids.has(infon.iid))
+    
+    console.log(`[Protection] 开始生成建议，风险数: ${privacyRisks.length}，信息元数: ${validInfons.length}`)
+    
+    // 初始化建议状态
+    const abortController = new AbortController()
+    set(state => ({
+      protectionSuggestions: {
+        ...state.protectionSuggestions,
+        [session.id]: {
+          status: 'running',
+          suggestions: [],
+          error: null,
+          abortController
+        }
+      }
+    }))
+    
+    try {
+      // 使用配置的模型生成建议
+      const configuredModel = get().privacyInferenceModel || 'deepseek-chat'
+      let provider = get().customProviders?.[configuredModel]
+      
+      if (configuredModel === 'deepseek-chat' && !provider) {
+        try {
+          get().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
+        } catch (_) { }
+        provider = get().customProviders?.[configuredModel]
+      }
+      
+      const apiUrl = provider ? provider.baseUrl : get().baseUrl
+      const apiKey = provider?.apiKey || ''
+      
+      // 确保 apiUrl 格式正确
+      if (!apiUrl) {
+        throw new Error('未配置API地址')
+      }
+      
+      const normalizedUrl = new URL(apiUrl.replace(/\/$/, '') + '/chat/completions')
+      const fullUrl = normalizedUrl.toString()
+      
+      // 构建提示词
+      const { fillProtectionPrompt } = await import('./templates/protection.js')
+      const prompt = fillProtectionPrompt(text, privacyRisks, validInfons)
+      
+      console.log(`[Protection] 发起建议生成请求到 ${fullUrl}`)
+      console.log(`[Protection] 使用模型: ${configuredModel}`)
+      console.log(`[Protection] Prompt 长度: ${prompt.length} 字符`)
+      
+      try {
+        const response = await fetch(fullUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+          },
+          body: JSON.stringify({
+            model: configuredModel,
+            messages: [{ role: 'user', content: prompt }],
+            stream: false, // 不使用流式，直接获取完整结果
+            temperature: 0.7,
+            max_tokens: 4096,
+          }),
+          signal: abortController.signal
+        })
+        
+        console.log(`[Protection] API响应状态: ${response.status}`)
+        
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '')
+          console.error(`[Protection] API错误响应: ${response.status} - ${errorText}`)
+          throw new Error(`API error: ${response.status} - ${errorText}`)
+        }
+        
+        const data = await response.json()
+        const content = data?.choices?.[0]?.message?.content || ''
+        
+        if (!content) {
+          throw new Error('API返回空内容')
+        }
+        
+        console.log(`[Protection] 收到响应，长度: ${content.length}`)
+        
+        // 解析响应
+        const { parseProtectionResponse, validateSuggestion } = await import('./templates/protection.js')
+        const parsed = parseProtectionResponse(content)
+        
+        if (!parsed || !parsed.suggestions || !Array.isArray(parsed.suggestions)) {
+          throw new Error('无法解析建议响应')
+        }
+        
+        // 验证建议
+        const validSuggestions = parsed.suggestions.filter(validateSuggestion)
+        
+        if (validSuggestions.length === 0) {
+          throw new Error('没有有效的建议')
+        }
+        
+        console.log(`[Protection] 成功生成 ${validSuggestions.length} 个建议`)
+        
+        // 更新状态
+        set(state => ({
+          protectionSuggestions: {
+            ...state.protectionSuggestions,
+            [session.id]: {
+              status: 'done',
+              suggestions: validSuggestions,
+              error: null,
+              abortController: null
+            }
+          }
+        }))
+        
+      } catch (fetchErr) {
+        console.error('[Protection] 网络请求或响应处理失败:', fetchErr)
+        
+        // 区分不同的错误类型
+        let errorMsg = fetchErr.message
+        if (fetchErr.name === 'AbortError') {
+          errorMsg = '请求已中止'
+        } else if (fetchErr instanceof TypeError) {
+          errorMsg = '网络连接失败，请检查API地址是否正确'
+        }
+        
+        throw new Error(errorMsg)
+      }
+      
+    } catch (err) {
+      console.error('[Protection] 生成建议失败:', err)
+      
+      if (err.name === 'AbortError') {
+        set(state => ({
+          protectionSuggestions: {
+            ...state.protectionSuggestions,
+            [session.id]: {
+              status: 'error',
+              error: '建议生成已中止',
+              suggestions: [],
+              abortController: null
+            }
+          }
+        }))
+      } else {
+        set(state => ({
+          protectionSuggestions: {
+            ...state.protectionSuggestions,
+            [session.id]: {
+              status: 'error',
+              error: err.message || '建议生成失败',
+              suggestions: [],
+              abortController: null
+            }
+          }
+        }))
+      }
+    }
+  },
+  
+  // 停止生成建议
+  abortProtectionSuggestions() {
+    const session = get().getCurrentSession()
+    if (!session) return
+    
+    const suggestions = get().protectionSuggestions?.[session.id]
+    if (suggestions?.abortController) {
+      try {
+        suggestions.abortController.abort()
+      } catch (_) {}
+    }
+  },
+  
+  // 清除建议
+  clearProtectionSuggestions() {
+    const session = get().getCurrentSession()
+    if (!session) return
+    
+    set(state => {
+      const newSuggestions = { ...state.protectionSuggestions }
+      delete newSuggestions[session.id]
+      return { 
+        protectionSuggestions: newSuggestions
       }
     })
   },
