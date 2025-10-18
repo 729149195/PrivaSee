@@ -154,11 +154,15 @@
 }
 
 /* 表格 */
+.markdown table {
+    margin: 0;
+}
+
 .tableWrap {
     overflow: auto;
     border: 1px solid #d0d7de;
     border-radius: 8px;
-    margin: 16px 0;
+    margin: 12px 0;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
@@ -166,6 +170,7 @@
     border-collapse: collapse;
     width: 100%;
     font-size: 14px;
+    margin: 0;
 }
 
 .tableWrap th,
