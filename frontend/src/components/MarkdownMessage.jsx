@@ -29,6 +29,49 @@ export default function MarkdownMessage({ content = '' }) {
   }, [content])
 
   const components = useMemo(() => ({
+    // 段落渲染：检查是否包含块级元素，避免嵌套错误
+    p({ children, node, ...props }) {
+      // 简化策略：如果子元素中有任何非文本节点，就使用 div
+      // 这样可以避免所有可能的嵌套问题
+      const childArray = React.Children.toArray(children)
+      const hasNonTextChild = childArray.some(child => {
+        // 如果是 React 元素（不是纯文本或数字）
+        if (React.isValidElement(child)) {
+          // 检查是否是代码块或其他块级元素
+          const type = child.type
+          const className = child.props?.className || ''
+          
+          // code 元素（可能是内联代码或代码块）
+          if (type === 'code') {
+            // 如果有 language- 前缀，说明是代码块
+            if (typeof className === 'string' && className.includes('language-')) {
+              return true
+            }
+          }
+          
+          // 检查是否是 div 或 pre（代码块组件返回的）
+          if (type === 'div' || type === 'pre') {
+            return true
+          }
+          
+          // 检查自定义类名
+          if (typeof className === 'string' && (
+            className.includes('blockWrap') || 
+            className.includes('tableWrap')
+          )) {
+            return true
+          }
+        }
+        return false
+      })
+      
+      // 如果包含非文本子元素，使用 div 替代 p
+      if (hasNonTextChild) {
+        return <div {...props}>{children}</div>
+      }
+      
+      return <p {...props}>{children}</p>
+    },
     // 代码块渲染：添加标题栏与复制
     code({ inline, className, children, ...props }) {
       const match = /language-(\w+)/.exec(className || '')

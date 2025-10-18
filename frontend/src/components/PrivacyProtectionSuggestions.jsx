@@ -124,33 +124,32 @@ export default function PrivacyProtectionSuggestions({
           </div>
         )}
 
-        {/* 正在生成 */}
-        {suggestions?.status === 'running' && (
-          <div style={{ padding: 20, fontSize: 11, color: 'var(--color-text-tertiary)', textAlign: 'center' }}>
-            <div style={{ marginBottom: 8, fontWeight: 600, color: 'var(--color-accent-primary)' }}>
-              正在生成隐私保护建议...
-            </div>
-            <div style={{ fontSize: 10 }}>
-              正在分析您的文本并生成不同级别的保护方案
-            </div>
-          </div>
-        )}
-
-        {/* 建议列表 */}
-        {suggestions?.status === 'done' && suggestions.suggestions && suggestions.suggestions.length > 0 && (
+        {/* 建议列表（支持流式渲染） */}
+        {(suggestions?.status === 'running' || suggestions?.status === 'done') && suggestions.suggestions && suggestions.suggestions.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {suggestions.suggestions.map((suggestion, idx) => {
               const config = getLevelConfig(suggestion.level)
               const isExpanded = expandedLevel === suggestion.level
               
+              // 支持流式渲染：检查建议是否完整
+              const isPartial = suggestion._isComplete === false
+              const level = suggestion.level || 'unknown'
+              const label = suggestion.label || (isPartial ? 'Generating...' : 'Unknown Level')
+              const privacyScore = suggestion.privacy_score || (isPartial ? '...' : 'N/A')
+              const utilityScore = suggestion.utility_score || (isPartial ? '...' : 'N/A')
+              const changesSummary = suggestion.changes_summary || (isPartial ? 'Analyzing modifications...' : '')
+              const modifiedText = suggestion.modified_text || (isPartial ? 'Generating protected text...' : '')
+              const uniqueKey = suggestion._objIndex ?? idx
+              
               return (
                 <div 
-                  key={idx}
+                  key={uniqueKey}
                   style={{
                     padding: 12,
                     borderRadius: 8,
                     background: config.bgColor,
                     border: `1px solid ${config.borderColor}`,
+                    opacity: isPartial ? 0.85 : 1,
                     transition: 'all 0.3s ease'
                   }}
                 >
@@ -160,9 +159,27 @@ export default function PrivacyProtectionSuggestions({
                       <span style={{ color: config.color, fontSize: 14 }}>
                         {config.icon}
                       </span>
-                      <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--color-text-primary)' }}>
-                        {suggestion.label}
+                      <span style={{ 
+                        fontWeight: 600, 
+                        fontSize: 12, 
+                        color: 'var(--color-text-primary)',
+                        fontStyle: isPartial && !suggestion.label ? 'italic' : 'normal'
+                      }}>
+                        {label}
                       </span>
+                      {isPartial && (
+                        <span style={{ 
+                          fontSize: 10, 
+                          color: 'var(--color-accent-primary)', 
+                          fontStyle: 'italic',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}>
+                          <span className={styles.analyzingDot} style={{ width: 4, height: 4 }}></span>
+                          streaming...
+                        </span>
+                      )}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       {/* 评分标签 */}
@@ -173,9 +190,10 @@ export default function PrivacyProtectionSuggestions({
                           borderRadius: 4,
                           background: '#10b981',
                           color: '#fff',
-                          fontWeight: 600
+                          fontWeight: 600,
+                          opacity: isPartial && !suggestion.privacy_score ? 0.6 : 1
                         }}>
-                          🔒 {suggestion.privacy_score}
+                          🔒 {privacyScore}
                         </span>
                       </Tooltip>
                       <Tooltip title="模型效用">
@@ -185,23 +203,27 @@ export default function PrivacyProtectionSuggestions({
                           borderRadius: 4,
                           background: '#3b82f6',
                           color: '#fff',
-                          fontWeight: 600
+                          fontWeight: 600,
+                          opacity: isPartial && !suggestion.utility_score ? 0.6 : 1
                         }}>
-                          ⚡ {suggestion.utility_score}
+                          ⚡ {utilityScore}
                         </span>
                       </Tooltip>
                     </div>
                   </div>
 
                   {/* 修改说明 */}
-                  <div style={{ 
-                    fontSize: 11, 
-                    color: 'var(--color-text-secondary)', 
-                    marginBottom: 8,
-                    lineHeight: 1.5
-                  }}>
-                    {suggestion.changes_summary}
-                  </div>
+                  {changesSummary && (
+                    <div style={{ 
+                      fontSize: 11, 
+                      color: 'var(--color-text-secondary)', 
+                      marginBottom: 8,
+                      lineHeight: 1.5,
+                      fontStyle: isPartial && !suggestion.changes_summary ? 'italic' : 'normal'
+                    }}>
+                      {changesSummary}
+                    </div>
+                  )}
 
                   {/* 展开/收起按钮 */}
                   <div style={{ display: 'flex', gap: 8 }}>
@@ -209,6 +231,7 @@ export default function PrivacyProtectionSuggestions({
                       size="small"
                       onClick={() => setExpandedLevel(isExpanded ? null : suggestion.level)}
                       style={{ fontSize: 11 }}
+                      disabled={isPartial}
                     >
                       {isExpanded ? '收起预览' : '预览修改'}
                     </Button>
@@ -217,6 +240,7 @@ export default function PrivacyProtectionSuggestions({
                       type="primary"
                       onClick={() => onApplySuggestion(suggestion)}
                       style={{ fontSize: 11 }}
+                      disabled={isPartial}
                     >
                       一键应用
                     </Button>
@@ -234,9 +258,10 @@ export default function PrivacyProtectionSuggestions({
                       maxHeight: 200,
                       overflow: 'auto',
                       whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word'
+                      wordBreak: 'break-word',
+                      fontStyle: isPartial && !suggestion.modified_text ? 'italic' : 'normal'
                     }}>
-                      {suggestion.modified_text}
+                      {modifiedText}
                     </div>
                   )}
 
@@ -269,6 +294,18 @@ export default function PrivacyProtectionSuggestions({
                 </div>
               )
             })}
+          </div>
+        )}
+
+        {/* 正在生成但还没有结果 */}
+        {suggestions?.status === 'running' && (!suggestions.suggestions || suggestions.suggestions.length === 0) && (
+          <div style={{ padding: 20, fontSize: 11, color: 'var(--color-text-tertiary)', textAlign: 'center' }}>
+            <div style={{ marginBottom: 8, fontWeight: 600, color: 'var(--color-accent-primary)' }}>
+              正在生成隐私保护建议...
+            </div>
+            <div style={{ fontSize: 10 }}>
+              正在分析您的文本并生成不同级别的保护方案
+            </div>
           </div>
         )}
       </div>

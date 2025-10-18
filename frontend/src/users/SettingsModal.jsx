@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Modal, Select, Button, message, Divider, Space, Upload, Input } from 'antd'
+import { Modal, Select, Button, message, Divider, Space, Upload, Input, Switch } from 'antd'
 import { DownloadOutlined, UploadOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useStore } from '../store'
 import { useUserStore } from './userStore'
@@ -14,6 +14,8 @@ export default function SettingsModal({ open, onClose }) {
     privacyInferenceModel,
     setInfonExtractionModel,
     setPrivacyInferenceModel,
+    inferenceMode,
+    setInferenceMode,
     sessions,
     infonSessions,
     privacyInferences,
@@ -27,6 +29,7 @@ export default function SettingsModal({ open, onClose }) {
   // 本地状态：模型配置
   const [localInfonModel, setLocalInfonModel] = useState('')
   const [localPrivacyModel, setLocalPrivacyModel] = useState('')
+  const [localInferenceMode, setLocalInferenceMode] = useState('extract')
   
   // 本地状态：添加自定义模型
   const [showAddModel, setShowAddModel] = useState(false)
@@ -39,8 +42,9 @@ export default function SettingsModal({ open, onClose }) {
     if (open) {
       setLocalInfonModel(infonExtractionModel || 'deepseek-chat')
       setLocalPrivacyModel(privacyInferenceModel || 'deepseek-chat')
+      setLocalInferenceMode(inferenceMode || 'extract')
     }
-  }, [open, infonExtractionModel, privacyInferenceModel])
+  }, [open, infonExtractionModel, privacyInferenceModel, inferenceMode])
   
   // 构建模型选项列表：包括 ollama 模型和自定义 API 模型
   const modelOptions = React.useMemo(() => {
@@ -58,6 +62,7 @@ export default function SettingsModal({ open, onClose }) {
   const handleSave = () => {
     setInfonExtractionModel(localInfonModel)
     setPrivacyInferenceModel(localPrivacyModel)
+    setInferenceMode(localInferenceMode)
     message.success('设置已保存')
     onClose()
   }
@@ -252,6 +257,32 @@ export default function SettingsModal({ open, onClose }) {
             />
             <div className={styles.hint}>
               用于基于提取的信息元进行隐私风险推理和分析
+            </div>
+          </div>
+        </div>
+        
+        <Divider />
+        
+        {/* 推断模式配置 */}
+        <div className={styles.section}>
+          <h3 className={styles.sectionTitle}>隐私推断模式</h3>
+          
+          <div className={styles.formItem}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Switch 
+                checked={localInferenceMode === 'direct'}
+                onChange={(checked) => setLocalInferenceMode(checked ? 'direct' : 'extract')}
+              />
+              <div>
+                <label className={styles.label} style={{ marginBottom: 0 }}>
+                  {localInferenceMode === 'direct' ? '直接推断模式' : '提取信息元模式'}
+                </label>
+              </div>
+            </div>
+            <div className={styles.hint} style={{ marginTop: 8 }}>
+              {localInferenceMode === 'extract' 
+                ? '先提取信息元，再基于信息元进行隐私推断（推荐）'
+                : '跳过信息元提取步骤，直接对输入内容进行隐私推断'}
             </div>
           </div>
         </div>

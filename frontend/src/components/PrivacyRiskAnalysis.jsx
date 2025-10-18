@@ -37,7 +37,7 @@ export default function PrivacyRiskAnalysis({
   inference, 
   selectedLaw
 }) {
-  const { getCurrentSession, infonSessions } = useStore()
+  const { getCurrentSession, infonSessions, inferenceMode } = useStore()
   const session = getCurrentSession()
   
   // 获取所有信息元映射（中文注释）
@@ -101,11 +101,22 @@ export default function PrivacyRiskAnalysis({
               const privacyExposure = risk.privacy_exposure || (isPartial ? 'Analyzing...' : 'N/A')
               const inferenceChain = risk.inference_chain || (isPartial ? 'Streaming reasoning...' : '')
               const usedInfons = risk.used_infons || []
-              const usedIids = Array.isArray(usedInfons) ? usedInfons.map(x => (typeof x === 'string' ? x : x?.iid)).filter(Boolean) : []
               const uniqueKey = risk._objIndex ?? idx
               
-              // 获取相关信息元数据（中文注释）
-              const relatedInfons = usedIids.map(iid => infonMap.get(iid)).filter(Boolean)
+              // 区分两种模式的 used_infons 格式（中文注释）
+              // - 提取信息元模式：used_infons 是 infon IDs（字符串数组）
+              // - 直接推断模式：used_infons 是文本片段（字符串数组）
+              let relatedInfons = []
+              let textSnippets = []
+              
+              if (inferenceMode === 'direct') {
+                // 直接推断模式：used_infons 是文本片段
+                textSnippets = Array.isArray(usedInfons) ? usedInfons.filter(x => typeof x === 'string' && x.trim()) : []
+              } else {
+                // 提取信息元模式：used_infons 是 infon IDs
+                const usedIids = Array.isArray(usedInfons) ? usedInfons.map(x => (typeof x === 'string' ? x : x?.iid)).filter(Boolean) : []
+                relatedInfons = usedIids.map(iid => infonMap.get(iid)).filter(Boolean)
+              }
               
               return (
                 <div 
@@ -170,45 +181,74 @@ export default function PrivacyRiskAnalysis({
                     </div>
                   )}
                   
-                  {/* 相关信息元列表（中文注释） */}
-                  {relatedInfons.length > 0 && (
+                  {/* 相关信息元/文本片段列表（中文注释） */}
+                  {(relatedInfons.length > 0 || textSnippets.length > 0) && (
                     <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--color-border-light)' }}>
                       <div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 4, fontWeight: 600 }}>
-                        Related Infons ({relatedInfons.length})
+                        {inferenceMode === 'direct' ? `Related Text (${textSnippets.length})` : `Related Infons (${relatedInfons.length})`}
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {relatedInfons.map((infon, infonIdx) => {
-                          const keyword = getInfonKeyword(infon)
-                          const color = getInfonColor(infon.infon_type)
-                          const infonType = String(infon.infon_type || '').toUpperCase()
-                          const isRelation = infonType === 'REL'
-                          
-                          // 过滤掉 SIT 类型（中文注释）
-                          if (infonType === 'SIT') {
-                            return null
-                          }
-                          
-                          return (
+                        {inferenceMode === 'direct' ? (
+                          // 直接推断模式：显示文本片段
+                          textSnippets.map((snippet, snippetIdx) => (
                             <div
-                              key={infon.iid || infonIdx}
+                              key={snippetIdx}
                               style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 padding: '4px 8px',
-                                borderRadius: isRelation ? 8 : 4,
-                                background: isRelation ? 'rgba(255, 255, 255, 0.95)' : `${color}26`,
-                                border: `1px solid ${color}`,
-                                borderStyle: isRelation ? 'dashed' : 'solid',
+                                borderRadius: 4,
+                                background: '#3b82f626',
+                                border: '1px solid #3b82f6',
                                 fontSize: 9,
-                                fontWeight: isRelation ? 700 : 600,
-                                color: color,
-                                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
+                                fontWeight: 500,
+                                color: '#3b82f6',
+                                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+                                maxWidth: '200px',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
                               }}
+                              title={snippet}
                             >
-                              {keyword}
+                              {snippet}
                             </div>
-                          )
-                        })}
+                          ))
+                        ) : (
+                          // 提取信息元模式：显示信息元
+                          relatedInfons.map((infon, infonIdx) => {
+                            const keyword = getInfonKeyword(infon)
+                            const color = getInfonColor(infon.infon_type)
+                            const infonType = String(infon.infon_type || '').toUpperCase()
+                            const isRelation = infonType === 'REL'
+                            
+                            // 过滤掉 SIT 类型（中文注释）
+                            if (infonType === 'SIT') {
+                              return null
+                            }
+                            
+                            return (
+                              <div
+                                key={infon.iid || infonIdx}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  padding: '4px 8px',
+                                  borderRadius: isRelation ? 8 : 4,
+                                  background: isRelation ? 'rgba(255, 255, 255, 0.95)' : `${color}26`,
+                                  border: `1px solid ${color}`,
+                                  borderStyle: isRelation ? 'dashed' : 'solid',
+                                  fontSize: 9,
+                                  fontWeight: isRelation ? 700 : 600,
+                                  color: color,
+                                  boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
+                                }}
+                              >
+                                {keyword}
+                              </div>
+                            )
+                          })
+                        )}
                       </div>
                     </div>
                   )}

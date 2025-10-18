@@ -529,6 +529,12 @@ export const useStore = create((set, get) => ({
   infonExtractionModel: 'deepseek-chat', // 信息元提取模型
   privacyInferenceModel: 'deepseek-chat', // 隐私推理模型
   
+  // 推断模式（中文注释）：extract（提取信息元）或 direct（直接推断）
+  inferenceMode: 'extract', // 默认为提取信息元模式
+  
+  // Pending用户输入（中文注释）：用于直接推断模式下获取未发送的输入
+  pendingUserInput: '',
+  
   // 设置信息元提取模型
   setInfonExtractionModel: (modelId) => {
     set({ infonExtractionModel: modelId })
@@ -537,6 +543,16 @@ export const useStore = create((set, get) => ({
   // 设置隐私推理模型
   setPrivacyInferenceModel: (modelId) => {
     set({ privacyInferenceModel: modelId })
+  },
+  
+  // 设置推断模式
+  setInferenceMode: (mode) => {
+    set({ inferenceMode: mode })
+  },
+  
+  // 设置pending用户输入
+  setPendingUserInput: (input) => {
+    set({ pendingUserInput: input })
   },
   
   // 设置当前用户（登录时调用）
@@ -828,6 +844,106 @@ export const useStore = create((set, get) => ({
     set((state) => ({
       sessions: state.sessions.map(s => s.id === id ? { ...s, title, updatedAt: Date.now() } : s),
     }))
+  },
+
+  // 自动生成会话标题（基于第一条消息）
+  async generateSessionTitle(sessionId) {
+    const session = get().sessions.find(s => s.id === sessionId)
+    if (!session) return
+    
+    // 只有在标题为默认值时才生成
+    if (!session.title.startsWith('New Chat')) return
+    
+    // 获取第一条用户消息
+    const firstUserMessage = session.messages.find(msg => msg.role === 'user')
+    if (!firstUserMessage) return
+    
+    // 提取消息内容
+    let content = ''
+    if (typeof firstUserMessage.content === 'string') {
+      content = firstUserMessage.content
+    } else if (Array.isArray(firstUserMessage.content)) {
+      // 多模态消息，提取文本部分
+      const textParts = firstUserMessage.content
+        .filter(part => part.type === 'text')
+        .map(part => part.text)
+      content = textParts.join(' ')
+    }
+    
+    if (!content || content.trim().length === 0) return
+    
+    // 限制内容长度
+    const truncatedContent = content.slice(0, 500)
+    
+    try {
+      // 使用 DeepSeek API 生成标题
+      const configuredModel = get().infonExtractionModel || 'deepseek-chat'
+      let provider = get().customProviders?.[configuredModel]
+      
+      if (configuredModel === 'deepseek-chat' && !provider) {
+        try {
+          get().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
+        } catch (_) { }
+        provider = get().customProviders?.[configuredModel]
+      }
+      
+      const apiUrl = provider ? provider.baseUrl : get().baseUrl
+      const apiKey = provider ? provider.apiKey : null
+      const modelName = provider ? provider.id : (get().model || 'llama3.2')
+      
+      const requestBody = {
+        model: modelName,
+        messages: [
+          {
+            role: 'system',
+            content: '你是一个对话标题生成助手。请根据用户的第一条消息，生成一个简短的对话标题（5-10个字）。只输出标题本身，不要有任何解释或标点符号。'
+          },
+          {
+            role: 'user',
+            content: `请为以下消息生成一个简短的对话标题：\n\n${truncatedContent}`
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 20
+      }
+      
+      const headers = {
+        'Content-Type': 'application/json'
+      }
+      
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`
+      }
+      
+      const response = await fetch(`${apiUrl}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody)
+      })
+      
+      if (!response.ok) {
+        console.error('[Session Title] API错误:', response.statusText)
+        return
+      }
+      
+      const data = await response.json()
+      const generatedTitle = data.choices?.[0]?.message?.content?.trim()
+      
+      if (generatedTitle && generatedTitle.length > 0) {
+        // 清理标题：移除引号、换行符等
+        const cleanTitle = generatedTitle
+          .replace(/^["'「『]+|["'」』]+$/g, '')
+          .replace(/\n/g, ' ')
+          .slice(0, 50) // 限制最大长度
+        
+        if (cleanTitle.length > 0) {
+          get().renameSession(sessionId, cleanTitle)
+          console.log('[Session Title] 自动生成标题:', cleanTitle)
+        }
+      }
+    } catch (error) {
+      console.error('[Session Title] 生成失败:', error)
+    }
   },
 
   // 追加消息：用于用户或助手消息写入
@@ -1991,39 +2107,87 @@ export const useStore = create((set, get) => ({
     const session = get().getCurrentSession()
     if (!session) return
     
-    const { selectedLaw, infonSessions } = get()
+    const { selectedLaw, infonSessions, inferenceMode } = get()
     if (!selectedLaw || !selectedLaw.data) {
       console.warn('No law selected for inference')
       return
     }
     
-    // 获取当前会话的所有信息元（中文注释）：只使用增量更新后保留的信息元
-    const runs = infonSessions?.[session.id]?.runs || []
-    const allRawInfons = []
-    const supersededIids = new Set() // 收集所有被取代的信息元iid
+    let allInfons = []
+    let directInput = null
     
-    // 第一遍：收集所有信息元和被取代的iid
-    runs.forEach(run => {
-      if (run.status === 'done' || run.status === 'running') {
-        const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
-        allRawInfons.push(...infons)
-        // 收集被取代的iid
-        infons.forEach(infon => {
-          if (Array.isArray(infon._supersedes)) {
-            infon._supersedes.forEach(oldIid => supersededIids.add(oldIid))
-          }
-        })
+    // 检查推断模式（中文注释）：extract（提取信息元）或 direct（直接推断）
+    if (inferenceMode === 'direct') {
+      // 直接推断模式：收集用户输入内容（包括pending和已发送的消息）
+      const textParts = []
+      
+      // 辅助函数：从消息内容中提取文本
+      const extractTextFromContent = (content) => {
+        if (!content) return ''
+        if (typeof content === 'string') return content
+        if (Array.isArray(content)) {
+          // 多模态内容：提取所有text类型的部分
+          return content
+            .filter(part => part && part.type === 'text')
+            .map(part => part.text || '')
+            .join('\n')
+        }
+        return ''
       }
-    })
-    
-    // 第二遍：过滤掉被取代的信息元
-    const allInfons = allRawInfons.filter(infon => {
-      return infon.iid && !supersededIids.has(infon.iid)
-    })
-    
-    if (allInfons.length === 0) {
-      console.warn('No infons available for inference')
-      return
+      
+      // 1. 获取所有已发送的用户消息
+      const userMessages = (session.messages || []).filter(msg => msg.role === 'user')
+      userMessages.forEach(msg => {
+        const text = extractTextFromContent(msg.content)
+        if (text) textParts.push(text)
+      })
+      
+      // 2. 获取pending输入（如果有）
+      const pendingInput = get().pendingUserInput || ''
+      if (pendingInput && pendingInput.trim()) {
+        textParts.push(pendingInput.trim())
+      }
+      
+      // 合并所有文本
+      directInput = textParts.filter(Boolean).join('\n\n')
+      
+      if (!directInput || directInput.trim().length === 0) {
+        console.warn('[Privacy Inference] 直接推断模式：无用户输入内容')
+        return
+      }
+      
+      console.log(`[Privacy Inference] 直接推断模式，用户输入长度: ${directInput.length} 字符，来源：${userMessages.length}条已发送消息 + ${pendingInput ? '1条pending输入' : '0条pending输入'}`)
+    } else {
+      // 提取信息元模式：获取当前会话的所有信息元
+      const runs = infonSessions?.[session.id]?.runs || []
+      const allRawInfons = []
+      const supersededIids = new Set() // 收集所有被取代的信息元iid
+      
+      // 第一遍：收集所有信息元和被取代的iid
+      runs.forEach(run => {
+        if (run.status === 'done' || run.status === 'running') {
+          const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
+          allRawInfons.push(...infons)
+          // 收集被取代的iid
+          infons.forEach(infon => {
+            if (Array.isArray(infon._supersedes)) {
+              infon._supersedes.forEach(oldIid => supersededIids.add(oldIid))
+            }
+          })
+        }
+      })
+      
+      // 第二遍：过滤掉被取代的信息元
+      allInfons = allRawInfons.filter(infon => {
+        return infon.iid && !supersededIids.has(infon.iid)
+      })
+      
+      if (allInfons.length === 0) {
+        console.warn('No infons available for inference')
+        return
+      }
+      
+      console.log(`[Privacy Inference] 提取信息元模式，使用 ${allInfons.length} 个信息元进行推理`)
     }
     
     // 初始化推理状态（中文注释）：记录当前选中的法律key，用于匹配高亮
@@ -2054,8 +2218,6 @@ export const useStore = create((set, get) => ({
     }))
     
     try {
-      console.log(`[Privacy Inference] 使用 ${allInfons.length} 个信息元进行推理`)
-      
       // 使用用户配置的隐私推理模型（中文注释）：优先使用配置，回退到 DeepSeek
       const configuredModel = get().privacyInferenceModel || 'deepseek-chat'
       let provider = get().customProviders?.[configuredModel]
@@ -2072,9 +2234,11 @@ export const useStore = create((set, get) => ({
       const apiUrl = provider ? provider.baseUrl : get().baseUrl
       const apiKey = provider?.apiKey || ''
       
-      // 构建推理提示词
+      // 构建推理提示词（中文注释）：根据模式传递不同的参数
       const { fillPromptTemplate } = await import('./templates/inference.js')
-      const prompt = fillPromptTemplate(allInfons, selectedLaw.data)
+      const prompt = inferenceMode === 'direct' 
+        ? fillPromptTemplate([], selectedLaw.data, directInput)  // 直接推断模式：传递用户输入
+        : fillPromptTemplate(allInfons, selectedLaw.data, null)  // 提取信息元模式：传递信息元列表
       
       console.log(`[Privacy Inference] 发起推理请求到 ${apiUrl}，使用模型: ${configuredModel}`)
       console.log(`[Privacy Inference] Prompt 长度: ${prompt.length} 字符`)
@@ -2647,7 +2811,8 @@ export const useStore = create((set, get) => ({
           selectedLawIdx: data.selectedLawIdx ?? 0,
           selectedPrivacyItems: data.selectedPrivacyItems || [],
           infonExtractionModel: data.infonExtractionModel || 'deepseek-chat',
-          privacyInferenceModel: data.privacyInferenceModel || 'deepseek-chat'
+          privacyInferenceModel: data.privacyInferenceModel || 'deepseek-chat',
+          inferenceMode: data.inferenceMode || 'extract' // 加载推断模式
         })
         console.log('[PrivaSee] 用户历史数据已加载')
       } else {
@@ -2660,7 +2825,8 @@ export const useStore = create((set, get) => ({
           privacyInferences: {},
           customPrivacyItems: [],
           selectedLawIdx: 0,
-          selectedPrivacyItems: []
+          selectedPrivacyItems: [],
+          inferenceMode: 'extract' // 默认为提取信息元模式
         })
       }
     } catch (error) {
@@ -2671,7 +2837,7 @@ export const useStore = create((set, get) => ({
   // 内部：保存用户历史数据
   _saveUserHistory(userId) {
     try {
-      const { sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel } = get()
+      const { sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel, inferenceMode } = get()
       
       // 清理不可序列化的字段（中文注释）：移除 abortController
       const serializableInferences = {}
@@ -2683,7 +2849,7 @@ export const useStore = create((set, get) => ({
         }
       })
       
-      saveUserSessions(userId, sessions, infonSessions, serializableInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel)
+      saveUserSessions(userId, sessions, infonSessions, serializableInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel, inferenceMode)
     } catch (error) {
       console.error('[PrivaSee] 保存用户历史失败:', error)
     }

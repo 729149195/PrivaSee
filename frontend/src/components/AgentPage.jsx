@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { useStore } from '../store'
 import styles from './AgentPage.module.css'
-import { Splitter, Progress, Spin } from 'antd'
+import { Splitter, Progress, Spin, Switch, Tooltip } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import WordCloud from './WordCloud'
 import LawTree from './LawTree'
@@ -48,6 +48,7 @@ export default function AgentPage() {
     switchSession,
     deleteSession,
     renameSession,
+    generateSessionTitle,
     getCurrentSession,
     sendMessage,
     stopGenerating,
@@ -69,6 +70,10 @@ export default function AgentPage() {
     protectionSuggestions,
     generateProtectionSuggestions,
     clearProtectionSuggestions,
+    // 推断模式
+    inferenceMode,
+    setInferenceMode,
+    setPendingUserInput,
   } = useStore()
 
   // 用户状态：从用户 store 获取
@@ -195,14 +200,70 @@ export default function AgentPage() {
     lastInferenceInfonSignatureRef.current = '' // 重置信息元签名
   }, [currentSessionId])
 
-  // 隐私推理自动触发逻辑（中文注释）：信息元提取完成后自动触发
-  // 核心逻辑：pending 或 message 信息元提取完成就触发推理
+  // 隐私推理自动触发逻辑（中文注释）：信息元提取完成后或用户输入后自动触发
+  // 核心逻辑：
+  // - 提取信息元模式：pending 或 message 信息元提取完成就触发推理
+  // - 直接推断模式：用户消息发送后或pending输入变化后自动触发推理
   useEffect(() => {
     if (!currentSession?.id || !selectedLaw) return
     
-    const runs = infonSessions?.[currentSession.id]?.runs || []
     const currentInference = privacyInferences?.[currentSession.id]
     const isInferenceRunning = currentInference?.status === 'running'
+    
+    // 直接推断模式：监听用户消息和pending输入的变化
+    if (inferenceMode === 'direct') {
+      const userMessages = (currentSession.messages || []).filter(msg => msg.role === 'user')
+      const pendingInput = (isWaitingForDebounce || input || landingInput) ? (input || landingInput || '').trim() : ''
+      
+      // 生成签名：包括已发送消息ID和pending输入的哈希
+      const messageIds = userMessages.map(msg => msg.id).sort().join('|')
+      const pendingHash = pendingInput ? `pending:${pendingInput.length}:${pendingInput.slice(0, 50)}` : ''
+      const currentSignature = `${messageIds}${pendingHash ? '|' + pendingHash : ''}`
+      
+      // 如果没有任何输入，清空签名并返回
+      if (userMessages.length === 0 && !pendingInput) {
+        if (lastInferenceRunCountRef.current) {
+          lastInferenceRunCountRef.current = ''
+        }
+        return
+      }
+      
+      // 初始化：如果是刷新进入且已有推理结果，直接记录当前签名，不触发推理
+      if (!lastInferenceRunCountRef.current && currentInference?.status === 'done' && !pendingInput) {
+        console.log('[Privacy Inference] 直接推断模式初始化：已有推理结果，记录签名')
+        lastInferenceRunCountRef.current = currentSignature
+        return
+      }
+      
+      // 检测到变化，触发推理
+      if (currentSignature !== lastInferenceRunCountRef.current && currentSignature) {
+        console.log('[Privacy Inference] 直接推断模式：检测到输入变化，触发推理', {
+          signature: currentSignature,
+          lastSignature: lastInferenceRunCountRef.current,
+          messageCount: userMessages.length,
+          hasPending: !!pendingInput,
+          inferenceStatus: currentInference?.status
+        })
+        lastInferenceRunCountRef.current = currentSignature
+        
+        // 如果推理正在运行，先中止
+        if (isInferenceRunning) {
+          console.log('[Privacy Inference] 中止当前推理')
+          abortPrivacyInference?.()
+        }
+        
+        // 延迟触发推理
+        const timer = setTimeout(() => {
+          startPrivacyInference?.()
+        }, 800)
+        return () => clearTimeout(timer)
+      }
+      
+      return
+    }
+    
+    // 提取信息元模式：监听信息元提取状态
+    const runs = infonSessions?.[currentSession.id]?.runs || []
     
     // 检查是否有任何信息元正在提取（message 或 pending）
     const hasAnyRunningInfons = runs.some(run => run.status === 'running')
@@ -259,13 +320,22 @@ export default function AgentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     infonSessions?.[currentSessionId]?.runs,
+    currentSession?.messages, // 添加消息依赖，用于直接推断模式
     currentSessionId,
     selectedLaw?.key,
+    inferenceMode,
+    input, // 直接推断模式需要监听pending输入
+    landingInput,
+    isWaitingForDebounce,
   ])
 
   // 推理中止逻辑1：任何信息元开始重新提取时（含 pending/message），若推理运行则立刻中止并恢复上次结果（中文注释）
+  // 注意：仅在提取信息元模式下有效
   useEffect(() => {
     if (!currentSession?.id) return
+    
+    // 直接推断模式：跳过此逻辑
+    if (inferenceMode === 'direct') return
     
     const runs = infonSessions?.[currentSession.id]?.runs || []
     const currentInference = privacyInferences?.[currentSession.id]
@@ -284,7 +354,8 @@ export default function AgentPage() {
   }, [
     infonSessions?.[currentSessionId]?.runs,
     currentSessionId,
-    privacyInferences?.[currentSessionId]?.status
+    privacyInferences?.[currentSessionId]?.status,
+    inferenceMode,
   ])
 
   // 推理中止逻辑2：切换法律时，中止正在进行的推理（中文注释）
@@ -398,6 +469,16 @@ export default function AgentPage() {
     }, 100)
     return () => clearTimeout(timer)
   }, [currentSessionId, currentSession?.messages?.length])
+
+  // 更新pending用户输入状态（用于直接推断模式）
+  useEffect(() => {
+    if (inferenceMode === 'direct') {
+      const pendingText = hasMessages ? (input || '').trim() : (landingInput || '').trim()
+      setPendingUserInput(pendingText)
+    } else {
+      setPendingUserInput('')
+    }
+  }, [input, landingInput, hasMessages, inferenceMode, setPendingUserInput])
 
   // 拉取模型列表（中文注释）：页面挂载时
   useEffect(() => { fetchModels?.() }, [fetchModels])
@@ -513,6 +594,20 @@ export default function AgentPage() {
       return { locked: true, stage: 'waiting', label: 'Preparing...' }
     }
     
+    // 直接推断模式：跳过信息元相关的锁定检查
+    if (inferenceMode === 'direct') {
+      const currentInference = privacyInferences?.[currentSession.id]
+      const isInferenceRunning = currentInference?.status === 'running'
+      
+      // 只检查隐私推理状态
+      if (isInferenceRunning) {
+        return { locked: true, stage: 'analyzing', label: 'Privacy Analyzing...' }
+      }
+      
+      return { locked: false, stage: 'ready', label: 'Send' }
+    }
+    
+    // 提取信息元模式：完整的流程检查
     const runs = infonSessions?.[currentSession.id]?.runs || []
     // 检查 pending 和 message 级别的信息元提取
     const hasRunningPendingInfons = runs.some(run => run.status === 'running' && run.targetType === 'pending')
@@ -551,7 +646,7 @@ export default function AgentPage() {
     }
     
     return { locked: false, stage: 'ready', label: 'Send' }
-  }, [currentSession?.id, infonSessions, privacyInferences, selectedLaw, isWaitingForDebounce])
+  }, [currentSession?.id, infonSessions, privacyInferences, selectedLaw, isWaitingForDebounce, inferenceMode])
 
   const removeSelectedAudio = (index) => {
     setSelectedAudios((prev) => prev.filter((_, i) => i !== index))
@@ -607,8 +702,8 @@ export default function AgentPage() {
         }
         
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0) {
-          // 没有 pending infons，需要重新提取
+        if (result.adopted === 0 && inferenceMode === 'extract') {
+          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
           startMessageInfons?.(userId)
         }
       } catch (_) {}
@@ -628,8 +723,8 @@ export default function AgentPage() {
         }
         
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0) {
-          // 没有 pending infons，需要重新提取
+        if (result.adopted === 0 && inferenceMode === 'extract') {
+          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
           startMessageInfons?.(userId)
         }
       } catch (_) {}
@@ -638,6 +733,18 @@ export default function AgentPage() {
       setInput('')
       setSelectedImages([])
       setSelectedAudios([])
+      
+      // 自动生成会话标题（仅在第一条消息后）
+      const currentSession = getCurrentSession()
+      if (currentSession) {
+        const userMessages = currentSession.messages.filter(msg => msg.role === 'user')
+        if (userMessages.length === 1) {
+          // 延迟一点，确保消息已经保存
+          setTimeout(() => {
+            generateSessionTitle?.(currentSession.id)
+          }, 500)
+        }
+      }
     }
     
     // 注意：adoptPendingInfonsToMessage 已经处理了 pending infons，无需再清空
@@ -677,8 +784,8 @@ export default function AgentPage() {
         }
         
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0) {
-          // 没有 pending infons，需要重新提取
+        if (result.adopted === 0 && inferenceMode === 'extract') {
+          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
           startMessageInfons?.(userId)
         }
       } catch (_) {}
@@ -698,8 +805,8 @@ export default function AgentPage() {
         }
         
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0) {
-          // 没有 pending infons，需要重新提取
+        if (result.adopted === 0 && inferenceMode === 'extract') {
+          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
           startMessageInfons?.(userId)
         }
       } catch (_) {}
@@ -708,6 +815,18 @@ export default function AgentPage() {
       setLandingInput('')
       setSelectedImages([])
       setSelectedAudios([])
+      
+      // 自动生成会话标题（仅在第一条消息后）
+      const currentSession = getCurrentSession()
+      if (currentSession) {
+        const userMessages = currentSession.messages.filter(msg => msg.role === 'user')
+        if (userMessages.length === 1) {
+          // 延迟一点，确保消息已经保存
+          setTimeout(() => {
+            generateSessionTitle?.(currentSession.id)
+          }, 500)
+        }
+      }
     }
     
     // 注意：adoptPendingInfonsToMessage 已经处理了 pending infons，无需再清空
@@ -815,9 +934,12 @@ export default function AgentPage() {
       setIsWaitingForDebounce(true)
       
       // 启动新的提取（不清空，让 startPendingInfons 自己处理）
+      // 注意：在直接推断模式下跳过信息元提取
       pendingTimerRef.current = setTimeout(() => {
         try { 
-          startPendingInfons?.(textToUse, imgs, audios)
+          if (inferenceMode === 'extract') {
+            startPendingInfons?.(textToUse, imgs, audios)
+          }
           setIsWaitingForDebounce(false)
         } catch (_) {}
         pendingTimerRef.current = null
@@ -855,9 +977,12 @@ export default function AgentPage() {
     setIsWaitingForDebounce(true)
     
     // 启动新的提取（不清空，让 startPendingInfons 自己处理）
+    // 注意：在直接推断模式下跳过信息元提取
     pendingTimerRef.current = setTimeout(() => {
       try { 
-        startPendingInfons?.(textToUse, imgs, audios) // 启动新提取
+        if (inferenceMode === 'extract') {
+          startPendingInfons?.(textToUse, imgs, audios) // 启动新提取
+        }
         setIsWaitingForDebounce(false) // 防抖结束
       } catch (_) {}
       pendingTimerRef.current = null
@@ -1050,7 +1175,37 @@ export default function AgentPage() {
             <Splitter.Panel defaultSize="35%" min="25%" max="50%">
               <div className={styles.rightPaneScroll}>
                 <div className={styles.rightPaneHeader}>
-                  <div className={styles.rightPaneTitle}>Privacy inference</div>
+                  <div className={styles.rightPaneTitle}>
+                    Privacy inference
+                    {/* 推断模式开关（中文注释）：低调样式，紧贴标题右侧 */}
+                    <Tooltip title={inferenceMode === 'direct' ? '直接推断：跳过信息元提取，直接对输入进行隐私推断' : '提取信息元：先提取信息元，再基于信息元进行隐私推断'}>
+                      <div style={{ 
+                        display: 'inline-flex', 
+                        alignItems: 'center', 
+                        gap: 6, 
+                        marginLeft: 12,
+                        fontSize: 11, 
+                        color: 'var(--color-text-tertiary)',
+                        opacity: 0.7,
+                        transition: 'opacity 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                      onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
+                      >
+                        <span style={{ userSelect: 'none', whiteSpace: 'nowrap' }}>
+                          {inferenceMode === 'direct' ? '直接' : '提取'}
+                        </span>
+                        <Switch 
+                          size="small"
+                          checked={inferenceMode === 'direct'}
+                          onChange={(checked) => {
+                            const newMode = checked ? 'direct' : 'extract'
+                            setInferenceMode(newMode)
+                          }}
+                        />
+                      </div>
+                    </Tooltip>
+                  </div>
                 </div>
                 <div className={styles.rightPaneBody}>
                   {/* 法规 treemap 可视化（中文注释） */}
@@ -1072,23 +1227,28 @@ export default function AgentPage() {
                         : (hasMessages ? (input || '').trim().length > 0 : (landingInput || '').trim().length > 0)
                     }
                   />
-                  {/* 时间线组件（中文注释）：用于按时间筛选信息元 */}
-                  <Timeline onTimeSelect={setSelectedTime} />
-                  {/* 信息元词云可视化（中文注释） */}
-                  <WordCloud selectedTime={selectedTime} />
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 8, paddingLeft: 4 }}>
-                      Infons Results
-                    </div>
-                    <div className={styles.infonRuns}>
-                      {(() => {
-                        const runs = (infonSessions?.[currentSession?.id]?.runs) || []
-                        if (!runs.length) return <div className={styles.infonEmpty}>No infons yet</div>
-                        const sorted = [...runs].sort((a, b) => b.createdAt - a.createdAt)
-                        return sorted.map((r) => <InfonRunCard key={r.id} run={r} />)
-                      })()}
-                    </div>
-                  </div>
+                  {/* 信息元相关组件（中文注释）：仅在提取信息元模式下显示 */}
+                  {inferenceMode === 'extract' && (
+                    <>
+                      {/* 时间线组件（中文注释）：用于按时间筛选信息元 */}
+                      <Timeline onTimeSelect={setSelectedTime} />
+                      {/* 信息元词云可视化（中文注释） */}
+                      <WordCloud selectedTime={selectedTime} />
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 8, paddingLeft: 4 }}>
+                          Infons Results
+                        </div>
+                        <div className={styles.infonRuns}>
+                          {(() => {
+                            const runs = (infonSessions?.[currentSession?.id]?.runs) || []
+                            if (!runs.length) return <div className={styles.infonEmpty}>No infons yet</div>
+                            const sorted = [...runs].sort((a, b) => b.createdAt - a.createdAt)
+                            return sorted.map((r) => <InfonRunCard key={r.id} run={r} />)
+                          })()}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </Splitter.Panel>

@@ -2,7 +2,7 @@
 // 为每个登录用户单独保存会话历史和信息元数据
 
 // 保存用户的所有会话数据
-export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel) {
+export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel, inferenceMode) {
   if (!userId) return
   
   try {
@@ -16,6 +16,7 @@ export function saveUserSessions(userId, sessions, infonSessions, privacyInferen
       selectedPrivacyItems: selectedPrivacyItems || [],
       infonExtractionModel: infonExtractionModel || 'deepseek-chat',
       privacyInferenceModel: privacyInferenceModel || 'deepseek-chat',
+      inferenceMode: inferenceMode || 'extract', // 保存推断模式
       savedAt: Date.now()
     }
     
@@ -48,6 +49,7 @@ export function loadUserSessions(userId) {
       selectedPrivacyItems: parsed.selectedPrivacyItems || [],
       infonExtractionModel: parsed.infonExtractionModel || 'deepseek-chat',
       privacyInferenceModel: parsed.privacyInferenceModel || 'deepseek-chat',
+      inferenceMode: parsed.inferenceMode || 'extract', // 加载推断模式
       savedAt: parsed.savedAt
     }
   } catch (error) {
@@ -126,7 +128,8 @@ export function importUserData(userId, file) {
           data.selectedLawIdx,
           data.selectedPrivacyItems,
           data.infonExtractionModel,
-          data.privacyInferenceModel
+          data.privacyInferenceModel,
+          data.inferenceMode
         )
         resolve(data)
       } catch (error) {

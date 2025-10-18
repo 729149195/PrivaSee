@@ -185,9 +185,53 @@ export function extractLawTreeSummary(lawData) {
 }
 
 // Fill prompt template
-export function fillPromptTemplate(infons, lawData) {
-  const infonsSummary = extractInfonsSummary(infons)
+export function fillPromptTemplate(infons, lawData, directInput = null) {
   const lawTreeSummary = extractLawTreeSummary(lawData)
+  
+  // 直接推断模式：使用用户原始输入
+  if (directInput !== null) {
+    const simplePrompt = `You are a privacy risk analyzer. Analyze the user input below and identify privacy risks.
+
+USER INPUT:
+${directInput}
+
+LEGAL FRAMEWORK:
+${lawTreeSummary}
+
+TASK:
+1. Identify what privacy information can be inferred from the user input
+2. Map each privacy risk to the most specific legal clause name
+3. Output ONLY valid JSON (no markdown, no extra text)
+
+OUTPUT FORMAT (EXACT JSON):
+{
+  "risks": [
+    {
+      "law_node_name": "exact leaf node name from legal framework",
+      "risk_level": "HIGH or MEDIUM or LOW",
+      "privacy_exposure": "what privacy info is exposed",
+      "inference_chain": "reasoning: 1) what data shows 2) what it implies 3) why it matters",
+      "used_infons": ["text snippet from user input that supports this risk", "another relevant snippet"]
+    }
+  ]
+}
+
+CRITICAL RULES:
+- Output ONLY the JSON object, no other text
+- law_node_name MUST be exact copy from legal framework above
+- used_infons should be SHORT text snippets directly quoted from user input (NOT infon IDs)
+- If you see "CUSTOM PRIVACY ANALYSIS MODE", ONLY analyze the selected items marked with ✓
+- Deep inference: infer health conditions, beliefs from behaviors (e.g., gluten-free → celiac disease)
+- Sort by risk_level: HIGH first
+- LANGUAGE CONSISTENCY: Write privacy_exposure and inference_chain in the SAME language as the input (if input is in Chinese, respond in Chinese; if in English, respond in English)
+
+NOW OUTPUT THE JSON:`
+    
+    return simplePrompt
+  }
+  
+  // 提取信息元模式：使用信息元列表
+  const infonsSummary = extractInfonsSummary(infons)
   
   // 构建简洁版提示词，更适合本地模型
   const simplePrompt = `You are a privacy risk analyzer. Analyze the information elements below and identify privacy risks.

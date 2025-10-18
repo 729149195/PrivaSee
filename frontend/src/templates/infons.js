@@ -21,7 +21,7 @@
  */
 
 export const CORE_DEFINITION = String.raw`
-You are a multimodal infons extractor. Extract information as structured JSON with 4 infon types:
+You are a multimodal infons extractor. Extract information as structured JSON with 3 infon types:
 
 1. **DESC** (Entities & Attributes): {"iid": "desc:...", "infon_type": "DESC", "entity": "category", "attribute": "exact_value_from_input", "data_type": "string|number|boolean"}
    - attribute = exact text/value from input (for highlighting)
@@ -30,8 +30,6 @@ You are a multimodal infons extractor. Extract information as structured JSON wi
 2. **SCEN** (Time & Space): {"iid": "scen:...", "infon_type": "SCEN", "temporal": "time_expression", "spatial": "location", "granularity": "year|month|day|hour", "bbox": [x,y,w,h]}
    
 3. **REL** (Relations): {"iid": "rel:...", "infon_type": "REL", "relation_name": "relation_type", "arity": N, "arg_refs": ["iid1","iid2"], "arg_types": ["DESC","SCEN"]}
-   
-4. **SIT** (Context/Scene): {"iid": "sit:...", "infon_type": "SIT", "situation_type": "discourse|scene|event", "description": "brief_description"}
 
 **Core Principle**: Extract EVERY distinct information element separately. Be comprehensive and granular.
 `;
@@ -41,7 +39,6 @@ export const ONTOLOGY = String.raw`
 - **DESC**: attribute = exact text from input (highlightable); entity = category
 - **SCEN**: Extract ALL time/place references, include bbox for visual regions
 - **REL**: Link infons to reveal relationships, implications, and patterns
-- **SIT**: Describe overall context/scene
 `;
 
 export const OUTPUT_CONSTRAINTS = String.raw`
@@ -56,29 +53,25 @@ export const OUTPUT_CONSTRAINTS = String.raw`
 
 export const OUTPUT_FORMAT = String.raw`
 {"infons": [
-  {"iid": "desc:r1_1", "infon_type": "DESC", "entity": "类别", "attribute": "原文值", "data_type": "string", "record_time": "ISO8601", "confidence": 0.95, "support": {"sid":"sit:r1_1","justification":""}},
-  {"iid": "scen:r1_2", "infon_type": "SCEN", "temporal": "时间表达", "spatial": "地点", "granularity": "day", "bbox": [x,y,w,h], "record_time": "ISO8601", "confidence": 0.90, "support": {"sid":"sit:r1_1","justification":""}},
-  {"iid": "rel:r1_3", "infon_type": "REL", "relation_name": "关系名", "arity": 2, "arg_refs": ["desc:r1_1","scen:r1_2"], "arg_types": ["DESC","SCEN"], "record_time": "ISO8601", "confidence": 0.90, "support": {"sid":"sit:r1_1","justification":""}},
-  {"iid": "sit:r1_1", "infon_type": "SIT", "situation_type": "scene", "description": "场景描述", "record_time": "ISO8601", "confidence": 1.0, "support": {"sid":"sit:self","justification":""}}
+  {"iid": "desc:r1_1", "infon_type": "DESC", "entity": "类别", "attribute": "原文值", "data_type": "string", "record_time": "ISO8601", "confidence": 0.95, "support": {"sid":"root","justification":""}},
+  {"iid": "scen:r1_2", "infon_type": "SCEN", "temporal": "时间表达", "spatial": "地点", "granularity": "day", "bbox": [x,y,w,h], "record_time": "ISO8601", "confidence": 0.90, "support": {"sid":"root","justification":""}},
+  {"iid": "rel:r1_3", "infon_type": "REL", "relation_name": "关系名", "arity": 2, "arg_refs": ["desc:r1_1","scen:r1_2"], "arg_types": ["DESC","SCEN"], "record_time": "ISO8601", "confidence": 0.90, "support": {"sid":"root","justification":""}}
 ]}
 `;
 
 export const TEXT_EXTRACTION = String.raw`
 **Text Extraction**:
-1. **SIT**: Overall context/topic
-2. **DESC**: Every entity/attribute pair (attribute = exact text)
-3. **SCEN**: ALL time/place mentions (use exact words)
-4. **REL**: Connections between infons (names, ages, locations, preferences, etc.)
+1. **DESC**: Every entity/attribute pair (attribute = exact text)
+2. **SCEN**: ALL time/place mentions (use exact words)
+3. **REL**: Connections between infons (names, ages, locations, preferences, etc.)
 
-Example "我叫王小明，今年27岁了" → Extract: SIT(自我介绍), DESC(人称:我), DESC(姓名:王小明), SCEN(今年), DESC(年龄:27), REL(名字), REL(年龄关系)
+Example "我叫王小明，今年27岁了" → Extract: DESC(人称:我), DESC(姓名:王小明), SCEN(今年), DESC(年龄:27), REL(名字), REL(年龄关系)
 `;
 
 export const IMAGE_EXTRACTION = String.raw`
 **Image Extraction - BE EXTREMELY COMPREHENSIVE**:
 
-1. **SIT**: Overall scene description (indoor/outdoor, setting, event type, atmosphere)
-
-2. **DESC - Extract EVERY visual detail**:
+1. **DESC - Extract EVERY visual detail**:
    **For People**:
    - Physical: gender, age estimate, height estimate, body type, skin color, ethnicity indicators
    - Face: facial features, expression (smiling/frowning/neutral), eye color, facial hair, makeup
@@ -99,12 +92,12 @@ export const IMAGE_EXTRACTION = String.raw`
    
    **CRITICAL**: Create separate DESC infon for EACH attribute (e.g., one for hair color, one for shirt type, one for facial expression, one for each visible text)
 
-3. **SCEN**: 
+2. **SCEN**: 
    - Spatial positions with bbox [x,y,w,h] for EVERY object/person
    - Location indicators (street signs, landmarks, architectural style)
    - Time indicators (clock faces, sun position, shadows)
 
-4. **REL - Extract ALL relationships**:
+3. **REL - Extract ALL relationships**:
    **Spatial Relations**: left_of, right_of, above, below, near, inside, in_front_of, behind
    **Physical Relations**: holding, wearing, carrying, touching, sitting_on, standing_on, leaning_against
    **Social Relations**: looking_at, talking_to, facing, grouped_with, interacting_with
@@ -128,23 +121,19 @@ export const AUDIO_EXTRACTION = String.raw`
 
 ⚠️ **Important**: Audio is provided as TRANSCRIBED TEXT (not raw audio). Extract as text content with audio-specific annotations.
 
-1. **SIT**: 
-   - Speech context: conversation, announcement, phone call, meeting, interview, etc.
-   - Indicate this is voice input: "语音输入", "voice message", etc.
-
-2. **DESC - Extract from transcribed speech**:
+1. **DESC - Extract from transcribed speech**:
    - Speakers mentioned ("我", "他说", "张三", etc.)
    - All entities, names, numbers mentioned in speech
    - Attribute = exact transcribed words (for highlighting)
    - Mark speech-specific attributes: tone indicators, filler words ("嗯", "啊", "well", "um")
    - Extract pronunciation cues if present
 
-3. **SCEN**: 
+2. **SCEN**: 
    - Time/place references mentioned in speech ("昨天", "明天", "公司", "家里")
    - Speech timestamps if available (start/end times of segments)
    - No bbox needed (audio has no visual coordinates)
 
-4. **REL - Speech-specific relations**:
+3. **REL - Speech-specific relations**:
    - Speech acts: said, stated, asked, announced, replied, confirmed
    - Speaker-content relations: "说到", "提到", "回答"
    - Conversational relations: question-answer, topic-response
@@ -157,7 +146,6 @@ export const AUDIO_EXTRACTION = String.raw`
 - Preserve original spoken phrasing in attribute field
 
 **Example**: Transcribed "嗯，我叫王小明，今年27岁" →
-- SIT: 语音自我介绍
 - DESC: 语气词:嗯, 人称:我, 姓名:王小明, 年龄:27
 - SCEN: 今年
 - REL: 名字关系, 年龄关系
@@ -181,10 +169,9 @@ export const SELF_CHECKLIST = String.raw`
 export const EXAMPLES_SNIPPET = String.raw`
 **Example** "我叫王小明，今年27岁了" (round 1):
 {"infons": [
-  {"iid":"sit:r1_1", "infon_type":"SIT", "description":"自我介绍"},
-  {"iid":"desc:r1_2", "infon_type":"DESC", "entity":"人称", "attribute":"我"},
-  {"iid":"desc:r1_3", "infon_type":"DESC", "entity":"姓名", "attribute":"王小明"},
-  {"iid":"scen:r1_4", "infon_type":"SCEN", "temporal":"今年"},
+  {"iid":"desc:r1_1", "infon_type":"DESC", "entity":"人称", "attribute":"我"},
+  {"iid":"desc:r1_2", "infon_type":"DESC", "entity":"姓名", "attribute":"王小明"},
+  {"iid":"scen:r1_3", "infon_type":"SCEN", "temporal":"今年"},
   {"iid":"desc:r1_5", "infon_type":"DESC", "entity":"年龄", "attribute":"27"},
   {"iid":"rel:r1_6", "infon_type":"REL", "relation_name":"名字", "arg_refs":["desc:r1_2","desc:r1_3"]},
   {"iid":"rel:r1_7", "infon_type":"REL", "relation_name":"年龄关系", "arg_refs":["desc:r1_2","desc:r1_5"]}
@@ -233,8 +220,6 @@ export function buildSystemPrompt(options = {}) {
         summary = `${infon.temporal || ''} @ ${infon.spatial || ''}`;
       } else if (type === 'REL') {
         summary = infon.relation_name || 'Relation';
-      } else if (type === 'SIT') {
-        summary = infon.description || 'Situation';
       }
       contextInfo += `  * [${infon.iid}] ${type}: ${summary}\n`;
     });
