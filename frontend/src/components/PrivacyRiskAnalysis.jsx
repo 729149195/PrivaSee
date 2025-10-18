@@ -1,13 +1,63 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import styles from './AgentPage.module.css'
-import WordCloud from './WordCloud'
-import { Tooltip } from 'antd'
+import { useStore } from '../store'
+
+// 信息元类型颜色映射（中文注释）
+const getInfonColor = (infonType) => {
+  const colors = {
+    DESC: '#3b82f6',  // 描述（实体+属性）：蓝色
+    SCEN: '#10b981',  // 场景（时间+位置）：翠绿色
+    REL: '#8b5cf6',   // 关系：紫色
+    SIT: '#f59e0b',   // 情景：琥珀色
+  }
+  return colors[String(infonType).toUpperCase()] || '#64748b'
+}
+
+// 提取信息元关键词（中文注释）
+const getInfonKeyword = (infon) => {
+  if (!infon || typeof infon !== 'object') return 'Unknown'
+  const t = String(infon.infon_type || '').toUpperCase()
+  if (t === 'DESC') {
+    const attribute = infon.attribute ?? ''
+    const entity = infon.entity ?? ''
+    return attribute || entity || 'Description'
+  }
+  if (t === 'SCEN') {
+    const temporal = infon.temporal ?? ''
+    const spatial = infon.spatial ?? ''
+    return temporal || spatial || 'Scenario'
+  }
+  if (t === 'REL') return String(infon.relation_name ?? 'Relation')
+  if (t === 'SIT') return String(infon.description ?? 'Situation')
+  return t || 'Unknown'
+}
 
 // Privacy Risk Analysis组件：用于显示隐私风险分析结果（自动推断版本）
 export default function PrivacyRiskAnalysis({ 
   inference, 
   selectedLaw
 }) {
+  const { getCurrentSession, infonSessions } = useStore()
+  const session = getCurrentSession()
+  
+  // 获取所有信息元映射（中文注释）
+  const infonMap = useMemo(() => {
+    const runs = session ? (infonSessions?.[session.id]?.runs || []) : []
+    const map = new Map()
+    
+    for (const run of runs) {
+      if (!run || (run.status !== 'done' && run.status !== 'running')) continue
+      const infons = Array.isArray(run?.resultJson?.infons) ? run.resultJson.infons : []
+      
+      infons.forEach((infon) => {
+        if (infon.iid) {
+          map.set(infon.iid, infon)
+        }
+      })
+    }
+    
+    return map
+  }, [session, infonSessions])
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
@@ -54,18 +104,12 @@ export default function PrivacyRiskAnalysis({
               const usedIids = Array.isArray(usedInfons) ? usedInfons.map(x => (typeof x === 'string' ? x : x?.iid)).filter(Boolean) : []
               const uniqueKey = risk._objIndex ?? idx
               
+              // 获取相关信息元数据（中文注释）
+              const relatedInfons = usedIids.map(iid => infonMap.get(iid)).filter(Boolean)
+              
               return (
-                <Tooltip 
-                  key={uniqueKey}
-                  title={usedIids.length > 0 ? (
-                    <WordCloud selectedTime={null} filterIids={usedIids} compact={true} />
-                  ) : null}
-                  placement={(idx % 2 === 0) ? 'right' : 'left'}
-                  mouseEnterDelay={0.1}
-                  classNames={{ root: `${styles.riskTooltipOverlay} ${(idx % 2 === 0) ? styles.riskTooltipRight : styles.riskTooltipLeft}` }}
-                  arrow={false}
-                >
                 <div 
+                  key={uniqueKey}
                   className={styles.riskItem}
                   style={{ 
                     flex: '0 0 calc(50% - 3px)',
@@ -119,14 +163,56 @@ export default function PrivacyRiskAnalysis({
                     <div style={{ 
                       fontSize: 10, 
                       color: 'var(--color-text-tertiary)', 
-                      marginBottom: 4,
+                      marginBottom: 6,
                       fontStyle: isPartial && !risk.inference_chain ? 'italic' : 'normal'
                     }}>
                       {inferenceChain}
                     </div>
                   )}
+                  
+                  {/* 相关信息元列表（中文注释） */}
+                  {relatedInfons.length > 0 && (
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--color-border-light)' }}>
+                      <div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 4, fontWeight: 600 }}>
+                        Related Infons ({relatedInfons.length})
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {relatedInfons.map((infon, infonIdx) => {
+                          const keyword = getInfonKeyword(infon)
+                          const color = getInfonColor(infon.infon_type)
+                          const infonType = String(infon.infon_type || '').toUpperCase()
+                          const isRelation = infonType === 'REL'
+                          
+                          // 过滤掉 SIT 类型（中文注释）
+                          if (infonType === 'SIT') {
+                            return null
+                          }
+                          
+                          return (
+                            <div
+                              key={infon.iid || infonIdx}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                padding: '4px 8px',
+                                borderRadius: isRelation ? 8 : 4,
+                                background: isRelation ? 'rgba(255, 255, 255, 0.95)' : `${color}26`,
+                                border: `1px solid ${color}`,
+                                borderStyle: isRelation ? 'dashed' : 'solid',
+                                fontSize: 9,
+                                fontWeight: isRelation ? 700 : 600,
+                                color: color,
+                                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
+                              }}
+                            >
+                              {keyword}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
-                </Tooltip>
               )
             })}
           </div>
