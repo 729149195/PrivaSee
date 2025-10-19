@@ -68,7 +68,7 @@ Output ONLY valid JSON (no markdown, no explanation):
       "risk_level": "HIGH | MEDIUM | LOW",
       "privacy_exposure": "Specific privacy information exposed or inferable (be explicit about implicit inferences)",
       "inference_chain": "Step-by-step reasoning: [1] What explicit info? [2] What can be implicitly inferred? [3] Why does this violate the specific clause?",
-      "used_infons": ["infon_id_1", "infon_id_2"]
+      "used_infons": ["exact_entity_name", "attribute_value", "temporal_expression", "spatial_location"]
     }
   ]
 }
@@ -82,10 +82,11 @@ Output ONLY valid JSON (no markdown, no explanation):
 6. **Deep Inference** - Don't just report explicit data; infer health conditions, beliefs, status from behavior/preferences
 7. **Comprehensive Coverage** - Analyze ALL possible privacy angles: direct exposure + implicit inference + contextual correlation (BUT respect Custom Mode restrictions)
 8. **Clear Attribution** - Every risk must trace back to specific information elements with logical reasoning
-9. **Prioritize Sensitivity** - Treat health, beliefs, children, biometrics as HIGH risk
-10. **Sort Properly** - HIGH risks first
-11. **Verify Before Output** - Before outputting each risk, find the [LEAF NODE - USE THIS] entry in the provided law tree and copy its exact name. If you cannot find an exact leaf node match, choose the closest leaf node from the tree.
-12. **LANGUAGE CONSISTENCY** - Write privacy_exposure and inference_chain in the SAME language as the input information elements. If the input data is in Chinese, write your analysis in Chinese. If in English, write in English. Match the language of the user's data.
+9. **used_infons Extraction** - CRITICAL: Extract EXACT KEYWORDS from input that support each risk. Like infons.js DESC/SCEN extraction: concrete entity names, attribute values, temporal expressions, spatial locations. Extract the ORIGINAL TEXT (highlightable keywords), NOT infon IDs, NOT paraphrases. Examples: entity names like "王小明", attribute values like "27", temporal like "今年", spatial like "北京市". DO NOT extract abstract relations or inferred concepts - only concrete observable keywords from the source.
+10. **Prioritize Sensitivity** - Treat health, beliefs, children, biometrics as HIGH risk
+11. **Sort Properly** - HIGH risks first
+12. **Verify Before Output** - Before outputting each risk, find the [LEAF NODE - USE THIS] entry in the provided law tree and copy its exact name. If you cannot find an exact leaf node match, choose the closest leaf node from the tree.
+13. **LANGUAGE CONSISTENCY** - Write privacy_exposure and inference_chain in the SAME language as the input information elements. If the input data is in Chinese, write your analysis in Chinese. If in English, write in English. Match the language of the user's data.
 
 ## Example Output Format
 When you find a privacy risk, you MUST:
@@ -99,14 +100,24 @@ If input contains "looking for gluten-free restaurant menu", infer:
 - IMPLICIT: User likely has celiac disease or gluten intolerance (health condition = HIGH risk)
   → Find the LEAF node for health data in the law tree (e.g., "医疗健康")
   → law_node_name = "医疗健康" (copied exactly from law tree)
+  → used_infons: ["gluten-free", "restaurant menu"] (exact keywords from input)
 - DIRECT: User's dietary preference (MEDIUM risk)
+  → used_infons: ["gluten-free"] (exact text)
 - CONTEXTUAL: Location search reveals geographic pattern (LOW-MEDIUM risk)
+  → used_infons: ["restaurant", "location search"] (observable keywords)
+
+If input is "我叫王小明，今年27岁，住在北京市海淀区", extract keywords:
+- Name exposure: used_infons: ["王小明"] (entity name from input)
+- Age exposure: used_infons: ["27", "今年"] (attribute value + temporal expression)
+- Location exposure: used_infons: ["北京市", "海淀区"] (spatial location keywords)
 
 **Custom Mode Example**:
 If law tree shows "CUSTOM PRIVACY ANALYSIS MODE" with selected items: ["Home Address", "Location/GPS", "Health Data"]
 And input contains: "User attends Friday prayers at mosque and searches for halal restaurants"
 - ✅ REPORT: Dietary preference (halal) → inferred health/dietary need → law_node_name = "Health Data" (selected)
+  → used_infons: ["halal", "restaurants"] (exact keywords)
 - ✅ REPORT: Location search pattern → law_node_name = "Location/GPS" (selected)
+  → used_infons: ["Friday prayers", "mosque"] (location/time keywords)
 - ❌ DO NOT REPORT: Religious belief inference (Islam) → NOT in selected list, must skip even though it's inferable
 - ❌ DO NOT REPORT: Any privacy category not explicitly listed in the selected items
 
@@ -185,23 +196,50 @@ export function extractLawTreeSummary(lawData) {
 }
 
 // Fill prompt template
-export function fillPromptTemplate(infons, lawData, directInput = null) {
+export function fillPromptTemplate(infons, lawData, directInput = null, historicalKeywords = []) {
   const lawTreeSummary = extractLawTreeSummary(lawData)
   
   // 直接推断模式：使用用户原始输入
   if (directInput !== null) {
-    const simplePrompt = `You are a privacy risk analyzer. Analyze the user input below and identify privacy risks.
+    // 分析输入结构：区分历史消息和当前输入
+    const inputLines = directInput.split('\n\n').filter(Boolean)
+    const hasMultipleMessages = inputLines.length > 1
+    
+    // 构建历史关键词上下文
+    let keywordsContext = ''
+    if (historicalKeywords && historicalKeywords.length > 0) {
+      keywordsContext = `\n\nKNOWN PRIVACY KEYWORDS (already identified in previous analyses):
+${historicalKeywords.join(', ')}
 
-USER INPUT:
-${directInput}
+IMPORTANT: The above keywords are from previous messages. When analyzing the complete conversation below, you MUST:
+1. Identify privacy risks by considering ALL messages together (cross-message correlation)
+2. Extract NEW keywords from ALL messages (not just the last one)
+3. Recognize that privacy information may be split across multiple messages
+4. Example: Message 1 has "name", Message 2 has "address" → Together they reveal identity
+`
+    }
+    
+    // 构建用户输入说明
+    let inputDescription = hasMultipleMessages 
+      ? `COMPLETE USER CONVERSATION (${inputLines.length} messages, analyze ALL together for comprehensive privacy assessment):`
+      : 'USER INPUT (single message):'
+    
+    const simplePrompt = `You are a privacy risk analyzer. Analyze the COMPLETE user conversation below and identify ALL privacy risks by considering cross-message correlations.
+
+${inputDescription}
+${directInput}${keywordsContext}
 
 LEGAL FRAMEWORK:
 ${lawTreeSummary}
 
-TASK:
-1. Identify what privacy information can be inferred from the user input
-2. Map each privacy risk to the most specific legal clause name
-3. Output ONLY valid JSON (no markdown, no extra text)
+CRITICAL TASK REQUIREMENTS:
+1. ANALYZE ALL MESSAGES TOGETHER: Information from different messages may combine to create privacy risks
+   - Example: If message 1 mentions "name" and message 2 mentions "address", this is HIGH risk (full identity)
+   - Example: If message 1 mentions "hospital visit" and message 2 mentions "medication", infer health condition
+2. EXTRACT KEYWORDS FROM ALL MESSAGES: Don't just focus on the last message
+3. IDENTIFY CROSS-MESSAGE PATTERNS: Look for information that connects across messages
+4. MAP EACH RISK to the most specific legal clause name
+5. Output ONLY valid JSON (no markdown, no extra text)
 
 OUTPUT FORMAT (EXACT JSON):
 {
@@ -209,9 +247,9 @@ OUTPUT FORMAT (EXACT JSON):
     {
       "law_node_name": "exact leaf node name from legal framework",
       "risk_level": "HIGH or MEDIUM or LOW",
-      "privacy_exposure": "what privacy info is exposed",
-      "inference_chain": "reasoning: 1) what data shows 2) what it implies 3) why it matters",
-      "used_infons": ["text snippet from user input that supports this risk", "another relevant snippet"]
+      "privacy_exposure": "what privacy info is exposed (consider information from ALL messages)",
+      "inference_chain": "reasoning: 1) what data appears in which message(s) 2) how they connect 3) what can be inferred 4) why it matters",
+      "used_infons": ["exact keyword/entity from ANY message", "attribute value", "time expression", "location name"]
     }
   ]
 }
@@ -219,9 +257,10 @@ OUTPUT FORMAT (EXACT JSON):
 CRITICAL RULES:
 - Output ONLY the JSON object, no other text
 - law_node_name MUST be exact copy from legal framework above
-- used_infons should be SHORT text snippets directly quoted from user input (NOT infon IDs)
+- used_infons should contain EXACT KEYWORDS from ANY/ALL messages (entities, attribute values, time expressions, locations) that support this risk. Extract concrete nouns, names, values, dates, places from the ENTIRE conversation. DO NOT use infon IDs.
 - If you see "CUSTOM PRIVACY ANALYSIS MODE", ONLY analyze the selected items marked with ✓
-- Deep inference: infer health conditions, beliefs from behaviors (e.g., gluten-free → celiac disease)
+- Deep inference: infer health conditions, beliefs from behaviors across messages (e.g., "gluten-free" in msg1 + "stomach pain" in msg2 → celiac disease)
+- CROSS-MESSAGE ANALYSIS: A single privacy risk may be supported by keywords from multiple messages
 - Sort by risk_level: HIGH first
 - LANGUAGE CONSISTENCY: Write privacy_exposure and inference_chain in the SAME language as the input (if input is in Chinese, respond in Chinese; if in English, respond in English)
 
@@ -255,7 +294,7 @@ OUTPUT FORMAT (EXACT JSON):
       "risk_level": "HIGH or MEDIUM or LOW",
       "privacy_exposure": "what privacy info is exposed",
       "inference_chain": "reasoning: 1) what data shows 2) what it implies 3) why it matters",
-      "used_infons": ["infon_id1", "infon_id2"]
+      "used_infons": ["exact entity/attribute keyword", "time expression", "location name", "value from input"]
     }
   ]
 }
@@ -263,6 +302,7 @@ OUTPUT FORMAT (EXACT JSON):
 CRITICAL RULES:
 - Output ONLY the JSON object, no other text
 - law_node_name MUST be exact copy from legal framework above
+- used_infons should contain EXACT KEYWORDS from the input data that support this risk. Extract concrete information elements: entity names, attribute values, temporal expressions, spatial locations (like DESC.attribute and SCEN.temporal/spatial from infons.js). DO NOT use infon IDs like "desc:r1_1".
 - If you see "CUSTOM PRIVACY ANALYSIS MODE", ONLY analyze the selected items marked with ✓
 - Deep inference: infer health conditions, beliefs from behaviors (e.g., gluten-free → celiac disease)
 - Sort by risk_level: HIGH first

@@ -1461,3 +1461,36 @@
         box-shadow: 0 0 15px rgba(14, 165, 233, 0.6), 0 0 25px rgba(14, 165, 233, 0.3);
     }
 }
+
+/* 生成隐私保护建议按钮的呼吸灯效果 */
+.generateSuggestionsButton {
+    animation: breathingGlow 3.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    position: relative;
+    will-change: box-shadow;
+}
+
+@keyframes breathingGlow {
+    0% {
+        box-shadow: 0 3px 10px rgba(59, 130, 246, 0.2), 
+                    0 0 0 0 rgba(59, 130, 246, 0);
+    }
+    25% {
+        box-shadow: 0 4px 13px rgba(59, 130, 246, 0.28), 
+                    0 0 10px rgba(59, 130, 246, 0.12),
+                    0 0 0 3px rgba(59, 130, 246, 0.05);
+    }
+    50% {
+        box-shadow: 0 5px 16px rgba(59, 130, 246, 0.35), 
+                    0 0 16px rgba(59, 130, 246, 0.2),
+                    0 0 0 6px rgba(59, 130, 246, 0.08);
+    }
+    75% {
+        box-shadow: 0 4px 13px rgba(59, 130, 246, 0.28), 
+                    0 0 10px rgba(59, 130, 246, 0.12),
+                    0 0 0 3px rgba(59, 130, 246, 0.05);
+    }
+    100% {
+        box-shadow: 0 3px 10px rgba(59, 130, 246, 0.2), 
+                    0 0 0 0 rgba(59, 130, 246, 0);
+    }
+}

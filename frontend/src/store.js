@@ -547,6 +547,26 @@ export const useStore = create((set, get) => ({
   
   // 设置推断模式
   setInferenceMode: (mode) => {
+    // 模式切换时清除当前编辑中的 pending 数据（但保留历史数据）
+    const session = get().getCurrentSession()
+    if (session?.id) {
+      const currentInfonSession = get().infonSessions?.[session.id]
+      if (currentInfonSession) {
+        // 移除所有 targetType 为 'pending' 的 runs，保留 'message' 类型的历史数据
+        const filteredRuns = (currentInfonSession.runs || []).filter(run => run.targetType !== 'pending')
+        
+        set(state => ({
+          infonSessions: {
+            ...state.infonSessions,
+            [session.id]: {
+              ...currentInfonSession,
+              runs: filteredRuns
+            }
+          }
+        }))
+      }
+    }
+    
     set({ inferenceMode: mode })
   },
   
@@ -578,7 +598,8 @@ export const useStore = create((set, get) => ({
       sessions: [emptySession],
       currentSessionId: emptySession.id,
       infonSessions: {},
-      privacyInferences: {}
+      privacyInferences: {},
+      sessionKeywords: {} // 清空关键词
     })
   },
 
@@ -613,6 +634,10 @@ export const useStore = create((set, get) => ({
   // 隐私推理：按会话维护推理结果
   // privacyInferences: { [sessionId]: { status: 'idle'|'running'|'done'|'error', risks: Array, buffer: string, abortController: AbortController|null, createdAt, updatedAt } }
   privacyInferences: {},
+  
+  // 隐私推理关键词：按会话维护关键词列表（持久化，用于高亮和上下文）
+  // sessionKeywords: { [sessionId]: Set<string> } - 累积的关键词集合
+  sessionKeywords: {},
   
   // 隐私推理增量解析器状态：按会话维护
   privacyParsers: {}, // { [sessionId]: parserState }
@@ -835,7 +860,16 @@ export const useStore = create((set, get) => ({
       if (state.currentSessionId === id) {
         nextCurrent = nextSessions[0]?.id || null
       }
-      return { sessions: nextSessions, currentSessionId: nextCurrent }
+      
+      // 清理该会话的关键词
+      const updatedKeywords = { ...state.sessionKeywords }
+      delete updatedKeywords[id]
+      
+      return { 
+        sessions: nextSessions, 
+        currentSessionId: nextCurrent,
+        sessionKeywords: updatedKeywords
+      }
     })
   },
 
@@ -852,7 +886,7 @@ export const useStore = create((set, get) => ({
     if (!session) return
     
     // 只有在标题为默认值时才生成
-    if (!session.title.startsWith('New Chat')) return
+    if (!session.title.startsWith('New chat')) return
     
     // 获取第一条用户消息
     const firstUserMessage = session.messages.find(msg => msg.role === 'user')
@@ -889,10 +923,9 @@ export const useStore = create((set, get) => ({
       
       const apiUrl = provider ? provider.baseUrl : get().baseUrl
       const apiKey = provider ? provider.apiKey : null
-      const modelName = provider ? provider.id : (get().model || 'llama3.2')
       
       const requestBody = {
-        model: modelName,
+        model: configuredModel,
         messages: [
           {
             role: 'system',
@@ -2236,9 +2269,14 @@ export const useStore = create((set, get) => ({
       
       // 构建推理提示词（中文注释）：根据模式传递不同的参数
       const { fillPromptTemplate } = await import('./templates/inference.js')
+      
+      // 获取历史关键词（用于上下文补充）
+      const historicalKeywords = get().sessionKeywords?.[session.id]
+      const keywordsArray = historicalKeywords instanceof Set ? Array.from(historicalKeywords) : []
+      
       const prompt = inferenceMode === 'direct' 
-        ? fillPromptTemplate([], selectedLaw.data, directInput)  // 直接推断模式：传递用户输入
-        : fillPromptTemplate(allInfons, selectedLaw.data, null)  // 提取信息元模式：传递信息元列表
+        ? fillPromptTemplate([], selectedLaw.data, directInput, keywordsArray)  // 直接推断模式：传递用户输入和历史关键词
+        : fillPromptTemplate(allInfons, selectedLaw.data, null, [])  // 提取信息元模式：传递信息元列表
       
       console.log(`[Privacy Inference] 发起推理请求到 ${apiUrl}，使用模型: ${configuredModel}`)
       console.log(`[Privacy Inference] Prompt 长度: ${prompt.length} 字符`)
@@ -2429,6 +2467,31 @@ export const useStore = create((set, get) => ({
             const parsed = JSON.parse(cleanBuffer)
             if (parsed.risks && Array.isArray(parsed.risks)) {
               console.log(`[Privacy Inference] 成功解析完整JSON，风险数: ${parsed.risks.length}`)
+              
+              // 累积关键词到 sessionKeywords（直接推理模式下）
+              if (inferenceMode === 'direct' && parsed.risks.length > 0) {
+                const existingKeywords = get().sessionKeywords?.[session.id] || new Set()
+                const newKeywords = new Set(existingKeywords)
+                
+                parsed.risks.forEach(risk => {
+                  const usedInfons = risk.used_infons || []
+                  usedInfons.forEach(keyword => {
+                    if (typeof keyword === 'string' && keyword.trim()) {
+                      newKeywords.add(keyword.trim())
+                    }
+                  })
+                })
+                
+                console.log(`[Privacy Inference] 累积关键词: ${existingKeywords.size} -> ${newKeywords.size} (新增 ${newKeywords.size - existingKeywords.size})`)
+                
+                set(state => ({
+                  sessionKeywords: {
+                    ...state.sessionKeywords,
+                    [session.id]: newKeywords
+                  }
+                }))
+              }
+              
               // 直接设置结果
               set(state => ({
                 privacyInferences: {
@@ -2475,6 +2538,31 @@ export const useStore = create((set, get) => ({
       
       // 完成推理
       console.log(`[Privacy Inference] 推理完成，风险数: ${currentState?.risks?.length || 0}`)
+      
+      // 累积关键词到 sessionKeywords（直接推理模式下）
+      if (inferenceMode === 'direct' && currentState?.risks?.length > 0) {
+        const existingKeywords = get().sessionKeywords?.[session.id] || new Set()
+        const newKeywords = new Set(existingKeywords)
+        
+        currentState.risks.forEach(risk => {
+          const usedInfons = risk.used_infons || []
+          usedInfons.forEach(keyword => {
+            if (typeof keyword === 'string' && keyword.trim()) {
+              newKeywords.add(keyword.trim())
+            }
+          })
+        })
+        
+        console.log(`[Privacy Inference] 累积关键词: ${existingKeywords.size} -> ${newKeywords.size} (新增 ${newKeywords.size - existingKeywords.size})`)
+        
+        set(state => ({
+          sessionKeywords: {
+            ...state.sessionKeywords,
+            [session.id]: newKeywords
+          }
+        }))
+      }
+      
       set(state => ({
         privacyInferences: {
           ...state.privacyInferences,
@@ -2668,7 +2756,7 @@ export const useStore = create((set, get) => ({
           body: JSON.stringify({
             model: configuredModel,
             messages: [{ role: 'user', content: prompt }],
-            stream: false, // 不使用流式，直接获取完整结果
+            stream: true, // 使用流式生成
             temperature: 0.7,
             max_tokens: 4096,
           }),
@@ -2683,39 +2771,95 @@ export const useStore = create((set, get) => ({
           throw new Error(`API error: ${response.status} - ${errorText}`)
         }
         
-        const data = await response.json()
-        const content = data?.choices?.[0]?.message?.content || ''
+        // 流式处理响应
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let parser = null
+        const allSuggestions = new Map() // 使用Map来管理建议，key为_objIndex
         
-        if (!content) {
-          throw new Error('API返回空内容')
+        const { incrementalExtractSuggestions } = await import('./templates/protection.js')
+        
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) {
+            console.log('[Protection] 流式生成完成')
+            break
+          }
+          
+          const chunk = decoder.decode(value, { stream: true })
+          const lines = chunk.split('\n')
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6)
+              if (data === '[DONE]') continue
+              
+              try {
+                const parsed = JSON.parse(data)
+                const content = parsed?.choices?.[0]?.delta?.content || ''
+                if (content) {
+                  buffer += content
+                  
+                  // 使用增量解析器
+                  const result = incrementalExtractSuggestions(buffer, parser)
+                  parser = result.state
+                  
+                  // 更新建议列表
+                  for (const suggestion of result.yielded) {
+                    const objIndex = suggestion._objIndex ?? 0
+                    allSuggestions.set(objIndex, suggestion)
+                  }
+                  
+                  // 实时更新状态
+                  if (result.yielded.length > 0) {
+                    const suggestionsArray = Array.from(allSuggestions.values()).sort((a, b) => {
+                      const orderMap = { 'high_privacy': 0, 'balanced': 1, 'low_privacy': 2 }
+                      return (orderMap[a.level] || 999) - (orderMap[b.level] || 999)
+                    })
+                    
+                    set(state => ({
+                      protectionSuggestions: {
+                        ...state.protectionSuggestions,
+                        [session.id]: {
+                          ...state.protectionSuggestions?.[session.id],
+                          status: 'running',
+                          suggestions: suggestionsArray,
+                          error: null,
+                          abortController
+                        }
+                      }
+                    }))
+                  }
+                }
+              } catch (parseErr) {
+                // 忽略解析错误，继续处理
+                if (process.env.NODE_ENV === 'development') {
+                  console.debug('[Protection] JSON解析失败:', parseErr)
+                }
+              }
+            }
+          }
         }
         
-        console.log(`[Protection] 收到响应，长度: ${content.length}`)
+        // 流式完成，标记所有建议为完成状态
+        const finalSuggestions = Array.from(allSuggestions.values()).map(s => ({
+          ...s,
+          _isComplete: true
+        })).sort((a, b) => {
+          const orderMap = { 'high_privacy': 0, 'balanced': 1, 'low_privacy': 2 }
+          return (orderMap[a.level] || 999) - (orderMap[b.level] || 999)
+        })
         
-        // 解析响应
-        const { parseProtectionResponse, validateSuggestion } = await import('./templates/protection.js')
-        const parsed = parseProtectionResponse(content)
+        console.log(`[Protection] 成功生成 ${finalSuggestions.length} 个建议`)
         
-        if (!parsed || !parsed.suggestions || !Array.isArray(parsed.suggestions)) {
-          throw new Error('无法解析建议响应')
-        }
-        
-        // 验证建议
-        const validSuggestions = parsed.suggestions.filter(validateSuggestion)
-        
-        if (validSuggestions.length === 0) {
-          throw new Error('没有有效的建议')
-        }
-        
-        console.log(`[Protection] 成功生成 ${validSuggestions.length} 个建议`)
-        
-        // 更新状态
+        // 更新最终状态
         set(state => ({
           protectionSuggestions: {
             ...state.protectionSuggestions,
             [session.id]: {
               status: 'done',
-              suggestions: validSuggestions,
+              suggestions: finalSuggestions,
               error: null,
               abortController: null
             }
@@ -2806,6 +2950,7 @@ export const useStore = create((set, get) => ({
           sessions: data.sessions,
           infonSessions: data.infonSessions || {},
           privacyInferences: data.privacyInferences || {},
+          sessionKeywords: data.sessionKeywords || {}, // 加载关键词
           currentSessionId: data.sessions[0]?.id || null,
           customPrivacyItems: data.customPrivacyItems || [],
           selectedLawIdx: data.selectedLawIdx ?? 0,
@@ -2814,7 +2959,7 @@ export const useStore = create((set, get) => ({
           privacyInferenceModel: data.privacyInferenceModel || 'deepseek-chat',
           inferenceMode: data.inferenceMode || 'extract' // 加载推断模式
         })
-        console.log('[PrivaSee] 用户历史数据已加载')
+        console.log('[PrivaSee] 用户历史数据已加载（包含关键词）')
       } else {
         // 如果没有历史数据，初始化一个新会话
         const newSession = createEmptySession()
@@ -2823,6 +2968,7 @@ export const useStore = create((set, get) => ({
           currentSessionId: newSession.id,
           infonSessions: {},
           privacyInferences: {},
+          sessionKeywords: {}, // 初始化关键词
           customPrivacyItems: [],
           selectedLawIdx: 0,
           selectedPrivacyItems: [],
@@ -2837,7 +2983,7 @@ export const useStore = create((set, get) => ({
   // 内部：保存用户历史数据
   _saveUserHistory(userId) {
     try {
-      const { sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel, inferenceMode } = get()
+      const { sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel, inferenceMode, sessionKeywords } = get()
       
       // 清理不可序列化的字段（中文注释）：移除 abortController
       const serializableInferences = {}
@@ -2849,7 +2995,7 @@ export const useStore = create((set, get) => ({
         }
       })
       
-      saveUserSessions(userId, sessions, infonSessions, serializableInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel, inferenceMode)
+      saveUserSessions(userId, sessions, infonSessions, serializableInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel, inferenceMode, sessionKeywords)
     } catch (error) {
       console.error('[PrivaSee] 保存用户历史失败:', error)
     }

@@ -20,7 +20,9 @@ export function useMessageHandlers(
   sendMessage,
   startMessageInfons,
   clearAllPendingInfons,
-  lastInferenceRunCountRef
+  lastInferenceRunCountRef,
+  inferenceMode,
+  startPrivacyInference
 ) {
   const [editingMessageId, setEditingMessageId] = useState(null)
   const [editingContent, setEditingContent] = useState('')
@@ -202,21 +204,23 @@ export function useMessageHandlers(
       console.log('[SaveEdit] 删除被删除消息的信息元和即将过期的信息元')
     }
     
-    // 在发送前，先检查当前是否有pending信息元
-    const hasPendingInfons = currentInfonSession?.runs?.some(run => 
-      run.targetType === 'pending' && run.status === 'done'
-    ) || false
-    
-    // 检查是否有完成的推理结果
+    // 获取当前推理结果
     const currentPrivacyInference = privacyInferences?.[session.id]
-    const hasCompletedInference = currentPrivacyInference?.status === 'done'
     
-    // 如果有pending信息元且推理已完成，说明用户重新编辑过并完成了推理，保持Privacy Risk Analysis状态
-    // 否则清空隐私推理结果并重置推理记录
-    if (hasPendingInfons && hasCompletedInference) {
-      console.log('[SaveEdit] 有pending信息元且推理已完成，保持Privacy Risk Analysis状态')
-    } else {
-      // 清空隐私推理结果
+    // 在直接推理模式下，清空关键词（因为消息被修改，旧关键词可能不再适用）
+    if (inferenceMode === 'direct') {
+      const sessionKeywords = useStore.getState().sessionKeywords || {}
+      if (sessionKeywords[session.id]) {
+        const updatedKeywords = { ...sessionKeywords }
+        delete updatedKeywords[session.id]
+        useStore.setState({ sessionKeywords: updatedKeywords })
+        console.log('[SaveEdit] 直接推理模式：清空关键词，等待重新推理')
+      }
+    }
+    
+    // 在提取信息元模式下清空推理结果
+    if (inferenceMode === 'extract') {
+      // 清空隐私推理结果和隐私保护建议
       if (currentPrivacyInference) {
         useStore.setState({
           privacyInferences: {
@@ -233,9 +237,22 @@ export function useMessageHandlers(
         })
       }
       
+      // 清空隐私保护建议
+      const protectionSuggestions = useStore.getState().protectionSuggestions
+      if (protectionSuggestions?.[session.id]) {
+        const newSuggestions = { ...protectionSuggestions }
+        delete newSuggestions[session.id]
+        useStore.setState({ protectionSuggestions: newSuggestions })
+      }
+      
       // 重置推理记录，以便在信息元提取完成后触发自动推理
       lastInferenceRunCountRef.current = ''
-      console.log('[SaveEdit] 清空隐私推理结果并重置推理记录')
+      console.log('[SaveEdit] 提取信息元模式：清空隐私推理结果、保护建议并重置推理记录')
+    } else {
+      // 直接推理模式：保留推理结果和高亮，只清空签名（与handleSend保持一致）
+      // 如果pending输入框有内容，会触发新的推理；否则保持当前推理结果
+      lastInferenceRunCountRef.current = ''
+      console.log('[SaveEdit] 直接推理模式：保留推理结果，仅重置签名')
     }
     
     // 更新 store 的 sessions
@@ -256,21 +273,21 @@ export function useMessageHandlers(
       const userId = await useStore.getState().sendMessageWithImages(text, editingImages)
       try {
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0) {
-          // 没有 pending infons，需要重新提取
+        if (result.adopted === 0 && inferenceMode === 'extract') {
+          // 没有 pending infons，且在提取信息元模式下，需要重新提取
           startMessageInfons?.(userId)
         }
-        console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0 })
+        console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0, mode: inferenceMode })
       } catch (_) {}
     } else {
       const userId = await sendMessage(text)
       try {
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0) {
-          // 没有 pending infons，需要重新提取
+        if (result.adopted === 0 && inferenceMode === 'extract') {
+          // 没有 pending infons，且在提取信息元模式下，需要重新提取
           startMessageInfons?.(userId)
         }
-        console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0 })
+        console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0, mode: inferenceMode })
       } catch (_) {}
     }
 
@@ -288,6 +305,21 @@ export function useMessageHandlers(
     
     // 注意：不清空pending infons，因为它们已经被adopt到message了
     // clearAllPendingInfons?.() // 这里不调用
+    
+    // 在直接推理模式下，由于清空了关键词，需要触发推理以重新提取
+    if (inferenceMode === 'direct') {
+      // 清空 pendingUserInput，确保推理使用所有已发送的消息
+      useStore.getState().setPendingUserInput('')
+      
+      // 延迟触发推理，确保消息已经保存
+      setTimeout(() => {
+        const updatedSession = useStore.getState().getCurrentSession()
+        if (updatedSession && updatedSession.messages.length > 0) {
+          console.log('[SaveEdit] 直接推理模式：触发推理以重新提取关键词')
+          startPrivacyInference?.()
+        }
+      }, 300)
+    }
     
     antdMessage.success('消息已更新并重新生成')
   }

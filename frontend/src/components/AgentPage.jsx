@@ -66,6 +66,7 @@ export default function AgentPage() {
     startPrivacyInference,
     abortPrivacyInference,
     selectedLaw,
+    sessionKeywords,
     // 隐私保护建议
     protectionSuggestions,
     generateProtectionSuggestions,
@@ -101,7 +102,7 @@ export default function AgentPage() {
     pendingRelations,
     pendingInfonIndex,
     renderHighlightedText
-  } = useInfonHighlight(currentSession, infonSessions)
+  } = useInfonHighlight(currentSession, infonSessions, inferenceMode, privacyInferences, sessionKeywords)
 
   const {
     draggingSessionId,
@@ -140,7 +141,9 @@ export default function AgentPage() {
     sendMessage,
     startMessageInfons,
     clearAllPendingInfons,
-    lastInferenceRunCountRef
+    lastInferenceRunCountRef,
+    inferenceMode,
+    startPrivacyInference
   )
 
   // 同步用户登录状态到主 store：用于控制历史数据持久化
@@ -203,45 +206,74 @@ export default function AgentPage() {
   // 隐私推理自动触发逻辑（中文注释）：信息元提取完成后或用户输入后自动触发
   // 核心逻辑：
   // - 提取信息元模式：pending 或 message 信息元提取完成就触发推理
-  // - 直接推断模式：用户消息发送后或pending输入变化后自动触发推理
+  // - 直接推断模式：ONLY当pending输入框或编辑框内容变化时触发推理（发送消息不触发重新推理）
   useEffect(() => {
     if (!currentSession?.id || !selectedLaw) return
     
     const currentInference = privacyInferences?.[currentSession.id]
     const isInferenceRunning = currentInference?.status === 'running'
     
-    // 直接推断模式：监听用户消息和pending输入的变化
+    // 直接推断模式：只监听pending输入的变化（不监听已发送消息的变化）
     if (inferenceMode === 'direct') {
       const userMessages = (currentSession.messages || []).filter(msg => msg.role === 'user')
-      const pendingInput = (isWaitingForDebounce || input || landingInput) ? (input || landingInput || '').trim() : ''
       
-      // 生成签名：包括已发送消息ID和pending输入的哈希
-      const messageIds = userMessages.map(msg => msg.id).sort().join('|')
+      // 获取pending输入：优先使用编辑内容（如果在编辑模式），否则使用主输入框或landing输入框
+      const isEditing = editingMessageId !== null
+      let pendingInput = ''
+      if (isEditing) {
+        // 编辑模式：使用编辑内容（且与原始内容不同时才算有效的pending）
+        const hasContentChanged = 
+          editingContent !== originalEditingContent || 
+          JSON.stringify(editingImages) !== JSON.stringify(originalEditingImages) ||
+          JSON.stringify(editingAudios) !== JSON.stringify(originalEditingAudios)
+        
+        if (hasContentChanged) {
+          pendingInput = (editingContent || '').trim()
+        }
+      } else {
+        // 非编辑模式：使用主输入框或landing输入框
+        pendingInput = (input || landingInput || '').trim()
+      }
+      
+      // 生成签名：ONLY基于pending输入（不包括已发送消息ID）
+      // 这样发送消息后不会触发重新推理，只有pending内容变化才会触发
       const pendingHash = pendingInput ? `pending:${pendingInput.length}:${pendingInput.slice(0, 50)}` : ''
-      const currentSignature = `${messageIds}${pendingHash ? '|' + pendingHash : ''}`
+      const currentSignature = pendingHash
       
-      // 如果没有任何输入，清空签名并返回
-      if (userMessages.length === 0 && !pendingInput) {
-        if (lastInferenceRunCountRef.current) {
+      // 如果没有pending输入
+      if (!pendingInput) {
+        // 如果有已发送消息且之前没有推理过，执行一次推理
+        if (userMessages.length > 0 && !lastInferenceRunCountRef.current && currentInference?.status !== 'done' && currentInference?.status !== 'running') {
+          console.log('[Privacy Inference] 直接推断模式：首次加载，有消息但无推理结果，触发推理')
+          lastInferenceRunCountRef.current = 'initial'
+          
+          // 清空隐私保护建议
+          clearProtectionSuggestions?.()
+          
+          // 清空 pendingUserInput
+          useStore.getState().setPendingUserInput('')
+          
+          // 延迟触发推理
+          const timer = setTimeout(() => {
+            startPrivacyInference?.()
+          }, 800)
+          return () => clearTimeout(timer)
+        }
+        
+        // 清空签名
+        if (lastInferenceRunCountRef.current && lastInferenceRunCountRef.current !== 'initial') {
           lastInferenceRunCountRef.current = ''
         }
         return
       }
       
-      // 初始化：如果是刷新进入且已有推理结果，直接记录当前签名，不触发推理
-      if (!lastInferenceRunCountRef.current && currentInference?.status === 'done' && !pendingInput) {
-        console.log('[Privacy Inference] 直接推断模式初始化：已有推理结果，记录签名')
-        lastInferenceRunCountRef.current = currentSignature
-        return
-      }
-      
-      // 检测到变化，触发推理
+      // 检测到pending输入变化，触发推理
       if (currentSignature !== lastInferenceRunCountRef.current && currentSignature) {
-        console.log('[Privacy Inference] 直接推断模式：检测到输入变化，触发推理', {
+        console.log('[Privacy Inference] 直接推断模式：检测到pending输入变化，触发推理', {
           signature: currentSignature,
           lastSignature: lastInferenceRunCountRef.current,
           messageCount: userMessages.length,
-          hasPending: !!pendingInput,
+          pendingInputLength: pendingInput.length,
           inferenceStatus: currentInference?.status
         })
         lastInferenceRunCountRef.current = currentSignature
@@ -252,8 +284,15 @@ export default function AgentPage() {
           abortPrivacyInference?.()
         }
         
+        // 清空隐私保护建议
+        clearProtectionSuggestions?.()
+        
+        // 立即同步设置 pendingUserInput（使用 useStore.getState().setPendingUserInput 确保同步）
+        useStore.getState().setPendingUserInput(pendingInput)
+        
         // 延迟触发推理
         const timer = setTimeout(() => {
+          console.log('[Privacy Inference] 触发推理，当前 pendingUserInput:', useStore.getState().pendingUserInput?.substring(0, 50))
           startPrivacyInference?.()
         }, 800)
         return () => clearTimeout(timer)
@@ -310,6 +349,9 @@ export default function AgentPage() {
         abortPrivacyInference?.()
       }
       
+      // 清空隐私保护建议
+      clearProtectionSuggestions?.()
+      
       // 直接调用推理，和长按 law 按钮一样的逻辑
       const timer = setTimeout(() => {
         startPrivacyInference?.()
@@ -326,7 +368,8 @@ export default function AgentPage() {
     inferenceMode,
     input, // 直接推断模式需要监听pending输入
     landingInput,
-    isWaitingForDebounce,
+    editingMessageId, // 直接推断模式：监听编辑状态
+    editingContent, // 直接推断模式：监听编辑内容
   ])
 
   // 推理中止逻辑1：任何信息元开始重新提取时（含 pending/message），若推理运行则立刻中止并恢复上次结果（中文注释）
@@ -473,12 +516,19 @@ export default function AgentPage() {
   // 更新pending用户输入状态（用于直接推断模式）
   useEffect(() => {
     if (inferenceMode === 'direct') {
-      const pendingText = hasMessages ? (input || '').trim() : (landingInput || '').trim()
+      // 如果在编辑模式，使用编辑内容；否则使用主输入框或landing输入框
+      const isEditing = editingMessageId !== null
+      let pendingText = ''
+      if (isEditing) {
+        pendingText = (editingContent || '').trim()
+      } else {
+        pendingText = hasMessages ? (input || '').trim() : (landingInput || '').trim()
+      }
       setPendingUserInput(pendingText)
     } else {
       setPendingUserInput('')
     }
-  }, [input, landingInput, hasMessages, inferenceMode, setPendingUserInput])
+  }, [input, landingInput, hasMessages, inferenceMode, setPendingUserInput, editingMessageId, editingContent])
 
   // 拉取模型列表（中文注释）：页面挂载时
   useEffect(() => { fetchModels?.() }, [fetchModels])
@@ -889,6 +939,11 @@ export default function AgentPage() {
   // 1.5秒 防抖：在用户停止输入后启动 pending 提取（中文注释）
   // 支持主输入框和编辑框两种模式
   useEffect(() => {
+    // 直接推断模式：跳过整个防抖逻辑，推理由专门的 useEffect 处理
+    if (inferenceMode === 'direct') {
+      return
+    }
+    
     // 检查是否在编辑模式
     const isEditing = editingMessageId !== null
     
@@ -930,16 +985,11 @@ export default function AgentPage() {
         return
       }
       
-      // 标记正在等待防抖
+      // 标记正在等待防抖（仅提取信息元模式）
       setIsWaitingForDebounce(true)
-      
-      // 启动新的提取（不清空，让 startPendingInfons 自己处理）
-      // 注意：在直接推断模式下跳过信息元提取
       pendingTimerRef.current = setTimeout(() => {
         try { 
-          if (inferenceMode === 'extract') {
-            startPendingInfons?.(textToUse, imgs, audios)
-          }
+          startPendingInfons?.(textToUse, imgs, audios)
           setIsWaitingForDebounce(false)
         } catch (_) {}
         pendingTimerRef.current = null
@@ -973,16 +1023,12 @@ export default function AgentPage() {
       return
     }
     
-    // 标记正在等待防抖
-    setIsWaitingForDebounce(true)
-    
     // 启动新的提取（不清空，让 startPendingInfons 自己处理）
-    // 注意：在直接推断模式下跳过信息元提取
+    // 标记正在等待防抖（仅提取信息元模式）
+    setIsWaitingForDebounce(true)
     pendingTimerRef.current = setTimeout(() => {
       try { 
-        if (inferenceMode === 'extract') {
-          startPendingInfons?.(textToUse, imgs, audios) // 启动新提取
-        }
+        startPendingInfons?.(textToUse, imgs, audios) // 启动新提取
         setIsWaitingForDebounce(false) // 防抖结束
       } catch (_) {}
       pendingTimerRef.current = null
@@ -1080,8 +1126,8 @@ export default function AgentPage() {
           />
           <Splitter className={styles.splitterRoot}>
             <Splitter.Panel style={{ overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-              {/* 信息元类型图例 */}
-              <InfonLegend />
+              {/* 信息元类型图例 - 仅在提取模式下显示 */}
+              {inferenceMode !== 'direct' && <InfonLegend />}
               <div className={styles.leftPaneScroll} ref={leftPaneScrollRef} style={{ flex: 1, overflow: 'auto' }}>
                 {hasMessages ? (
                   <div className={styles.column}>

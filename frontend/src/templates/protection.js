@@ -43,6 +43,11 @@ export const PROTECTION_SUGGESTIONS_PROMPT = `
 
 ## 输出格式
 
+**流式渲染优化**: 为了实现流畅的流式显示效果，请按以下顺序输出每个建议的字段：
+1. 先输出 level 和 label（用于快速识别）
+2. 再输出 modified_text（主要内容，将会逐字显示）
+3. 最后输出 changes_summary 和 removed_risks
+
 输出**仅包含有效JSON**（无markdown代码块，无额外说明）：
 
 {
@@ -50,8 +55,6 @@ export const PROTECTION_SUGGESTIONS_PROMPT = `
     {
       "level": "high_privacy",
       "label": "高隐私保护",
-      "privacy_score": 95,
-      "utility_score": 40,
       "modified_text": "修改后的文本内容",
       "changes_summary": "简要说明做了哪些修改，为什么这样修改",
       "removed_risks": ["列出移除了哪些隐私风险"]
@@ -59,8 +62,6 @@ export const PROTECTION_SUGGESTIONS_PROMPT = `
     {
       "level": "balanced",
       "label": "平衡方案",
-      "privacy_score": 75,
-      "utility_score": 70,
       "modified_text": "修改后的文本内容",
       "changes_summary": "简要说明做了哪些修改",
       "removed_risks": ["列出移除了哪些隐私风险"]
@@ -68,8 +69,6 @@ export const PROTECTION_SUGGESTIONS_PROMPT = `
     {
       "level": "low_privacy",
       "label": "低隐私保护",
-      "privacy_score": 50,
-      "utility_score": 90,
       "modified_text": "修改后的文本内容",
       "changes_summary": "简要说明做了哪些修改",
       "removed_risks": ["列出移除了哪些隐私风险"]
@@ -81,10 +80,9 @@ export const PROTECTION_SUGGESTIONS_PROMPT = `
 1. **仅输出JSON** - 不要使用markdown代码块，不要添加任何解释文字
 2. **保持语言一致** - 如果输入是中文，修改后的文本也必须是中文；英文同理
 3. **修改要具体** - modified_text必须是完整的、可直接使用的文本
-4. **评分要合理** - privacy_score和utility_score范围0-100，要符合修改程度
-5. **说明要清晰** - changes_summary要简洁说明修改了什么，为什么
-6. **按顺序输出** - 必须按high_privacy → balanced → low_privacy顺序
-7. **保持完整性** - 即使高隐私保护方案也要确保文本可读、有意义
+4. **说明要清晰** - changes_summary要简洁说明修改了什么，为什么
+5. **按顺序输出** - 必须按high_privacy → balanced → low_privacy顺序，且字段顺序为level → label → modified_text → changes_summary → removed_risks
+6. **保持完整性** - 即使高隐私保护方案也要确保文本可读、有意义
 
 ## 示例
 
@@ -191,7 +189,199 @@ export function parseProtectionResponse(responseText) {
 export function validateSuggestion(suggestion) {
   if (!suggestion || typeof suggestion !== 'object') return false
   
-  const required = ['level', 'label', 'privacy_score', 'utility_score', 'modified_text']
+  const required = ['level', 'label', 'modified_text']
   return required.every(field => suggestion[field] !== undefined && suggestion[field] !== null)
+}
+
+/**
+ * 流式增量解析保护建议
+ * @param {string} streamText - 流式接收的文本
+ * @param {object} parser - 解析器状态
+ * @returns {object} { state, yielded }
+ */
+export function incrementalExtractSuggestions(streamText, parser) {
+  const state = parser || {
+    foundArray: false,
+    arrayStart: -1,
+    scanPos: 0,
+    inString: false,
+    escape: false,
+    objStart: -1,
+    braceDepth: 0,
+    closed: false,
+    objectStates: new Map(),
+    currentObjIndex: 0
+  }
+  const yielded = []
+  const text = String(streamText || '')
+
+  // 查找 "suggestions" 数组
+  if (!state.foundArray) {
+    const m = /"suggestions"\s*:\s*\[/.exec(text)
+    if (!m) {
+      state.scanPos = text.length
+      return { state, yielded }
+    }
+    state.foundArray = true
+    state.arrayStart = m.index + m[0].lastIndexOf('[')
+    state.scanPos = state.arrayStart + 1
+  }
+
+  let i = state.scanPos
+  let inString = state.inString
+  let escape = state.escape
+  let objStart = state.objStart
+  let braceDepth = state.braceDepth
+
+  if (state.closed) return { state, yielded }
+
+  for (; i < text.length; i++) {
+    const ch = text[i]
+    if (inString) {
+      if (escape) { escape = false; continue }
+      if (ch === '\\') { escape = true; continue }
+      if (ch === '"') { inString = false; continue }
+      continue
+    }
+    if (ch === '"') { inString = true; continue }
+    if (ch === '{') {
+      if (objStart < 0) {
+        objStart = i
+        braceDepth = 1
+        if (!state.objectStates.has(state.currentObjIndex)) {
+          state.objectStates.set(state.currentObjIndex, { lastParsedHash: null, data: {} })
+        }
+      } else {
+        braceDepth++
+      }
+      continue
+    }
+    if (ch === '}') {
+      if (objStart >= 0) {
+        braceDepth--
+        if (braceDepth === 0) {
+          let objText = text.slice(objStart, i + 1).trim()
+          if (!objText.endsWith('}')) {
+            const lastBrace = objText.lastIndexOf('}')
+            if (lastBrace >= 0) {
+              objText = objText.slice(0, lastBrace + 1)
+            }
+          }
+          
+          try {
+            const value = JSON.parse(objText)
+            const objState = state.objectStates.get(state.currentObjIndex)
+            if (objState) {
+              yielded.push({ ...value, _objIndex: state.currentObjIndex, _isComplete: true })
+              objState.data = value
+              objState.lastParsedHash = computeHashId(objText)
+            }
+          } catch (err) {
+            const objState = state.objectStates.get(state.currentObjIndex)
+            if (objState && Object.keys(objState.data).length > 0) {
+              yielded.push({ ...objState.data, _objIndex: state.currentObjIndex, _isComplete: true })
+              objState.lastParsedHash = computeHashId(objText)
+            }
+          }
+          objStart = -1
+          state.currentObjIndex++
+        }
+      }
+      continue
+    }
+    if (ch === ']') {
+      if (objStart < 0) { state.closed = true; i++; break }
+    }
+    
+    // 部分解析
+    if (objStart >= 0 && braceDepth > 0) {
+      const objText = text.slice(objStart, i + 1)
+      if ((ch === ',' || ch === '\n') && (i - objStart) > 20) {
+        const objState = state.objectStates.get(state.currentObjIndex)
+        const currentHash = computeHashId(objText)
+        
+        if (objState && objState.lastParsedHash !== currentHash) {
+          const partialData = parsePartialSuggestion(objText)
+          if (partialData && Object.keys(partialData).length > 0) {
+            const hasNewData = Object.keys(partialData).some(
+              key => partialData[key] !== objState.data[key]
+            )
+            
+            if (hasNewData) {
+              objState.data = { ...objState.data, ...partialData }
+              objState.lastParsedHash = currentHash
+              yielded.push({ ...objState.data, _objIndex: state.currentObjIndex, _isComplete: false })
+            }
+          }
+        }
+      }
+    }
+  }
+
+  state.inString = inString
+  state.escape = escape
+  state.objStart = objStart
+  state.braceDepth = braceDepth
+  state.scanPos = i
+  return { state, yielded }
+}
+
+/**
+ * 解析部分建议对象
+ */
+function parsePartialSuggestion(objText) {
+  const result = {}
+  const criticalFields = ['level', 'label']
+  const otherFields = ['modified_text', 'changes_summary', 'removed_risks']
+  
+  for (const field of [...criticalFields, ...otherFields]) {
+    const value = extractFieldValue(objText, field)
+    if (value !== null) {
+      result[field] = value
+    }
+  }
+  
+  return result
+}
+
+/**
+ * 提取字段值
+ */
+function extractFieldValue(text, fieldName) {
+  const patterns = [
+    new RegExp(`"${fieldName}"\\s*:\\s*"([^"]*(?:\\\\.[^"]*)*)"`, 's'),
+    new RegExp(`"${fieldName}"\\s*:\\s*(\\d+\\.?\\d*)`, 's'),
+    new RegExp(`"${fieldName}"\\s*:\\s*(\\[[^\\]]*\\])`, 's'),
+    new RegExp(`"${fieldName}"\\s*:\\s*(\\{[^}]*\\})`, 's')
+  ]
+  
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    if (match) {
+      try {
+        if (pattern.source.includes('"([^"]*')) {
+          return match[1].replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\\\/g, '\\')
+        }
+        return JSON.parse(match[1])
+      } catch (err) {
+        continue
+      }
+    }
+  }
+  
+  return null
+}
+
+/**
+ * 计算简单哈希ID
+ */
+function computeHashId(str) {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i)
+    hash = ((hash << 5) - hash) + char
+    hash = hash & hash
+  }
+  return hash.toString(36)
 }
 

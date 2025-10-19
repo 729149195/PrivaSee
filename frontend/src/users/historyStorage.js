@@ -2,11 +2,24 @@
 // 为每个登录用户单独保存会话历史和信息元数据
 
 // 保存用户的所有会话数据
-export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel, inferenceMode) {
+export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel, inferenceMode, sessionKeywords) {
   if (!userId) return
   
   try {
     const key = `privasee_history_${userId}`
+    
+    // 将sessionKeywords中的Set转换为数组以便JSON序列化
+    const serializedKeywords = {}
+    if (sessionKeywords && typeof sessionKeywords === 'object') {
+      Object.entries(sessionKeywords).forEach(([sessionId, keywordSet]) => {
+        if (keywordSet instanceof Set) {
+          serializedKeywords[sessionId] = Array.from(keywordSet)
+        } else if (Array.isArray(keywordSet)) {
+          serializedKeywords[sessionId] = keywordSet
+        }
+      })
+    }
+    
     const data = {
       sessions: sessions || [],
       infonSessions: infonSessions || {},
@@ -17,11 +30,12 @@ export function saveUserSessions(userId, sessions, infonSessions, privacyInferen
       infonExtractionModel: infonExtractionModel || 'deepseek-chat',
       privacyInferenceModel: privacyInferenceModel || 'deepseek-chat',
       inferenceMode: inferenceMode || 'extract', // 保存推断模式
+      sessionKeywords: serializedKeywords, // 保存关键词（数组格式）
       savedAt: Date.now()
     }
     
     localStorage.setItem(key, JSON.stringify(data))
-    console.log(`[PrivaSee] 已保存用户 ${userId} 的会话数据`)
+    console.log(`[PrivaSee] 已保存用户 ${userId} 的会话数据（包含 ${Object.keys(serializedKeywords).length} 个会话的关键词）`)
   } catch (error) {
     console.error('[PrivaSee] 保存会话数据失败:', error)
   }
@@ -38,7 +52,18 @@ export function loadUserSessions(userId) {
     if (!data) return null
     
     const parsed = JSON.parse(data)
-    console.log(`[PrivaSee] 已加载用户 ${userId} 的会话数据`)
+    
+    // 将sessionKeywords中的数组转换回Set
+    const deserializedKeywords = {}
+    if (parsed.sessionKeywords && typeof parsed.sessionKeywords === 'object') {
+      Object.entries(parsed.sessionKeywords).forEach(([sessionId, keywordArray]) => {
+        if (Array.isArray(keywordArray)) {
+          deserializedKeywords[sessionId] = new Set(keywordArray)
+        }
+      })
+    }
+    
+    console.log(`[PrivaSee] 已加载用户 ${userId} 的会话数据（包含 ${Object.keys(deserializedKeywords).length} 个会话的关键词）`)
     
     return {
       sessions: parsed.sessions || [],
@@ -50,6 +75,7 @@ export function loadUserSessions(userId) {
       infonExtractionModel: parsed.infonExtractionModel || 'deepseek-chat',
       privacyInferenceModel: parsed.privacyInferenceModel || 'deepseek-chat',
       inferenceMode: parsed.inferenceMode || 'extract', // 加载推断模式
+      sessionKeywords: deserializedKeywords, // 加载关键词（Set格式）
       savedAt: parsed.savedAt
     }
   } catch (error) {
@@ -129,7 +155,8 @@ export function importUserData(userId, file) {
           data.selectedPrivacyItems,
           data.infonExtractionModel,
           data.privacyInferenceModel,
-          data.inferenceMode
+          data.inferenceMode,
+          data.sessionKeywords || {}
         )
         resolve(data)
       } catch (error) {
