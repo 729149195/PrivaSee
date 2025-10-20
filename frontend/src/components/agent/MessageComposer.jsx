@@ -6,6 +6,7 @@ import HighlightInput from '../HighlightInput'
 import RelationTags from './RelationTags'
 import AudioRecorder from './AudioRecorder'
 import AudioTag from './AudioTag'
+import ImagePreview from './ImagePreview'
 import { compressImage, checkFileSize, getFileSizeText } from '../../utils/imageCompression'
 
 /**
@@ -30,6 +31,8 @@ import { compressImage, checkFileSize, getFileSizeText } from '../../utils/image
  * @param {boolean} currentModelIsMultimodal - 当前模型是否支持多模态
  * @param {boolean} isEditingMessage - 是否正在编辑消息
  * @param {function} renderHighlightedText - 渲染高亮文本的函数
+ * @param {string} inferenceMode - 推断模式 ('extract' | 'direct')
+ * @param {function} processImageUpload - 处理图片上传的函数（用于直接推断模式）
  */
 const MessageComposer = ({
   input,
@@ -51,10 +54,22 @@ const MessageComposer = ({
   pendingInfonIndex,
   currentModelIsMultimodal,
   isEditingMessage,
-  renderHighlightedText
+  renderHighlightedText,
+  inferenceMode,
+  processImageUpload
 }) => {
   const handleAudioAdded = (audioData) => {
     setSelectedAudios?.((prev) => [...prev, audioData])
+  }
+  
+  // 获取图片URL（兼容字符串和对象格式）
+  const getImageUrl = (img) => {
+    return typeof img === 'string' ? img : img?.url
+  }
+  
+  // 获取图片对象（兼容字符串和对象格式）
+  const getImageData = (img) => {
+    return typeof img === 'string' ? { url: img, status: 'done' } : img
   }
 
   return (
@@ -63,24 +78,21 @@ const MessageComposer = ({
         {/* 预览总在输入框上方 */}
         {selectedImages.length > 0 && (
           <div className={styles.composerPreviews}>
-            {selectedImages.map((src, i) => (
-              <div key={i} className={styles.composerPreviewItem}>
-                <img 
-                  src={src} 
-                  alt={`preview-${i}`} 
-                  className={styles.composerPreviewImg} 
-                  onClick={() => onImageClick?.(src)}
-                  style={{ cursor: 'pointer' }}
-                />
-                <button 
-                  className={styles.composerPreviewRemove} 
-                  onClick={(e) => { 
-                    e.stopPropagation(); 
-                    onRemoveImage?.(i); 
-                  }}
-                >✕</button>
-              </div>
-            ))}
+            {selectedImages.map((img, i) => {
+              const imageData = getImageData(img)
+              const imageUrl = getImageUrl(img)
+              
+              return (
+                <div key={imageData.id || i} className={styles.composerPreviewItem}>
+                  <ImagePreview
+                    imageData={imageData}
+                    onRemove={() => onRemoveImage?.(i)}
+                    onClick={() => onImageClick?.(imageUrl)}
+                    removable={true}
+                  />
+                </div>
+              )
+            })}
           </div>
         )}
         {/* 音频预览在输入框上方 */}
@@ -137,8 +149,16 @@ const MessageComposer = ({
                   })
                   
                   hideLoading()
-                  setSelectedImages((prev) => [...prev, compressed])
-                  message.success('图片上传成功')
+                  
+                  // 直接推断模式：使用图片分析功能
+                  if (inferenceMode === 'direct' && processImageUpload) {
+                    await processImageUpload(compressed, setSelectedImages)
+                    message.success('图片上传成功，正在分析...')
+                  } else {
+                    // 提取信息元模式：直接添加图片（保持向后兼容）
+                    setSelectedImages((prev) => [...prev, compressed])
+                    message.success('图片上传成功')
+                  }
                 } catch (error) {
                   message.error(`图片处理失败: ${error.message}`)
                   console.error('[ImageUpload]', error)

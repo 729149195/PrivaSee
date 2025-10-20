@@ -29,6 +29,7 @@ import MessageComposer from './agent/MessageComposer'
 
 // 导入提取的 Hook
 import { useImageSelection } from '../hooks/useImageSelection'
+import { useImageAnalysis } from '../hooks/useImageAnalysis'
 import { useInfonHighlight } from '../hooks/useInfonHighlight.jsx'
 import { useSessionDragDrop } from '../hooks/useSessionDragDrop'
 import { useMessageHandlers } from '../hooks/useMessageHandlers'
@@ -77,6 +78,7 @@ export default function AgentPage() {
     setInferenceMode,
     setPendingUserInput,
     setPendingAudios,
+    setPendingImages,
   } = useStore()
 
   // 用户状态：从用户 store 获取
@@ -95,6 +97,9 @@ export default function AgentPage() {
     handlePickImages,
     removeSelectedImage,
   } = useImageSelection()
+  
+  // 使用图片分析 Hook
+  const { processImageUpload } = useImageAnalysis(inferenceMode)
 
   const {
     getMessageInfons,
@@ -223,6 +228,7 @@ export default function AgentPage() {
       const isEditing = editingMessageId !== null
       let pendingInput = ''
       let pendingAudios = []
+      let pendingImages = []
       if (isEditing) {
         // 编辑模式：使用编辑内容（且与原始内容不同时才算有效的pending）
         const hasContentChanged = 
@@ -233,23 +239,31 @@ export default function AgentPage() {
         if (hasContentChanged) {
           pendingInput = (editingContent || '').trim()
           pendingAudios = editingAudios || []
+          pendingImages = editingImages || []
         }
       } else {
         // 非编辑模式：使用主输入框或landing输入框
         pendingInput = (input || landingInput || '').trim()
         pendingAudios = selectedAudios || []
+        pendingImages = selectedImages || []
       }
       
-      // 生成签名：基于pending输入和音频转写内容
+      // 生成签名：基于pending输入、音频转写内容和图片分析内容
       // 这样发送消息后不会触发重新推理，只有pending内容变化才会触发
       const audioHash = pendingAudios
         .map(audio => `${audio.id}:${audio.transcript?.length || 0}:${(audio.transcript || '').slice(0, 30)}`)
         .join('|')
+      const imageHash = pendingImages
+        .map(img => {
+          const imgObj = typeof img === 'string' ? { id: 'legacy', url: img, status: 'done' } : img
+          return `${imgObj.id}:${imgObj.status}:${imgObj.analysis?.length || 0}`
+        })
+        .join('|')
       const pendingHash = pendingInput ? `pending:${pendingInput.length}:${pendingInput.slice(0, 50)}` : ''
-      const currentSignature = [pendingHash, audioHash].filter(Boolean).join('||')
+      const currentSignature = [pendingHash, audioHash, imageHash].filter(Boolean).join('||')
       
-      // 如果没有pending输入也没有pending音频
-      if (!pendingInput && pendingAudios.length === 0) {
+      // 如果没有pending输入、没有pending音频、也没有pending图片
+      if (!pendingInput && pendingAudios.length === 0 && pendingImages.length === 0) {
         // 如果有已发送消息且之前没有推理过，执行一次推理
         if (userMessages.length > 0 && !lastInferenceRunCountRef.current && currentInference?.status !== 'done' && currentInference?.status !== 'running') {
           console.log('[Privacy Inference] 直接推断模式：首次加载，有消息但无推理结果，触发推理')
@@ -258,9 +272,10 @@ export default function AgentPage() {
           // 清空隐私保护建议
           clearProtectionSuggestions?.()
           
-          // 清空 pendingUserInput 和 pendingAudios
+          // 清空 pendingUserInput、pendingAudios 和 pendingImages
           useStore.getState().setPendingUserInput('')
           useStore.getState().setPendingAudios([])
+          useStore.getState().setPendingImages([])
           
           // 延迟触发推理
           const timer = setTimeout(() => {
@@ -276,9 +291,10 @@ export default function AgentPage() {
           // 清除当前推理并恢复到上一次结果
           clearCurrentInferenceAndRestore?.()
           
-          // 清空 pendingUserInput 和 pendingAudios
+          // 清空 pendingUserInput、pendingAudios 和 pendingImages
           useStore.getState().setPendingUserInput('')
           useStore.getState().setPendingAudios([])
+          useStore.getState().setPendingImages([])
           
           // 清空签名
           lastInferenceRunCountRef.current = ''
@@ -287,14 +303,27 @@ export default function AgentPage() {
         return
       }
       
-      // 检测到pending输入或音频变化，触发推理
+      // 检测到pending输入、音频或图片变化，触发推理
       if (currentSignature !== lastInferenceRunCountRef.current && currentSignature) {
-        console.log('[Privacy Inference] 直接推断模式：检测到pending输入或音频变化，触发推理', {
+        // 检查图片是否都已完成分析
+        const allImagesAnalyzed = pendingImages.every(img => {
+          const imgObj = typeof img === 'string' ? { status: 'done' } : img
+          return imgObj.status === 'done' || imgObj.status === 'error'
+        })
+        
+        // 如果有图片还在处理中，不触发推理
+        if (pendingImages.length > 0 && !allImagesAnalyzed) {
+          console.log('[Privacy Inference] 直接推断模式：图片正在处理中，等待完成')
+          return
+        }
+        
+        console.log('[Privacy Inference] 直接推断模式：检测到pending输入、音频或图片变化，触发推理', {
           signature: currentSignature,
           lastSignature: lastInferenceRunCountRef.current,
           messageCount: userMessages.length,
           pendingInputLength: pendingInput.length,
           pendingAudiosCount: pendingAudios.length,
+          pendingImagesCount: pendingImages.length,
           inferenceStatus: currentInference?.status,
           editingMessageId: editingMessageId
         })
@@ -309,13 +338,14 @@ export default function AgentPage() {
         // 清空隐私保护建议
         clearProtectionSuggestions?.()
         
-        // 立即同步设置 pendingUserInput 和 pendingAudios（使用 useStore.getState() 确保同步）
+        // 立即同步设置 pendingUserInput、pendingAudios 和 pendingImages（使用 useStore.getState() 确保同步）
         useStore.getState().setPendingUserInput(pendingInput)
         useStore.getState().setPendingAudios(pendingAudios)
+        useStore.getState().setPendingImages(pendingImages)
         
         // 延迟触发推理，传递editingMessageId以排除正在编辑的消息
         const timer = setTimeout(() => {
-          console.log('[Privacy Inference] 触发推理，当前 pendingUserInput:', useStore.getState().pendingUserInput?.substring(0, 50), 'pendingAudios:', useStore.getState().pendingAudios?.length)
+          console.log('[Privacy Inference] 触发推理，当前 pendingUserInput:', useStore.getState().pendingUserInput?.substring(0, 50), 'pendingAudios:', useStore.getState().pendingAudios?.length, 'pendingImages:', useStore.getState().pendingImages?.length)
           startPrivacyInference?.(editingMessageId)
         }, 800)
         return () => clearTimeout(timer)
@@ -392,6 +422,7 @@ export default function AgentPage() {
     input, // 直接推断模式需要监听pending输入
     landingInput,
     selectedAudios, // 直接推断模式：监听音频数据
+    selectedImages, // 直接推断模式：监听图片数据
     editingMessageId, // 直接推断模式：监听编辑状态
     editingContent, // 直接推断模式：监听编辑内容
     editingAudios, // 直接推断模式：监听编辑音频
@@ -675,10 +706,22 @@ export default function AgentPage() {
     
     // 直接推断模式：跳过信息元相关的锁定检查
     if (inferenceMode === 'direct') {
+      // 检查是否有图片正在处理中
+      const isEditing = editingMessageId !== null
+      const imagesToCheck = isEditing ? editingImages : selectedImages
+      const hasProcessingImages = imagesToCheck.some(img => {
+        const imgObj = typeof img === 'string' ? { status: 'done' } : img
+        return imgObj.status === 'uploading' || imgObj.status === 'analyzing'
+      })
+      
+      if (hasProcessingImages) {
+        return { locked: true, stage: 'analyzing', label: 'Processing Images...' }
+      }
+      
       const currentInference = privacyInferences?.[currentSession.id]
       const isInferenceRunning = currentInference?.status === 'running'
       
-      // 只检查隐私推理状态
+      // 检查隐私推理状态
       if (isInferenceRunning) {
         return { locked: true, stage: 'analyzing', label: 'Privacy Analyzing...' }
       }
@@ -1193,6 +1236,8 @@ export default function AgentPage() {
                           messageRelations={messageRelations}
                           infonIndex={infonIndex}
                           pendingHighlights={pendingHighlights}
+                          inferenceMode={inferenceMode}
+                          processImageUpload={processImageUpload}
                           pendingRelations={pendingRelations}
                           pendingInfonIndex={pendingInfonIndex}
                           sendLockState={sendLockState}
@@ -1220,6 +1265,8 @@ export default function AgentPage() {
                     pendingInfonIndex={pendingInfonIndex}
                     currentModelIsMultimodal={currentModelIsMultimodal}
                     renderHighlightedText={renderHighlightedText}
+                    inferenceMode={inferenceMode}
+                    processImageUpload={processImageUpload}
                   />
                 )}
               </div>
@@ -1247,6 +1294,8 @@ export default function AgentPage() {
                   currentModelIsMultimodal={currentModelIsMultimodal}
                   isEditingMessage={editingMessageId !== null}
                   renderHighlightedText={renderHighlightedText}
+                  inferenceMode={inferenceMode}
+                  processImageUpload={processImageUpload}
                 />
               )}
             </Splitter.Panel>

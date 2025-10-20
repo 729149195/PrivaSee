@@ -1,8 +1,22 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
+import { message as antdMessage } from 'antd'
 
 /**
  * 图片选择管理 Hook
  * 管理选择的图片和预览状态
+ * 
+ * 图片数据结构（直接推断模式）：
+ * {
+ *   id: string,              // 唯一标识
+ *   url: string,             // base64 data URL
+ *   status: 'uploading' | 'analyzing' | 'done' | 'error',
+ *   analysis: string,        // 分析结果文本
+ *   error: string,           // 错误信息
+ *   timestamp: number        // 时间戳
+ * }
+ * 
+ * 图片数据结构（提取信息元模式）：
+ * string (base64 data URL) - 保持向后兼容
  */
 export function useImageSelection() {
   const [selectedImages, setSelectedImages] = useState([])

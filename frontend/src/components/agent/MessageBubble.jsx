@@ -36,6 +36,8 @@ const ViteIcon = '/vite.svg'
  * @param {Array} pendingRelations - 待处理的关系
  * @param {object} pendingInfonIndex - 待处理的信息元索引
  * @param {boolean} currentModelIsMultimodal - 当前模型是否支持多模态
+ * @param {string} inferenceMode - 推断模式 ('extract' | 'direct')
+ * @param {function} processImageUpload - 处理图片上传的函数（用于直接推断模式）
  */
 const MessageBubble = ({
   message,
@@ -65,7 +67,9 @@ const MessageBubble = ({
   pendingRelations,
   pendingInfonIndex,
   sendLockState,
-  currentModelIsMultimodal
+  currentModelIsMultimodal,
+  inferenceMode,
+  processImageUpload
 }) => {
   const isEditing = editingMessageId === message.id
 
@@ -98,6 +102,8 @@ const MessageBubble = ({
               onEditingTranscriptChange={onEditingTranscriptChange}
               onSave={onSaveEdit}
               onCancel={onCancelEdit}
+              inferenceMode={inferenceMode}
+              processImageUpload={processImageUpload}
               pendingHighlights={pendingHighlights}
               pendingRelations={pendingRelations}
               pendingInfonIndex={pendingInfonIndex}

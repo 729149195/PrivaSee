@@ -538,6 +538,9 @@ export const useStore = create((set, get) => ({
   // Pending音频（中文注释）：用于直接推断模式下获取未发送的音频转写
   pendingAudios: [],
   
+  // Pending图片（中文注释）：用于直接推断模式下获取未发送的图片分析
+  pendingImages: [],
+  
   // 设置信息元提取模型
   setInfonExtractionModel: (modelId) => {
     set({ infonExtractionModel: modelId })
@@ -581,6 +584,78 @@ export const useStore = create((set, get) => ({
   // 设置pending音频
   setPendingAudios: (audios) => {
     set({ pendingAudios: audios })
+  },
+  
+  // 设置pending图片
+  setPendingImages: (images) => {
+    set({ pendingImages: images })
+  },
+  
+  // 分析图片内容（用于直接推断模式）
+  async analyzeImage(imageDataUrl) {
+    try {
+      // 使用 Ollama 的本地 gemma3:12b 模型分析图片
+      const apiUrl = get().baseUrl
+      const model = 'gemma3:12b'
+      
+      // 精心设计的提示词：提取图片中的所有细节和可能关联到个人隐私的内容
+      const systemPrompt = `You are a privacy-focused AI assistant. Analyze the provided image and extract ALL details that could potentially be used to infer personal information or be associated with other data to deduce privacy-related information.
+
+Your task:
+1. Identify and describe ALL visible elements in the image (people, objects, locations, text, symbols, etc.)
+2. Extract any text visible in the image
+3. Identify any identifiable information (faces, license plates, addresses, names, etc.)
+4. Note contextual clues (time, place, activity, relationships, etc.)
+5. Identify any metadata or background details that could reveal personal information
+6. Provide a brief summary of the image content
+
+Output format:
+- Be thorough and detailed
+- List all observations systematically
+- Highlight privacy-sensitive elements
+- Keep your response concise but comprehensive
+- Use clear and structured language`
+
+      const userPrompt = 'Analyze this image and extract all details as instructed.'
+      
+      const response = await fetch(`${apiUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: userPrompt },
+                { type: 'image_url', image_url: { url: imageDataUrl } }
+              ]
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 1000,
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`Image analysis failed: ${response.statusText}`)
+      }
+      
+      const result = await response.json()
+      const analysisText = result.choices?.[0]?.message?.content?.trim() || ''
+      
+      if (!analysisText) {
+        throw new Error('No analysis result returned')
+      }
+      
+      return analysisText
+    } catch (error) {
+      console.error('[Image Analysis] Error:', error)
+      throw error
+    }
   },
   
   // 设置当前用户（登录时调用）
@@ -2248,6 +2323,14 @@ export const useStore = create((set, get) => ({
         }
       })
       
+      // 4. 获取pending图片（如果有）
+      const pendingImages = get().pendingImages || []
+      pendingImages.forEach(image => {
+        if (image && image.analysis && image.analysis.trim()) {
+          textParts.push(`<img>${image.analysis.trim()}</img>`)
+        }
+      })
+      
       // 合并所有文本
       directInput = textParts.filter(Boolean).join('\n\n')
       
@@ -2257,7 +2340,14 @@ export const useStore = create((set, get) => ({
       }
       
       const audioCount = userMessages.reduce((sum, msg) => sum + (msg.audios?.length || 0), 0) + pendingAudios.length
-      console.log(`[Privacy Inference] 直接推断模式，用户输入长度: ${directInput.length} 字符，来源：${userMessages.length}条已发送消息 + ${pendingInput ? '1条pending输入' : '0条pending输入'} + ${audioCount}条音频转写`)
+      const imageCount = userMessages.reduce((sum, msg) => {
+        if (!msg.content) return sum
+        if (Array.isArray(msg.content)) {
+          return sum + msg.content.filter(part => part && part.type === 'image_url').length
+        }
+        return sum
+      }, 0) + pendingImages.length
+      console.log(`[Privacy Inference] 直接推断模式，用户输入长度: ${directInput.length} 字符，来源：${userMessages.length}条已发送消息 + ${pendingInput ? '1条pending输入' : '0条pending输入'} + ${audioCount}条音频转写 + ${imageCount}条图片分析`)
     } else {
       // 提取信息元模式：获取当前会话的所有信息元
       const runs = infonSessions?.[session.id]?.runs || []
