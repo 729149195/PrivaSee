@@ -26,6 +26,7 @@ import { compressImage, checkFileSize, getFileSizeText } from '../../utils/image
  * @param {Array} originalImages - 原始图片
  * @param {Array} originalAudios - 原始音频
  * @param {boolean} currentModelIsMultimodal - 当前模型是否支持多模态
+ * @param {function} renderHighlightedText - 渲染高亮文本的函数
  */
 const MessageEditor = ({
   editingContent,
@@ -44,7 +45,8 @@ const MessageEditor = ({
   originalContent,
   originalImages,
   originalAudios = [],
-  currentModelIsMultimodal
+  currentModelIsMultimodal,
+  renderHighlightedText
 }) => {
   const handleAudioAdded = (audioData) => {
     setEditingAudios?.((prev) => [...prev, audioData])
@@ -93,6 +95,7 @@ const MessageEditor = ({
               removable={true}
               variant="input"
               editable={true}
+              renderHighlightedText={renderHighlightedText}
             />
           ))}
         </div>

@@ -65,6 +65,7 @@ export default function AgentPage() {
     privacyInferences,
     startPrivacyInference,
     abortPrivacyInference,
+    clearCurrentInferenceAndRestore,
     selectedLaw,
     sessionKeywords,
     // 隐私保护建议
@@ -75,6 +76,7 @@ export default function AgentPage() {
     inferenceMode,
     setInferenceMode,
     setPendingUserInput,
+    setPendingAudios,
   } = useStore()
 
   // 用户状态：从用户 store 获取
@@ -220,6 +222,7 @@ export default function AgentPage() {
       // 获取pending输入：优先使用编辑内容（如果在编辑模式），否则使用主输入框或landing输入框
       const isEditing = editingMessageId !== null
       let pendingInput = ''
+      let pendingAudios = []
       if (isEditing) {
         // 编辑模式：使用编辑内容（且与原始内容不同时才算有效的pending）
         const hasContentChanged = 
@@ -229,19 +232,24 @@ export default function AgentPage() {
         
         if (hasContentChanged) {
           pendingInput = (editingContent || '').trim()
+          pendingAudios = editingAudios || []
         }
       } else {
         // 非编辑模式：使用主输入框或landing输入框
         pendingInput = (input || landingInput || '').trim()
+        pendingAudios = selectedAudios || []
       }
       
-      // 生成签名：ONLY基于pending输入（不包括已发送消息ID）
+      // 生成签名：基于pending输入和音频转写内容
       // 这样发送消息后不会触发重新推理，只有pending内容变化才会触发
+      const audioHash = pendingAudios
+        .map(audio => `${audio.id}:${audio.transcript?.length || 0}:${(audio.transcript || '').slice(0, 30)}`)
+        .join('|')
       const pendingHash = pendingInput ? `pending:${pendingInput.length}:${pendingInput.slice(0, 50)}` : ''
-      const currentSignature = pendingHash
+      const currentSignature = [pendingHash, audioHash].filter(Boolean).join('||')
       
-      // 如果没有pending输入
-      if (!pendingInput) {
+      // 如果没有pending输入也没有pending音频
+      if (!pendingInput && pendingAudios.length === 0) {
         // 如果有已发送消息且之前没有推理过，执行一次推理
         if (userMessages.length > 0 && !lastInferenceRunCountRef.current && currentInference?.status !== 'done' && currentInference?.status !== 'running') {
           console.log('[Privacy Inference] 直接推断模式：首次加载，有消息但无推理结果，触发推理')
@@ -250,31 +258,45 @@ export default function AgentPage() {
           // 清空隐私保护建议
           clearProtectionSuggestions?.()
           
-          // 清空 pendingUserInput
+          // 清空 pendingUserInput 和 pendingAudios
           useStore.getState().setPendingUserInput('')
+          useStore.getState().setPendingAudios([])
           
           // 延迟触发推理
           const timer = setTimeout(() => {
-            startPrivacyInference?.()
+            startPrivacyInference?.(null)
           }, 800)
           return () => clearTimeout(timer)
         }
         
-        // 清空签名
+        // 输入被清空：如果之前有推理（非initial状态），清除当前推理并恢复上一次结果
         if (lastInferenceRunCountRef.current && lastInferenceRunCountRef.current !== 'initial') {
+          console.log('[Privacy Inference] 直接推断模式：输入被清空，清除当前推理并恢复上一次结果')
+          
+          // 清除当前推理并恢复到上一次结果
+          clearCurrentInferenceAndRestore?.()
+          
+          // 清空 pendingUserInput 和 pendingAudios
+          useStore.getState().setPendingUserInput('')
+          useStore.getState().setPendingAudios([])
+          
+          // 清空签名
           lastInferenceRunCountRef.current = ''
         }
+        
         return
       }
       
-      // 检测到pending输入变化，触发推理
+      // 检测到pending输入或音频变化，触发推理
       if (currentSignature !== lastInferenceRunCountRef.current && currentSignature) {
-        console.log('[Privacy Inference] 直接推断模式：检测到pending输入变化，触发推理', {
+        console.log('[Privacy Inference] 直接推断模式：检测到pending输入或音频变化，触发推理', {
           signature: currentSignature,
           lastSignature: lastInferenceRunCountRef.current,
           messageCount: userMessages.length,
           pendingInputLength: pendingInput.length,
-          inferenceStatus: currentInference?.status
+          pendingAudiosCount: pendingAudios.length,
+          inferenceStatus: currentInference?.status,
+          editingMessageId: editingMessageId
         })
         lastInferenceRunCountRef.current = currentSignature
         
@@ -287,13 +309,14 @@ export default function AgentPage() {
         // 清空隐私保护建议
         clearProtectionSuggestions?.()
         
-        // 立即同步设置 pendingUserInput（使用 useStore.getState().setPendingUserInput 确保同步）
+        // 立即同步设置 pendingUserInput 和 pendingAudios（使用 useStore.getState() 确保同步）
         useStore.getState().setPendingUserInput(pendingInput)
+        useStore.getState().setPendingAudios(pendingAudios)
         
-        // 延迟触发推理
+        // 延迟触发推理，传递editingMessageId以排除正在编辑的消息
         const timer = setTimeout(() => {
-          console.log('[Privacy Inference] 触发推理，当前 pendingUserInput:', useStore.getState().pendingUserInput?.substring(0, 50))
-          startPrivacyInference?.()
+          console.log('[Privacy Inference] 触发推理，当前 pendingUserInput:', useStore.getState().pendingUserInput?.substring(0, 50), 'pendingAudios:', useStore.getState().pendingAudios?.length)
+          startPrivacyInference?.(editingMessageId)
         }, 800)
         return () => clearTimeout(timer)
       }
@@ -354,7 +377,7 @@ export default function AgentPage() {
       
       // 直接调用推理，和长按 law 按钮一样的逻辑
       const timer = setTimeout(() => {
-        startPrivacyInference?.()
+        startPrivacyInference?.(null)
       }, 300)
       return () => clearTimeout(timer)
     }
@@ -368,8 +391,14 @@ export default function AgentPage() {
     inferenceMode,
     input, // 直接推断模式需要监听pending输入
     landingInput,
+    selectedAudios, // 直接推断模式：监听音频数据
     editingMessageId, // 直接推断模式：监听编辑状态
     editingContent, // 直接推断模式：监听编辑内容
+    editingAudios, // 直接推断模式：监听编辑音频
+    editingImages, // 直接推断模式：监听编辑图片
+    originalEditingContent,
+    originalEditingImages,
+    originalEditingAudios,
   ])
 
   // 推理中止逻辑1：任何信息元开始重新提取时（含 pending/message），若推理运行则立刻中止并恢复上次结果（中文注释）
@@ -1189,6 +1218,7 @@ export default function AgentPage() {
                     pendingRelations={pendingRelations}
                     pendingInfonIndex={pendingInfonIndex}
                     currentModelIsMultimodal={currentModelIsMultimodal}
+                    renderHighlightedText={renderHighlightedText}
                   />
                 )}
               </div>
@@ -1215,6 +1245,7 @@ export default function AgentPage() {
                   pendingInfonIndex={pendingInfonIndex}
                   currentModelIsMultimodal={currentModelIsMultimodal}
                   isEditingMessage={editingMessageId !== null}
+                  renderHighlightedText={renderHighlightedText}
                 />
               )}
             </Splitter.Panel>

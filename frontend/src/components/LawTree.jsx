@@ -630,7 +630,7 @@ export default function LawTree() {
       
       if (startPrivacyInference) {
         console.log('[LawTree] 启动新的推理')
-        const result = await startPrivacyInference()
+        const result = await startPrivacyInference(null) // 手动触发，不排除任何消息
         console.log('[LawTree] 推理已启动:', result)
       } else {
         console.error('[LawTree] startPrivacyInference 不可用')

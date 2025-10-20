@@ -25,6 +25,7 @@ import { compressImage, checkFileSize, getFileSizeText } from '../../utils/image
  * @param {Array} pendingRelations - 待处理的关系
  * @param {object} pendingInfonIndex - 待处理的信息元索引
  * @param {boolean} currentModelIsMultimodal - 当前模型是否支持多模态
+ * @param {function} renderHighlightedText - 渲染高亮文本的函数
  */
 const LandingView = ({
   landingInput,
@@ -42,7 +43,8 @@ const LandingView = ({
   pendingHighlights,
   pendingRelations,
   pendingInfonIndex,
-  currentModelIsMultimodal
+  currentModelIsMultimodal,
+  renderHighlightedText
 }) => {
   const handleAudioAdded = (audioData) => {
     setSelectedAudios?.((prev) => [...prev, audioData])
@@ -85,6 +87,7 @@ const LandingView = ({
                 removable={true}
                 variant="input"
                 editable={true}
+                renderHighlightedText={renderHighlightedText}
               />
             ))}
           </div>

@@ -67,6 +67,17 @@ const MessageBubble = ({
 }) => {
   const isEditing = editingMessageId === message.id
 
+  // 辅助函数：从消息内容中移除 <audio>...</audio> 标签
+  // 音频转写文本完全通过 AudioTag 组件显示
+  const removeAudioTags = (content) => {
+    if (typeof content !== 'string') return content
+    // 移除所有 <audio>...</audio> 标签及其内容
+    return content.replace(/<audio>[\s\S]*?<\/audio>/gi, '').trim()
+  }
+  
+  // 获取显示用的内容（移除了音频标签）
+  const displayContent = removeAudioTags(message.content)
+
   if (isUser) {
     return (
       <div className={`${styles.msgRow} ${styles.rowUser}`}>
@@ -90,6 +101,7 @@ const MessageBubble = ({
               pendingInfonIndex={pendingInfonIndex}
               sendLockState={sendLockState}
               currentModelIsMultimodal={currentModelIsMultimodal}
+              renderHighlightedText={renderHighlightedText}
             />
           ) : (
             <>
@@ -97,9 +109,11 @@ const MessageBubble = ({
                 {messageRelations.length > 0 && (
                   <RelationConnections messageId={message.id} relations={messageRelations} infonIndex={infonIndex} />
                 )}
-                <div className={styles.msgContent} style={{ position: 'relative', zIndex: 2 }}>
-                  {renderHighlightedText(message.content, message.id)}
-                </div>
+                {displayContent && (
+                  <div className={styles.msgContent} style={{ position: 'relative', zIndex: 2 }}>
+                    {renderHighlightedText(displayContent, message.id)}
+                  </div>
+                )}
                 {Array.isArray(message.images) && message.images.length > 0 && (
                   <div className={styles.msgImages}>
                     {message.images.map((src, imgIdx) => (

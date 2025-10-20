@@ -87,8 +87,12 @@ const AudioTag = ({ audioData, onRemove, removable = true, variant = 'input', on
     if (editable && !isEditingTranscript) {
       setIsEditingTranscript(true)
       setTimeout(() => {
-        transcriptInputRef.current?.focus()
-        transcriptInputRef.current?.select()
+        // Ant Design TextArea 的 select 方法在 resizableTextArea.textArea 上
+        const textArea = transcriptInputRef.current?.resizableTextArea?.textArea
+        if (textArea) {
+          textArea.focus()
+          textArea.select()
+        }
       }, 0)
     }
   }

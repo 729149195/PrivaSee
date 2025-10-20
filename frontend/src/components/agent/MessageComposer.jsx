@@ -29,6 +29,7 @@ import { compressImage, checkFileSize, getFileSizeText } from '../../utils/image
  * @param {object} pendingInfonIndex - 待处理的信息元索引
  * @param {boolean} currentModelIsMultimodal - 当前模型是否支持多模态
  * @param {boolean} isEditingMessage - 是否正在编辑消息
+ * @param {function} renderHighlightedText - 渲染高亮文本的函数
  */
 const MessageComposer = ({
   input,
@@ -49,7 +50,8 @@ const MessageComposer = ({
   pendingRelations,
   pendingInfonIndex,
   currentModelIsMultimodal,
-  isEditingMessage
+  isEditingMessage,
+  renderHighlightedText
 }) => {
   const handleAudioAdded = (audioData) => {
     setSelectedAudios?.((prev) => [...prev, audioData])
@@ -93,6 +95,7 @@ const MessageComposer = ({
                 removable={true}
                 variant="input"
                 editable={true}
+                renderHighlightedText={renderHighlightedText}
               />
             ))}
           </div>

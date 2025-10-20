@@ -535,6 +535,9 @@ export const useStore = create((set, get) => ({
   // Pending用户输入（中文注释）：用于直接推断模式下获取未发送的输入
   pendingUserInput: '',
   
+  // Pending音频（中文注释）：用于直接推断模式下获取未发送的音频转写
+  pendingAudios: [],
+  
   // 设置信息元提取模型
   setInfonExtractionModel: (modelId) => {
     set({ infonExtractionModel: modelId })
@@ -573,6 +576,11 @@ export const useStore = create((set, get) => ({
   // 设置pending用户输入
   setPendingUserInput: (input) => {
     set({ pendingUserInput: input })
+  },
+  
+  // 设置pending音频
+  setPendingAudios: (audios) => {
+    set({ pendingAudios: audios })
   },
   
   // 设置当前用户（登录时调用）
@@ -1841,11 +1849,24 @@ export const useStore = create((set, get) => ({
     // 写入用户消息
     const userMsgId = generateId()
     const audios = Array.isArray(audioDataArray) ? audioDataArray.filter(Boolean) : []
+    
+    // 构建消息内容：文本 + 带标签的音频转写
+    let messageContent = text
+    if (audios.length > 0) {
+      const audioTranscripts = audios
+        .filter(audio => audio.transcript && audio.transcript.trim())
+        .map(audio => `<audio>${audio.transcript.trim()}</audio>`)
+        .join('\n')
+      if (audioTranscripts) {
+        messageContent = [text, audioTranscripts].filter(Boolean).join('\n\n')
+      }
+    }
+    
     get()._appendMessage(session.id, {
       id: userMsgId,
       role: 'user',
-      content: text,
-      audios: audios, // 添加音频数据
+      content: messageContent,
+      audios: audios, // 保留原始音频数据用于UI显示
       createdAt: Date.now(),
     })
 
@@ -1986,12 +2007,25 @@ export const useStore = create((set, get) => ({
     const userMsgId = generateId()
     const imgs = Array.isArray(imageDataUrls) ? imageDataUrls.filter(Boolean) : []
     const audios = Array.isArray(audioDataArray) ? audioDataArray.filter(Boolean) : []
+    
+    // 构建消息内容：文本 + 带标签的音频转写
+    let messageContent = text
+    if (audios.length > 0) {
+      const audioTranscripts = audios
+        .filter(audio => audio.transcript && audio.transcript.trim())
+        .map(audio => `<audio>${audio.transcript.trim()}</audio>`)
+        .join('\n')
+      if (audioTranscripts) {
+        messageContent = [text, audioTranscripts].filter(Boolean).join('\n\n')
+      }
+    }
+    
     get()._appendMessage(session.id, {
       id: userMsgId,
       role: 'user',
-      content: text,
+      content: messageContent,
       images: imgs,
-      audios: audios, // 添加音频数据
+      audios: audios, // 保留原始音频数据用于UI显示
       createdAt: Date.now(),
     })
 
@@ -2136,7 +2170,7 @@ export const useStore = create((set, get) => ({
   // ========== 隐私推理相关方法 ==========
   
   // 启动隐私推理：基于当前会话的信息元和选中的法律
-  async startPrivacyInference() {
+  async startPrivacyInference(editingMessageId = null) {
     const session = get().getCurrentSession()
     if (!session) return
     
@@ -2146,12 +2180,24 @@ export const useStore = create((set, get) => ({
       return
     }
     
+    // 如果正在编辑消息（editingMessageId != null），清空sessionKeywords
+    // 这样可以确保修改后的推理不会包含修改前的旧关键词
+    if (inferenceMode === 'direct' && editingMessageId) {
+      const sessionKeywords = get().sessionKeywords || {}
+      if (sessionKeywords[session.id]) {
+        const updatedKeywords = { ...sessionKeywords }
+        delete updatedKeywords[session.id]
+        set({ sessionKeywords: updatedKeywords })
+        console.log('[Privacy Inference] 编辑模式：清空旧关键词')
+      }
+    }
+    
     let allInfons = []
     let directInput = null
     
     // 检查推断模式（中文注释）：extract（提取信息元）或 direct（直接推断）
     if (inferenceMode === 'direct') {
-      // 直接推断模式：收集用户输入内容（包括pending和已发送的消息）
+      // 直接推断模式：收集用户输入内容（包括pending和已发送的消息，以及音频转写文本）
       const textParts = []
       
       // 辅助函数：从消息内容中提取文本
@@ -2168,11 +2214,24 @@ export const useStore = create((set, get) => ({
         return ''
       }
       
-      // 1. 获取所有已发送的用户消息
-      const userMessages = (session.messages || []).filter(msg => msg.role === 'user')
+      // 辅助函数：从消息中提取音频转写文本，并加上<audio></audio>标签
+      const extractAudioTranscripts = (message) => {
+        const audios = message.audios || []
+        return audios
+          .filter(audio => audio && audio.transcript && audio.transcript.trim())
+          .map(audio => `<audio>${audio.transcript.trim()}</audio>`)
+          .join('\n')
+      }
+      
+      // 1. 获取所有已发送的用户消息（排除正在编辑的消息）
+      const userMessages = (session.messages || [])
+        .filter(msg => msg.role === 'user' && msg.id !== editingMessageId)
       userMessages.forEach(msg => {
         const text = extractTextFromContent(msg.content)
+        const audioText = extractAudioTranscripts(msg)
+        
         if (text) textParts.push(text)
+        if (audioText) textParts.push(audioText)
       })
       
       // 2. 获取pending输入（如果有）
@@ -2180,6 +2239,14 @@ export const useStore = create((set, get) => ({
       if (pendingInput && pendingInput.trim()) {
         textParts.push(pendingInput.trim())
       }
+      
+      // 3. 获取pending音频（如果有）
+      const pendingAudios = get().pendingAudios || []
+      pendingAudios.forEach(audio => {
+        if (audio && audio.transcript && audio.transcript.trim()) {
+          textParts.push(`<audio>${audio.transcript.trim()}</audio>`)
+        }
+      })
       
       // 合并所有文本
       directInput = textParts.filter(Boolean).join('\n\n')
@@ -2189,7 +2256,8 @@ export const useStore = create((set, get) => ({
         return
       }
       
-      console.log(`[Privacy Inference] 直接推断模式，用户输入长度: ${directInput.length} 字符，来源：${userMessages.length}条已发送消息 + ${pendingInput ? '1条pending输入' : '0条pending输入'}`)
+      const audioCount = userMessages.reduce((sum, msg) => sum + (msg.audios?.length || 0), 0) + pendingAudios.length
+      console.log(`[Privacy Inference] 直接推断模式，用户输入长度: ${directInput.length} 字符，来源：${userMessages.length}条已发送消息 + ${pendingInput ? '1条pending输入' : '0条pending输入'} + ${audioCount}条音频转写`)
     } else {
       // 提取信息元模式：获取当前会话的所有信息元
       const runs = infonSessions?.[session.id]?.runs || []
@@ -2341,6 +2409,31 @@ export const useStore = create((set, get) => ({
         
         // 如果有新的风险项被解析出来，立即添加到结果中
         if (yielded && yielded.length > 0) {
+          // 在直接推理模式下，立即累积新解析出来的关键词（流式高亮）
+          if (inferenceMode === 'direct') {
+            const existingKeywords = get().sessionKeywords?.[session.id] || new Set()
+            const newKeywords = new Set(existingKeywords)
+            
+            yielded.forEach(newRisk => {
+              const usedInfons = newRisk.used_infons || []
+              usedInfons.forEach(keyword => {
+                if (typeof keyword === 'string' && keyword.trim()) {
+                  newKeywords.add(keyword.trim())
+                }
+              })
+            })
+            
+            if (newKeywords.size > existingKeywords.size) {
+              console.log(`[Privacy Inference] 流式累积关键词: ${existingKeywords.size} -> ${newKeywords.size} (新增 ${newKeywords.size - existingKeywords.size})`)
+              set(state => ({
+                sessionKeywords: {
+                  ...state.sessionKeywords,
+                  [session.id]: newKeywords
+                }
+              }))
+            }
+          }
+          
           set(state => {
             const currentRisks = state.privacyInferences?.[session.id]?.risks || []
             const updatedRisks = [...currentRisks]
@@ -2563,6 +2656,9 @@ export const useStore = create((set, get) => ({
         }))
       }
       
+      // 在直接推理模式下，保留 previousRisks 以便在输入清空时恢复
+      const shouldKeepPreviousRisks = get().inferenceMode === 'direct'
+      
       set(state => ({
         privacyInferences: {
           ...state.privacyInferences,
@@ -2570,7 +2666,7 @@ export const useStore = create((set, get) => ({
             ...state.privacyInferences[session.id],
             status: 'done',
             abortController: null,
-            previousRisks: undefined, // 清除临时保存的数据
+            previousRisks: shouldKeepPreviousRisks ? state.privacyInferences[session.id].previousRisks : undefined,
             updatedAt: Date.now()
           }
         }
@@ -2584,6 +2680,9 @@ export const useStore = create((set, get) => ({
         
         console.log(`[Privacy Inference] 推理被中止，恢复之前的 ${previousRisks.length} 个风险项`)
         
+        // 在直接推理模式下，将恢复的结果作为新的previousRisks保留，以便下次输入清空时再次恢复
+        const shouldKeepPreviousRisks = get().inferenceMode === 'direct'
+        
         set(state => ({
           privacyInferences: {
             ...state.privacyInferences,
@@ -2592,7 +2691,7 @@ export const useStore = create((set, get) => ({
               status: previousRisks.length > 0 ? 'done' : 'aborted',
               risks: previousRisks, // 恢复之前的结果
               abortController: null,
-              previousRisks: undefined, // 清除临时保存的数据
+              previousRisks: shouldKeepPreviousRisks ? previousRisks : undefined,
               updatedAt: Date.now()
             }
           }
@@ -2642,6 +2741,54 @@ export const useStore = create((set, get) => ({
         privacyParsers: newParsers
       }
     })
+  },
+  
+  // 清除当前推理结果并恢复到上一次推理结果（用于直接推理模式中输入被清空的情况）
+  clearCurrentInferenceAndRestore() {
+    const session = get().getCurrentSession()
+    if (!session) return
+    
+    const currentInference = get().privacyInferences?.[session.id]
+    if (!currentInference) return
+    
+    // 如果推理正在运行，中止它（会自动恢复到previousRisks）
+    if (currentInference.status === 'running') {
+      console.log('[Privacy Inference] 清除当前推理：中止正在运行的推理')
+      if (currentInference.abortController) {
+        try {
+          currentInference.abortController.abort()
+        } catch (_) {}
+      }
+      // abortController.abort() 会触发 AbortError，在 catch 块中会恢复 previousRisks
+    } else if (currentInference.status === 'done') {
+      // 如果推理已完成，检查是否有previousRisks可以恢复
+      const previousRisks = currentInference.previousRisks || []
+      
+      console.log(`[Privacy Inference] 清除当前推理：恢复到上一次的 ${previousRisks.length} 个风险项`)
+      
+      set(state => ({
+        privacyInferences: {
+          ...state.privacyInferences,
+          [session.id]: {
+            ...state.privacyInferences[session.id],
+            status: previousRisks.length > 0 ? 'done' : 'idle',
+            risks: previousRisks,
+            // 保留previousRisks，以便下次输入清空时再次恢复
+            previousRisks: previousRisks.length > 0 ? previousRisks : undefined,
+            buffer: '',
+            updatedAt: Date.now()
+          }
+        }
+      }))
+      
+      // 同时清除解析器状态
+      set(state => ({
+        privacyParsers: {
+          ...state.privacyParsers,
+          [session.id]: null
+        }
+      }))
+    }
   },
 
   // ========== 隐私保护修改建议方法 ==========

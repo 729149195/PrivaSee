@@ -45,19 +45,32 @@ export function useMessageHandlers(
   }
 
   /**
+   * 辅助函数：从消息内容中移除 <audio>...</audio> 标签
+   * 编辑时只显示纯文本部分，音频通过AudioTag组件单独显示和编辑
+   */
+  const removeAudioTags = (content) => {
+    if (typeof content !== 'string') return content
+    // 移除所有 <audio>...</audio> 标签及其内容
+    return content.replace(/<audio>[\s\S]*?<\/audio>/gi, '').trim()
+  }
+
+  /**
    * 开始编辑消息：进入编辑模式（不立即标记expiring）
    */
   const handleEditMessage = (messageId, content, images, audios) => {
+    // 从content中移除音频标签，编辑时只编辑纯文本
+    const contentWithoutAudio = removeAudioTags(content)
+    
     setEditingMessageId(messageId)
-    setEditingContent(content || '')
+    setEditingContent(contentWithoutAudio)
     setEditingImages(images || [])
     setEditingAudios(audios || [])
     // 保存原始内容、图片和音频，用于判断是否发生变化
-    setOriginalEditingContent(content || '')
+    setOriginalEditingContent(contentWithoutAudio)
     setOriginalEditingImages(images || [])
     setOriginalEditingAudios(audios || [])
     
-    console.log('[EditMessage] 进入编辑模式', { messageId })
+    console.log('[EditMessage] 进入编辑模式', { messageId, hasAudios: audios?.length })
   }
   
   /**
@@ -152,7 +165,7 @@ export function useMessageHandlers(
     if (!editingMessageId) return
     
     const text = editingContent.trim()
-    if (!text && editingImages.length === 0) {
+    if (!text && editingImages.length === 0 && editingAudios.length === 0) {
       antdMessage.warning('消息内容不能为空')
       return
     }
@@ -268,27 +281,39 @@ export function useMessageHandlers(
     // 设置标志，防止useEffect清空pending
     isAdoptingPendingRef.current = true
     
-    // 发送新消息
-    if (editingImages.length > 0) {
-      const userId = await useStore.getState().sendMessageWithImages(text, editingImages)
-      try {
-        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0 && inferenceMode === 'extract') {
-          // 没有 pending infons，且在提取信息元模式下，需要重新提取
-          startMessageInfons?.(userId)
-        }
-        console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0, mode: inferenceMode })
-      } catch (_) {}
+    // 发送新消息（包含音频）
+    if (editingImages.length > 0 || editingAudios.length > 0) {
+      const userId = await useStore.getState().sendMessageWithImages(text, editingImages, editingAudios)
+      
+      // 只在提取信息元模式下处理信息元相关逻辑
+      if (inferenceMode === 'extract') {
+        try {
+          const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
+          if (result.adopted === 0) {
+            // 没有 pending infons，需要重新提取
+            startMessageInfons?.(userId)
+          }
+          console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0, mode: inferenceMode })
+        } catch (_) {}
+      } else {
+        console.log('[SaveEdit] 直接推理模式：跳过信息元处理')
+      }
     } else {
-      const userId = await sendMessage(text)
-      try {
-        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0 && inferenceMode === 'extract') {
-          // 没有 pending infons，且在提取信息元模式下，需要重新提取
-          startMessageInfons?.(userId)
-        }
-        console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0, mode: inferenceMode })
-      } catch (_) {}
+      const userId = await sendMessage(text, editingAudios)
+      
+      // 只在提取信息元模式下处理信息元相关逻辑
+      if (inferenceMode === 'extract') {
+        try {
+          const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
+          if (result.adopted === 0) {
+            // 没有 pending infons，需要重新提取
+            startMessageInfons?.(userId)
+          }
+          console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0, mode: inferenceMode })
+        } catch (_) {}
+      } else {
+        console.log('[SaveEdit] 直接推理模式：跳过信息元处理')
+      }
     }
 
     // 清除标志并清理编辑状态（不调用handleCancelEdit，避免清空pending导致自动推理失败）
@@ -308,15 +333,16 @@ export function useMessageHandlers(
     
     // 在直接推理模式下，由于清空了关键词，需要触发推理以重新提取
     if (inferenceMode === 'direct') {
-      // 清空 pendingUserInput，确保推理使用所有已发送的消息
+      // 清空 pendingUserInput 和 pendingAudios，确保推理使用所有已发送的消息
       useStore.getState().setPendingUserInput('')
+      useStore.getState().setPendingAudios([])
       
       // 延迟触发推理，确保消息已经保存
       setTimeout(() => {
         const updatedSession = useStore.getState().getCurrentSession()
         if (updatedSession && updatedSession.messages.length > 0) {
           console.log('[SaveEdit] 直接推理模式：触发推理以重新提取关键词')
-          startPrivacyInference?.()
+          startPrivacyInference?.(null) // 编辑已完成，传null
         }
       }, 300)
     }
