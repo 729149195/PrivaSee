@@ -1187,6 +1187,7 @@ export default function AgentPage() {
                           onSaveEdit={handleSaveEdit}
                           onCancelEdit={handleCancelEdit}
                           onRetry={handleRetry}
+                          onImageClick={setPreviewImage}
                           isGenerating={isGenerating}
                           renderHighlightedText={renderHighlightedText}
                           messageRelations={messageRelations}

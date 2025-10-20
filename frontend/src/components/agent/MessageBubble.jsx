@@ -27,6 +27,7 @@ const ViteIcon = '/vite.svg'
  * @param {function} onSaveEdit - 保存编辑的回调
  * @param {function} onCancelEdit - 取消编辑的回调
  * @param {function} onRetry - 重试的回调
+ * @param {function} onImageClick - 图片点击的回调
  * @param {boolean} isGenerating - 是否正在生成
  * @param {function} renderHighlightedText - 渲染高亮文本的函数
  * @param {Array} messageRelations - 消息的关系信息元
@@ -55,6 +56,7 @@ const MessageBubble = ({
   onSaveEdit,
   onCancelEdit,
   onRetry,
+  onImageClick,
   isGenerating,
   renderHighlightedText,
   messageRelations,
@@ -117,7 +119,14 @@ const MessageBubble = ({
                 {Array.isArray(message.images) && message.images.length > 0 && (
                   <div className={styles.msgImages}>
                     {message.images.map((src, imgIdx) => (
-                      <img key={imgIdx} src={src} alt={`img-${imgIdx}`} className={styles.msgImage} />
+                      <img 
+                        key={imgIdx} 
+                        src={src} 
+                        alt={`img-${imgIdx}`} 
+                        className={styles.msgImage}
+                        onClick={() => onImageClick?.(src)}
+                        style={{ cursor: 'pointer' }}
+                      />
                     ))}
                   </div>
                 )}
