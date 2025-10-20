@@ -57,20 +57,37 @@ export function useMessageHandlers(
   /**
    * 开始编辑消息：进入编辑模式（不立即标记expiring）
    */
-  const handleEditMessage = (messageId, content, images, audios) => {
+  const handleEditMessage = (messageId, content, images, audios, imageAnalysisMap = {}) => {
     // 从content中移除音频标签，编辑时只编辑纯文本
     const contentWithoutAudio = removeAudioTags(content)
     
+    // 恢复图片对象（包含 analysis 数据）
+    const imageObjects = (images || []).map(img => {
+      if (typeof img === 'string') {
+        // 如果图片是字符串 URL，恢复为对象格式
+        const analysis = imageAnalysisMap?.[img] || ''
+        return {
+          id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          url: img,
+          status: 'done',
+          analysis: analysis,
+          timestamp: Date.now()
+        }
+      }
+      // 如果已经是对象，直接返回
+      return img
+    })
+    
     setEditingMessageId(messageId)
     setEditingContent(contentWithoutAudio)
-    setEditingImages(images || [])
+    setEditingImages(imageObjects)
     setEditingAudios(audios || [])
     // 保存原始内容、图片和音频，用于判断是否发生变化
     setOriginalEditingContent(contentWithoutAudio)
-    setOriginalEditingImages(images || [])
+    setOriginalEditingImages(imageObjects)
     setOriginalEditingAudios(audios || [])
     
-    console.log('[EditMessage] 进入编辑模式', { messageId, hasAudios: audios?.length })
+    console.log('[EditMessage] 进入编辑模式', { messageId, hasAudios: audios?.length, hasImageAnalysis: Object.keys(imageAnalysisMap || {}).length })
   }
   
   /**
@@ -147,6 +164,9 @@ export function useMessageHandlers(
       }
     }
     
+    // 设置标志，防止清空编辑状态时触发"输入被清空"的逻辑
+    isAdoptingPendingRef.current = true
+    
     setEditingMessageId(null)
     setEditingContent('')
     setEditingImages([])
@@ -154,6 +174,9 @@ export function useMessageHandlers(
     setOriginalEditingContent('')
     setOriginalEditingImages([])
     setOriginalEditingAudios([])
+    
+    // 标志会在 AgentPage useEffect 中检测并重置
+    
     // 清除 pending 信息元
     clearAllPendingInfons?.()
   }
@@ -220,18 +243,7 @@ export function useMessageHandlers(
     // 获取当前推理结果
     const currentPrivacyInference = privacyInferences?.[session.id]
     
-    // 在直接推理模式下，清空关键词（因为消息被修改，旧关键词可能不再适用）
-    if (inferenceMode === 'direct') {
-      const sessionKeywords = useStore.getState().sessionKeywords || {}
-      if (sessionKeywords[session.id]) {
-        const updatedKeywords = { ...sessionKeywords }
-        delete updatedKeywords[session.id]
-        useStore.setState({ sessionKeywords: updatedKeywords })
-        console.log('[SaveEdit] 直接推理模式：清空关键词，等待重新推理')
-      }
-    }
-    
-    // 在提取信息元模式下清空推理结果
+    // 在提取信息元模式下清空推理结果和关键词
     if (inferenceMode === 'extract') {
       // 清空隐私推理结果和隐私保护建议
       if (currentPrivacyInference) {
@@ -283,7 +295,21 @@ export function useMessageHandlers(
     
     // 发送新消息（包含音频）
     if (editingImages.length > 0 || editingAudios.length > 0) {
-      const userId = await useStore.getState().sendMessageWithImages(text, editingImages, editingAudios)
+      // 提取图片 URL（兼容字符串和对象格式）
+      const imageUrls = editingImages.map(img => typeof img === 'string' ? img : img.url)
+      
+      // 提取图片 analysis 数据（直接推理模式）
+      const imageAnalysisMap = {}
+      if (inferenceMode === 'direct' && editingImages.length > 0) {
+        editingImages.forEach(img => {
+          const imgObj = typeof img === 'string' ? { url: img } : img
+          if (imgObj.url && imgObj.analysis) {
+            imageAnalysisMap[imgObj.url] = imgObj.analysis
+          }
+        })
+      }
+      
+      const userId = await useStore.getState().sendMessageWithImages(text, imageUrls, editingAudios, imageAnalysisMap)
       
       // 只在提取信息元模式下处理信息元相关逻辑
       if (inferenceMode === 'extract') {
@@ -316,8 +342,8 @@ export function useMessageHandlers(
       }
     }
 
-    // 清除标志并清理编辑状态（不调用handleCancelEdit，避免清空pending导致自动推理失败）
-    isAdoptingPendingRef.current = false
+    // 清理编辑状态（不调用handleCancelEdit，避免清空pending导致自动推理失败）
+    // 注意：不立即重置 isAdoptingPendingRef.current 标志，等清空编辑状态后再重置
     
     // 手动清理编辑状态
     setEditingMessageId(null)
@@ -328,24 +354,10 @@ export function useMessageHandlers(
     setOriginalEditingImages([])
     setOriginalEditingAudios([])
     
+    // 标志会在 AgentPage useEffect 中检测并重置
+    
     // 注意：不清空pending infons，因为它们已经被adopt到message了
     // clearAllPendingInfons?.() // 这里不调用
-    
-    // 在直接推理模式下，由于清空了关键词，需要触发推理以重新提取
-    if (inferenceMode === 'direct') {
-      // 清空 pendingUserInput 和 pendingAudios，确保推理使用所有已发送的消息
-      useStore.getState().setPendingUserInput('')
-      useStore.getState().setPendingAudios([])
-      
-      // 延迟触发推理，确保消息已经保存
-      setTimeout(() => {
-        const updatedSession = useStore.getState().getCurrentSession()
-        if (updatedSession && updatedSession.messages.length > 0) {
-          console.log('[SaveEdit] 直接推理模式：触发推理以重新提取关键词')
-          startPrivacyInference?.(null) // 编辑已完成，传null
-        }
-      }, 300)
-    }
     
     antdMessage.success('消息已更新并重新生成')
   }
@@ -462,7 +474,13 @@ export function useMessageHandlers(
     const hasImages = Array.isArray(userMessage.images) && userMessage.images.length > 0
     let newUserMessageId
     if (hasImages) {
-      newUserMessageId = await useStore.getState().sendMessageWithImages(userMessage.content, userMessage.images)
+      // 提取图片 URL（兼容字符串和对象格式）
+      const imageUrls = userMessage.images.map(img => typeof img === 'string' ? img : img.url)
+      
+      // 获取图片分析数据（如果有）
+      const imageAnalysisMap = userMessage.imageAnalysis || {}
+      
+      newUserMessageId = await useStore.getState().sendMessageWithImages(userMessage.content, imageUrls, userMessage.audios || [], imageAnalysisMap)
     } else {
       newUserMessageId = await sendMessage(userMessage.content)
     }

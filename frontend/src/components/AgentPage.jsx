@@ -210,6 +210,11 @@ export default function AgentPage() {
     lastInferenceInfonSignatureRef.current = '' // 重置信息元签名
   }, [currentSessionId])
 
+  // 用于直接推断模式：只监听 user 消息数量，不监听 assistant 消息
+  const userMessageCount = useMemo(() => {
+    return (currentSession?.messages || []).filter(msg => msg.role === 'user').length
+  }, [currentSession?.messages])
+
   // 隐私推理自动触发逻辑（中文注释）：信息元提取完成后或用户输入后自动触发
   // 核心逻辑：
   // - 提取信息元模式：pending 或 message 信息元提取完成就触发推理
@@ -226,16 +231,19 @@ export default function AgentPage() {
       
       // 获取pending输入：优先使用编辑内容（如果在编辑模式），否则使用主输入框或landing输入框
       const isEditing = editingMessageId !== null
+      
+      // 检查编辑内容是否有变化
+      const hasContentChanged = isEditing && (
+        editingContent !== originalEditingContent || 
+        JSON.stringify(editingImages) !== JSON.stringify(originalEditingImages) ||
+        JSON.stringify(editingAudios) !== JSON.stringify(originalEditingAudios)
+      )
+      
       let pendingInput = ''
       let pendingAudios = []
       let pendingImages = []
       if (isEditing) {
         // 编辑模式：使用编辑内容（且与原始内容不同时才算有效的pending）
-        const hasContentChanged = 
-          editingContent !== originalEditingContent || 
-          JSON.stringify(editingImages) !== JSON.stringify(originalEditingImages) ||
-          JSON.stringify(editingAudios) !== JSON.stringify(originalEditingAudios)
-        
         if (hasContentChanged) {
           pendingInput = (editingContent || '').trim()
           pendingAudios = editingAudios || []
@@ -264,6 +272,12 @@ export default function AgentPage() {
       
       // 如果没有pending输入、没有pending音频、也没有pending图片
       if (!pendingInput && pendingAudios.length === 0 && pendingImages.length === 0) {
+        // 特殊情况：编辑模式但内容未变化，不执行任何操作，保持当前状态
+        if (isEditing && !hasContentChanged) {
+          console.log('[Privacy Inference] 直接推断模式：编辑模式但内容未变化，保持当前推理状态')
+          return
+        }
+        
         // 如果有已发送消息且之前没有推理过，执行一次推理
         if (userMessages.length > 0 && !lastInferenceRunCountRef.current && currentInference?.status !== 'done' && currentInference?.status !== 'running') {
           console.log('[Privacy Inference] 直接推断模式：首次加载，有消息但无推理结果，触发推理')
@@ -284,20 +298,37 @@ export default function AgentPage() {
           return () => clearTimeout(timer)
         }
         
-        // 输入被清空：如果之前有推理（非initial状态），清除当前推理并恢复上一次结果
+        // 输入被清空：如果之前有推理（非initial状态）
+        // 但如果是发送消息后自动清空（isAdoptingPendingRef.current为true），不要清除推理和关键词
         if (lastInferenceRunCountRef.current && lastInferenceRunCountRef.current !== 'initial') {
-          console.log('[Privacy Inference] 直接推断模式：输入被清空，清除当前推理并恢复上一次结果')
-          
-          // 清除当前推理并恢复到上一次结果
-          clearCurrentInferenceAndRestore?.()
-          
-          // 清空 pendingUserInput、pendingAudios 和 pendingImages
-          useStore.getState().setPendingUserInput('')
-          useStore.getState().setPendingAudios([])
-          useStore.getState().setPendingImages([])
-          
-          // 清空签名
-          lastInferenceRunCountRef.current = ''
+          if (isAdoptingPendingRef.current) {
+            console.log('[Privacy Inference] 直接推断模式：发送消息后清空输入，保留推理结果和关键词')
+            // 发送消息后的清空，保留推理结果和关键词
+            // 重置标志
+            isAdoptingPendingRef.current = false
+          } else {
+            console.log('[Privacy Inference] 直接推断模式：输入被手动清空，清除当前推理并恢复上一次结果')
+            
+            // 清除当前推理并恢复到上一次结果
+            clearCurrentInferenceAndRestore?.()
+            
+            // 清空 pendingUserInput、pendingAudios 和 pendingImages
+            useStore.getState().setPendingUserInput('')
+            useStore.getState().setPendingAudios([])
+            useStore.getState().setPendingImages([])
+            
+            // 清空当前会话的关键词（因为没有pending内容了）
+            const currentSessionKeywords = useStore.getState().sessionKeywords?.[currentSession.id]
+            if (currentSessionKeywords && currentSessionKeywords.size > 0) {
+              console.log('[Privacy Inference] 输入被手动清空，清空关键词')
+              const updatedKeywords = { ...useStore.getState().sessionKeywords }
+              delete updatedKeywords[currentSession.id]
+              useStore.setState({ sessionKeywords: updatedKeywords })
+            }
+            
+            // 清空签名
+            lastInferenceRunCountRef.current = ''
+          }
         }
         
         return
@@ -311,12 +342,50 @@ export default function AgentPage() {
           return imgObj.status === 'done' || imgObj.status === 'error'
         })
         
-        // 如果有图片还在处理中，不触发推理
+        // 如果有图片还在处理中：中止当前推理，但不触发新推理
         if (pendingImages.length > 0 && !allImagesAnalyzed) {
-          console.log('[Privacy Inference] 直接推断模式：图片正在处理中，等待完成')
+          console.log('[Privacy Inference] 直接推断模式：图片正在处理中，中止当前推理并等待完成')
+          
+          // 如果推理正在运行，先中止
+          if (isInferenceRunning) {
+            console.log('[Privacy Inference] 直接推理模式：中止当前推理')
+            abortPrivacyInference?.()
+          }
+          
+          // 直接推理模式：清空当前推理结果（不保留 previousRisks）
+          console.log('[Privacy Inference] 直接推理模式：清空当前推理结果')
+          const privacyInferences = useStore.getState().privacyInferences || {}
+          useStore.setState({
+            privacyInferences: {
+              ...privacyInferences,
+              [currentSession.id]: {
+                status: 'idle',
+                risks: [],
+                buffer: '',
+                abortController: null,
+                createdAt: Date.now(),
+                updatedAt: Date.now()
+              }
+            }
+          })
+          
+          // 清空隐私保护建议
+          clearProtectionSuggestions?.()
+          
+          // 清空当前会话的关键词
+          const currentSessionKeywords = useStore.getState().sessionKeywords?.[currentSession.id]
+          if (currentSessionKeywords && currentSessionKeywords.size > 0) {
+            console.log('[Privacy Inference] 直接推理模式：清空旧关键词，等待图片处理完成')
+            const updatedKeywords = { ...useStore.getState().sessionKeywords }
+            delete updatedKeywords[currentSession.id]
+            useStore.setState({ sessionKeywords: updatedKeywords })
+          }
+          
+          // 不更新签名，等待图片处理完成后再触发
           return
         }
         
+        // 所有图片都已完成分析，可以触发推理
         console.log('[Privacy Inference] 直接推断模式：检测到pending输入、音频或图片变化，触发推理', {
           signature: currentSignature,
           lastSignature: lastInferenceRunCountRef.current,
@@ -331,12 +400,32 @@ export default function AgentPage() {
         
         // 如果推理正在运行，先中止
         if (isInferenceRunning) {
-          console.log('[Privacy Inference] 中止当前推理')
+          console.log('[Privacy Inference] 直接推理模式：中止当前推理')
           abortPrivacyInference?.()
         }
         
+        // 直接推理模式：清空当前推理结果（不保留 previousRisks）
+        console.log('[Privacy Inference] 直接推理模式：清空当前推理结果')
+        const privacyInferences = useStore.getState().privacyInferences || {}
+        useStore.setState({
+          privacyInferences: {
+            ...privacyInferences,
+            [currentSession.id]: {
+              status: 'idle',
+              risks: [],
+              buffer: '',
+              abortController: null,
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            }
+          }
+        })
+        
         // 清空隐私保护建议
         clearProtectionSuggestions?.()
+        
+        // 不要清空关键词，让新推理的结果自然覆盖（保持旧消息的高亮直到新推理完成）
+        // 新推理会基于所有消息重新提取关键词，自动替换旧的关键词集合
         
         // 立即同步设置 pendingUserInput、pendingAudios 和 pendingImages（使用 useStore.getState() 确保同步）
         useStore.getState().setPendingUserInput(pendingInput)
@@ -415,7 +504,7 @@ export default function AgentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     infonSessions?.[currentSessionId]?.runs,
-    currentSession?.messages, // 添加消息依赖，用于直接推断模式
+    userMessageCount, // 只监听 user 消息数量，不监听 assistant 消息
     currentSessionId,
     selectedLaw?.key,
     inferenceMode,
@@ -720,16 +809,59 @@ export default function AgentPage() {
       
       const currentInference = privacyInferences?.[currentSession.id]
       const isInferenceRunning = currentInference?.status === 'running'
+      const hasCompletedInference = currentInference?.status === 'done'
       
       // 检查隐私推理状态
       if (isInferenceRunning) {
         return { locked: true, stage: 'analyzing', label: 'Privacy Analyzing...' }
       }
       
+      // 检查是否有 pending 输入但推理未完成
+      // 获取当前的 pending 输入
+      let pendingInput = ''
+      let pendingAudios = []
+      let pendingImages = []
+      
+      if (isEditing) {
+        const hasContentChanged = 
+          editingContent !== originalEditingContent || 
+          JSON.stringify(editingImages) !== JSON.stringify(originalEditingImages) ||
+          JSON.stringify(editingAudios) !== JSON.stringify(originalEditingAudios)
+        
+        if (hasContentChanged) {
+          pendingInput = (editingContent || '').trim()
+          pendingAudios = editingAudios || []
+          pendingImages = editingImages || []
+        }
+      } else {
+        pendingInput = (input || landingInput || '').trim()
+        pendingAudios = selectedAudios || []
+        pendingImages = selectedImages || []
+      }
+      
+      // 如果有 pending 输入但推理未完成，保持锁定
+      const hasPendingContent = pendingInput || pendingAudios.length > 0 || pendingImages.length > 0
+      
+      if (hasPendingContent && selectedLaw && !hasCompletedInference) {
+        return { locked: true, stage: 'waiting', label: 'Preparing...' }
+      }
+      
       return { locked: false, stage: 'ready', label: 'Send' }
     }
     
     // 提取信息元模式：完整的流程检查
+    // 首先检查是否有图片正在处理中（任何模式下都需要等待图片处理完成）
+    const isEditing = editingMessageId !== null
+    const imagesToCheck = isEditing ? editingImages : selectedImages
+    const hasProcessingImages = imagesToCheck.some(img => {
+      const imgObj = typeof img === 'string' ? { status: 'done' } : img
+      return imgObj.status === 'uploading' || imgObj.status === 'analyzing'
+    })
+    
+    if (hasProcessingImages) {
+      return { locked: true, stage: 'analyzing', label: 'Processing Images...' }
+    }
+    
     const runs = infonSessions?.[currentSession.id]?.runs || []
     // 检查 pending 和 message 级别的信息元提取
     const hasRunningPendingInfons = runs.some(run => run.status === 'running' && run.targetType === 'pending')
@@ -768,7 +900,25 @@ export default function AgentPage() {
     }
     
     return { locked: false, stage: 'ready', label: 'Send' }
-  }, [currentSession?.id, infonSessions, privacyInferences, selectedLaw, isWaitingForDebounce, inferenceMode])
+  }, [
+    currentSession?.id, 
+    infonSessions, 
+    privacyInferences, 
+    selectedLaw, 
+    isWaitingForDebounce, 
+    inferenceMode, 
+    editingMessageId, 
+    editingImages, 
+    selectedImages,
+    editingContent,
+    originalEditingContent,
+    editingAudios,
+    originalEditingAudios,
+    originalEditingImages,
+    input,
+    landingInput,
+    selectedAudios
+  ])
 
   const removeSelectedAudio = (index) => {
     setSelectedAudios((prev) => prev.filter((_, i) => i !== index))
@@ -795,7 +945,8 @@ export default function AgentPage() {
     if (sendLockState.locked) return
     
     const text = (input || '').trim()
-    const imgs = [...selectedImages]
+    // 提取图片 URL（兼容字符串和对象格式）
+    const imgs = selectedImages.map(img => typeof img === 'string' ? img : img.url)
     const audios = [...selectedAudios]
     const hasImages = imgs.length > 0
     const hasAudios = audios.length > 0
@@ -813,8 +964,19 @@ export default function AgentPage() {
     // 设置标志，防止useEffect清空pending
     isAdoptingPendingRef.current = true
     
+    // 提取图片 analysis 数据（直接推理模式）
+    const imageAnalysisMap = {}
+    if (inferenceMode === 'direct' && hasImages) {
+      selectedImages.forEach(img => {
+        const imgObj = typeof img === 'string' ? { url: img } : img
+        if (imgObj.url && imgObj.analysis) {
+          imageAnalysisMap[imgObj.url] = imgObj.analysis
+        }
+      })
+    }
+    
     if (hasImages || hasAudios) {
-      const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios)
+      const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios, imageAnalysisMap)
       try {
         // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
         if (pendingRunIds.length > 0) {
@@ -830,10 +992,12 @@ export default function AgentPage() {
         }
       } catch (_) {}
       // 清空输入、图片和音频（中文注释）
-      isAdoptingPendingRef.current = false
       setInput('')
       setSelectedImages([])
       setSelectedAudios([])
+      // 清空 pending 图片（直接推断模式）
+      useStore.getState().setPendingImages([])
+      // 标志会在 useEffect 中检测并重置
     } else {
       const userId = await sendMessage(text, audios)
       try {
@@ -851,23 +1015,27 @@ export default function AgentPage() {
         }
       } catch (_) {}
       // 清空输入、图片和音频（中文注释）
-      isAdoptingPendingRef.current = false
       setInput('')
       setSelectedImages([])
       setSelectedAudios([])
-      
-      // 自动生成会话标题（仅在第一条消息后）
+      // 清空 pending 图片（直接推断模式）
+      useStore.getState().setPendingImages([])
+      // 标志会在 useEffect 中检测并重置
+    }
+    
+    // 自动生成会话标题（仅在第一条消息后）
+    // 延迟执行，确保消息已经添加到 session
+    setTimeout(() => {
       const currentSession = getCurrentSession()
       if (currentSession) {
         const userMessages = currentSession.messages.filter(msg => msg.role === 'user')
+        console.log('[AgentPage] 检查是否需要生成标题，用户消息数:', userMessages.length)
         if (userMessages.length === 1) {
-          // 延迟一点，确保消息已经保存
-          setTimeout(() => {
-            generateSessionTitle?.(currentSession.id)
-          }, 500)
+          console.log('[AgentPage] 触发标题生成')
+          generateSessionTitle?.(currentSession.id)
         }
       }
-    }
+    }, 1000)
     
     // 注意：adoptPendingInfonsToMessage 已经处理了 pending infons，无需再清空
   }
@@ -877,7 +1045,8 @@ export default function AgentPage() {
     if (sendLockState.locked) return
     
     const text = (landingInput || '').trim()
-    const imgs = [...selectedImages]
+    // 提取图片 URL（兼容字符串和对象格式）
+    const imgs = selectedImages.map(img => typeof img === 'string' ? img : img.url)
     const audios = [...selectedAudios]
     const hasImages = imgs.length > 0
     const hasAudios = audios.length > 0
@@ -895,8 +1064,19 @@ export default function AgentPage() {
     // 设置标志，防止useEffect清空pending
     isAdoptingPendingRef.current = true
     
+    // 提取图片 analysis 数据（直接推理模式）
+    const imageAnalysisMap = {}
+    if (inferenceMode === 'direct' && hasImages) {
+      selectedImages.forEach(img => {
+        const imgObj = typeof img === 'string' ? { url: img } : img
+        if (imgObj.url && imgObj.analysis) {
+          imageAnalysisMap[imgObj.url] = imgObj.analysis
+        }
+      })
+    }
+    
     if (hasImages || hasAudios) {
-      const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios)
+      const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios, imageAnalysisMap)
       try {
         // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
         if (pendingRunIds.length > 0) {
@@ -912,10 +1092,12 @@ export default function AgentPage() {
         }
       } catch (_) {}
       // 清空输入、图片和音频（中文注释）
-      isAdoptingPendingRef.current = false
       setLandingInput('')
       setSelectedImages([])
       setSelectedAudios([])
+      // 清空 pending 图片（直接推断模式）
+      useStore.getState().setPendingImages([])
+      // 标志会在 useEffect 中检测并重置
     } else {
       const userId = await sendMessage(text, audios)
       try {
@@ -933,23 +1115,27 @@ export default function AgentPage() {
         }
       } catch (_) {}
       // 清空输入、图片和音频（中文注释）
-      isAdoptingPendingRef.current = false
       setLandingInput('')
       setSelectedImages([])
       setSelectedAudios([])
-      
-      // 自动生成会话标题（仅在第一条消息后）
+      // 清空 pending 图片（直接推断模式）
+      useStore.getState().setPendingImages([])
+      // 标志会在 useEffect 中检测并重置
+    }
+    
+    // 自动生成会话标题（仅在第一条消息后）
+    // 延迟执行，确保消息已经添加到 session
+    setTimeout(() => {
       const currentSession = getCurrentSession()
       if (currentSession) {
         const userMessages = currentSession.messages.filter(msg => msg.role === 'user')
+        console.log('[AgentPage] 检查是否需要生成标题，用户消息数:', userMessages.length)
         if (userMessages.length === 1) {
-          // 延迟一点，确保消息已经保存
-          setTimeout(() => {
-            generateSessionTitle?.(currentSession.id)
-          }, 500)
+          console.log('[AgentPage] 触发标题生成')
+          generateSessionTitle?.(currentSession.id)
         }
       }
-    }
+    }, 1000)
     
     // 注意：adoptPendingInfonsToMessage 已经处理了 pending infons，无需再清空
   }

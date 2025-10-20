@@ -965,29 +965,79 @@ Output format:
 
   // 自动生成会话标题（基于第一条消息）
   async generateSessionTitle(sessionId) {
+    console.log('[Session Title] 开始生成标题，会话ID:', sessionId)
     const session = get().sessions.find(s => s.id === sessionId)
-    if (!session) return
+    if (!session) {
+      console.log('[Session Title] 未找到会话')
+      return
+    }
     
     // 只有在标题为默认值时才生成
-    if (!session.title.startsWith('New chat')) return
+    if (!session.title.startsWith('New chat')) {
+      console.log('[Session Title] 标题不是默认值，跳过生成:', session.title)
+      return
+    }
     
     // 获取第一条用户消息
     const firstUserMessage = session.messages.find(msg => msg.role === 'user')
-    if (!firstUserMessage) return
+    if (!firstUserMessage) {
+      console.log('[Session Title] 未找到用户消息')
+      return
+    }
     
-    // 提取消息内容
-    let content = ''
+    console.log('[Session Title] 第一条消息:', {
+      hasContent: !!firstUserMessage.content,
+      contentType: typeof firstUserMessage.content,
+      hasImages: !!(firstUserMessage.images && firstUserMessage.images.length > 0),
+      hasImageAnalysis: !!(firstUserMessage.imageAnalysis && Object.keys(firstUserMessage.imageAnalysis).length > 0),
+      hasAudios: !!(firstUserMessage.audios && firstUserMessage.audios.length > 0)
+    })
+    
+    // 提取消息内容：包含纯文本 + 音频转录 + 图片分析
+    const contentParts = []
+    
+    // 1. 提取文本内容（已包含音频转录，带 <audio> 标签）
     if (typeof firstUserMessage.content === 'string') {
-      content = firstUserMessage.content
+      // 移除音频标签，只保留转录文本
+      const contentWithoutTags = firstUserMessage.content.replace(/<audio>([\s\S]*?)<\/audio>/gi, '$1')
+      if (contentWithoutTags.trim()) {
+        contentParts.push(contentWithoutTags.trim())
+        console.log('[Session Title] 提取文本内容:', contentWithoutTags.trim().slice(0, 50) + '...')
+      }
     } else if (Array.isArray(firstUserMessage.content)) {
-      // 多模态消息，提取文本部分
+      // 多模态消息（旧格式），提取文本部分
       const textParts = firstUserMessage.content
         .filter(part => part.type === 'text')
         .map(part => part.text)
-      content = textParts.join(' ')
+      if (textParts.length > 0) {
+        contentParts.push(textParts.join(' '))
+        console.log('[Session Title] 提取文本内容（数组格式）:', textParts.join(' ').slice(0, 50) + '...')
+      }
     }
     
-    if (!content || content.trim().length === 0) return
+    // 2. 提取图片分析内容
+    const imageAnalysisMap = firstUserMessage.imageAnalysis || {}
+    const imageUrls = firstUserMessage.images || []
+    console.log('[Session Title] 图片分析数据:', {
+      imageCount: imageUrls.length,
+      analysisCount: Object.keys(imageAnalysisMap).length
+    })
+    imageUrls.forEach(url => {
+      const analysis = imageAnalysisMap[url]
+      if (analysis && analysis.trim()) {
+        // 取图片分析的前200字符作为摘要
+        const summary = analysis.trim().slice(0, 200)
+        contentParts.push(summary)
+        console.log('[Session Title] 提取图片分析:', summary.slice(0, 50) + '...')
+      }
+    })
+    
+    const content = contentParts.join(' ')
+    console.log('[Session Title] 合并后的内容长度:', content.length)
+    if (!content || content.trim().length === 0) {
+      console.log('[Session Title] 内容为空，无法生成标题')
+      return
+    }
     
     // 限制内容长度
     const truncatedContent = content.slice(0, 500)
@@ -2072,7 +2122,7 @@ Output format:
   },
 
   // 发送带图片的多模态消息：立即返回用户消息 ID，流式在后台执行
-  async sendMessageWithImages(text, imageDataUrls, audioDataArray = []) {
+  async sendMessageWithImages(text, imageDataUrls, audioDataArray = [], imageAnalysisMap = {}) {
     const state = get()
     state._ensureCurrentSession()
     const session = get().getCurrentSession()
@@ -2101,6 +2151,7 @@ Output format:
       content: messageContent,
       images: imgs,
       audios: audios, // 保留原始音频数据用于UI显示
+      imageAnalysis: imageAnalysisMap, // 保存图片分析数据（直接推理模式）
       createdAt: Date.now(),
     })
 
@@ -2298,15 +2349,28 @@ Output format:
           .join('\n')
       }
       
+      // 辅助函数：从消息中提取图片分析文本，并加上<img></img>标签
+      const extractImageAnalysis = (message) => {
+        const imageAnalysisMap = message.imageAnalysis || {}
+        const imageUrls = message.images || []
+        return imageUrls
+          .map(url => imageAnalysisMap[url])
+          .filter(analysis => analysis && analysis.trim())
+          .map(analysis => `<img>${analysis.trim()}</img>`)
+          .join('\n')
+      }
+      
       // 1. 获取所有已发送的用户消息（排除正在编辑的消息）
       const userMessages = (session.messages || [])
         .filter(msg => msg.role === 'user' && msg.id !== editingMessageId)
       userMessages.forEach(msg => {
         const text = extractTextFromContent(msg.content)
         const audioText = extractAudioTranscripts(msg)
+        const imageText = extractImageAnalysis(msg)
         
         if (text) textParts.push(text)
         if (audioText) textParts.push(audioText)
+        if (imageText) textParts.push(imageText)
       })
       
       // 2. 获取pending输入（如果有）
@@ -2340,13 +2404,14 @@ Output format:
       }
       
       const audioCount = userMessages.reduce((sum, msg) => sum + (msg.audios?.length || 0), 0) + pendingAudios.length
-      const imageCount = userMessages.reduce((sum, msg) => {
-        if (!msg.content) return sum
-        if (Array.isArray(msg.content)) {
-          return sum + msg.content.filter(part => part && part.type === 'image_url').length
-        }
-        return sum
-      }, 0) + pendingImages.length
+      // 统计图片分析数量：已发送消息中有 imageAnalysis 的图片 + pending 图片
+      const sentImagesWithAnalysis = userMessages.reduce((sum, msg) => {
+        const imageAnalysisMap = msg.imageAnalysis || {}
+        const images = msg.images || []
+        const analysisCount = images.filter(url => imageAnalysisMap[url] && imageAnalysisMap[url].trim()).length
+        return sum + analysisCount
+      }, 0)
+      const imageCount = sentImagesWithAnalysis + pendingImages.length
       console.log(`[Privacy Inference] 直接推断模式，用户输入长度: ${directInput.length} 字符，来源：${userMessages.length}条已发送消息 + ${pendingInput ? '1条pending输入' : '0条pending输入'} + ${audioCount}条音频转写 + ${imageCount}条图片分析`)
     } else {
       // 提取信息元模式：获取当前会话的所有信息元
@@ -2398,7 +2463,9 @@ Output format:
           lawKey: selectedLaw.key, // 记录推理时使用的法律
           previousRisks: previousRisks, // 保存之前的结果，用于中止时恢复
           createdAt: Date.now(),
-          updatedAt: Date.now()
+          updatedAt: Date.now(),
+          // 直接推理模式：创建临时关键词集合，用于累积新关键词
+          tempKeywords: inferenceMode === 'direct' ? new Set() : undefined
         }
       },
       // 重置隐私推理解析器状态，确保流式增量从头开始
@@ -2438,7 +2505,7 @@ Output format:
       
       console.log(`[Privacy Inference] 发起推理请求到 ${apiUrl}，使用模型: ${configuredModel}`)
       console.log(`[Privacy Inference] Prompt 长度: ${prompt.length} 字符`)
-      console.log(`[Privacy Inference] Prompt 预览 (前500字):`, prompt.slice(0, 500))
+      console.log(`[Privacy Inference] Prompt 预览 (前500字):`, prompt)
       
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
@@ -2501,27 +2568,30 @@ Output format:
         if (yielded && yielded.length > 0) {
           // 在直接推理模式下，立即累积新解析出来的关键词（流式高亮）
           if (inferenceMode === 'direct') {
-            const existingKeywords = get().sessionKeywords?.[session.id] || new Set()
-            const newKeywords = new Set(existingKeywords)
+            const currentInference = get().privacyInferences?.[session.id]
+            const tempKeywords = currentInference?.tempKeywords || new Set()
             
             yielded.forEach(newRisk => {
               const usedInfons = newRisk.used_infons || []
               usedInfons.forEach(keyword => {
                 if (typeof keyword === 'string' && keyword.trim()) {
-                  newKeywords.add(keyword.trim())
+                  tempKeywords.add(keyword.trim())
                 }
               })
             })
             
-            if (newKeywords.size > existingKeywords.size) {
-              console.log(`[Privacy Inference] 流式累积关键词: ${existingKeywords.size} -> ${newKeywords.size} (新增 ${newKeywords.size - existingKeywords.size})`)
-              set(state => ({
-                sessionKeywords: {
-                  ...state.sessionKeywords,
-                  [session.id]: newKeywords
+            // 更新临时关键词集合（不影响当前显示的关键词）
+            set(state => ({
+              privacyInferences: {
+                ...state.privacyInferences,
+                [session.id]: {
+                  ...state.privacyInferences[session.id],
+                  tempKeywords: tempKeywords
                 }
-              }))
-            }
+              }
+            }))
+            
+            console.log(`[Privacy Inference] 流式累积临时关键词: ${tempKeywords.size} 个`)
           }
           
           set(state => {
@@ -2625,7 +2695,7 @@ Output format:
       await performParsing()
       
       console.log(`[Privacy Inference] 流式接收完成，buffer长度: ${buffer.length}`)
-      console.log(`[Privacy Inference] Buffer内容预览:`, buffer.slice(0, 500))
+      console.log(`[Privacy Inference] Buffer内容预览:`, buffer)
       
       // 尝试清理buffer：移除模型的思考过程和markdown标记
       let cleanBuffer = buffer
@@ -2675,6 +2745,19 @@ Output format:
                 }))
               }
               
+              // 直接推理模式：将临时关键词移动到正式关键词
+              const currentInference = get().privacyInferences?.[session.id]
+              const tempKeywords = currentInference?.tempKeywords
+              if (inferenceMode === 'direct' && tempKeywords && tempKeywords.size > 0) {
+                console.log(`[Privacy Inference] 推理完成，应用 ${tempKeywords.size} 个新关键词（替换旧关键词）`)
+                set(s => ({
+                  sessionKeywords: {
+                    ...s.sessionKeywords,
+                    [session.id]: tempKeywords
+                  }
+                }))
+              }
+              
               // 直接设置结果
               set(state => ({
                 privacyInferences: {
@@ -2685,6 +2768,7 @@ Output format:
                     risks: parsed.risks,
                     buffer: cleanBuffer,
                     abortController: null,
+                    tempKeywords: undefined, // 清除临时关键词
                     updatedAt: Date.now()
                   }
                 }
@@ -2722,28 +2806,22 @@ Output format:
       // 完成推理
       console.log(`[Privacy Inference] 推理完成，风险数: ${currentState?.risks?.length || 0}`)
       
-      // 累积关键词到 sessionKeywords（直接推理模式下）
-      if (inferenceMode === 'direct' && currentState?.risks?.length > 0) {
-        const existingKeywords = get().sessionKeywords?.[session.id] || new Set()
-        const newKeywords = new Set(existingKeywords)
+      // 直接推理模式：应用临时关键词（替换旧关键词）
+      if (inferenceMode === 'direct') {
+        const currentInference = get().privacyInferences?.[session.id]
+        const tempKeywords = currentInference?.tempKeywords
         
-        currentState.risks.forEach(risk => {
-          const usedInfons = risk.used_infons || []
-          usedInfons.forEach(keyword => {
-            if (typeof keyword === 'string' && keyword.trim()) {
-              newKeywords.add(keyword.trim())
+        if (tempKeywords && tempKeywords.size > 0) {
+          console.log(`[Privacy Inference] 推理完成，应用 ${tempKeywords.size} 个新关键词（替换旧关键词）`)
+          set(state => ({
+            sessionKeywords: {
+              ...state.sessionKeywords,
+              [session.id]: tempKeywords
             }
-          })
-        })
-        
-        console.log(`[Privacy Inference] 累积关键词: ${existingKeywords.size} -> ${newKeywords.size} (新增 ${newKeywords.size - existingKeywords.size})`)
-        
-        set(state => ({
-          sessionKeywords: {
-            ...state.sessionKeywords,
-            [session.id]: newKeywords
-          }
-        }))
+          }))
+        } else {
+          console.log(`[Privacy Inference] 推理完成，但没有提取到关键词`)
+        }
       }
       
       // 在直接推理模式下，保留 previousRisks 以便在输入清空时恢复
@@ -2757,6 +2835,7 @@ Output format:
             status: 'done',
             abortController: null,
             previousRisks: shouldKeepPreviousRisks ? state.privacyInferences[session.id].previousRisks : undefined,
+            tempKeywords: undefined, // 清除临时关键词
             updatedAt: Date.now()
           }
         }

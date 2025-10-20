@@ -172,7 +172,7 @@ const MessageBubble = ({
                     type="text" 
                     size="small" 
                     icon={<EditOutlined />}
-                    onClick={() => onEdit(message.id, message.content, message.images, message.audios)}
+                    onClick={() => onEdit(message.id, message.content, message.images, message.audios, message.imageAnalysis)}
                     className={styles.messageActionBtn}
                     disabled={isGenerating}
                   />
