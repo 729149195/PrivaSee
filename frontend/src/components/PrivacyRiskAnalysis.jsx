@@ -65,6 +65,46 @@ function useTypewriter(text, isComplete, speed = 15) {
 }
 
 /**
+ * 将 inference_chain 文本按序号分段
+ * 例如："1) xxx 2) yyy" => ["1) xxx", "2) yyy"]
+ */
+function parseInferenceChain(text) {
+  if (!text || typeof text !== 'string') return []
+  
+  // 匹配序号模式，如 "1)", "2)", "10)" 等
+  const pattern = /(\d+\))/g
+  const segments = []
+  let lastIndex = 0
+  let match
+  
+  while ((match = pattern.exec(text)) !== null) {
+    // 如果不是第一个匹配，先保存前一段
+    if (match.index > 0 && lastIndex < match.index) {
+      const prevSegment = text.substring(lastIndex, match.index).trim()
+      if (prevSegment) {
+        segments.push(prevSegment)
+      }
+    }
+    lastIndex = match.index
+  }
+  
+  // 添加最后一段
+  if (lastIndex < text.length) {
+    const finalSegment = text.substring(lastIndex).trim()
+    if (finalSegment) {
+      segments.push(finalSegment)
+    }
+  }
+  
+  // 如果没有找到序号，返回原文本
+  if (segments.length === 0 && text.trim()) {
+    segments.push(text.trim())
+  }
+  
+  return segments
+}
+
+/**
  * 单个风险卡片组件 - 带打字机效果
  */
 function RiskCard({ risk, idx, inferenceMode, infonMap }) {
@@ -86,6 +126,12 @@ function RiskCard({ risk, idx, inferenceMode, infonMap }) {
     risk.inference_chain || '',
     isComplete,
     15
+  )
+  
+  // 解析 inference_chain 为分段数组
+  const inferenceChainSegments = useMemo(
+    () => parseInferenceChain(inferenceChain),
+    [inferenceChain]
   )
   
   // 区分两种模式的 used_infons 格式
@@ -160,7 +206,19 @@ function RiskCard({ risk, idx, inferenceMode, infonMap }) {
           fontStyle: isPartial && !risk.inference_chain ? 'italic' : 'normal',
           minHeight: '1.5em'
         }}>
-          {inferenceChain || 'Streaming reasoning...'}
+          {inferenceChain ? (
+            inferenceChainSegments.length > 0 ? (
+              inferenceChainSegments.map((segment, segIdx) => (
+                <div key={segIdx} style={{ marginBottom: segIdx < inferenceChainSegments.length - 1 ? 4 : 0 }}>
+                  {segment}
+                </div>
+              ))
+            ) : (
+              inferenceChain
+            )
+          ) : (
+            'Streaming reasoning...'
+          )}
         </div>
       )}
       

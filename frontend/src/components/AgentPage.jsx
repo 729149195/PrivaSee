@@ -1239,7 +1239,7 @@ export default function AgentPage() {
                       onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
                       >
                         <span style={{ userSelect: 'none', whiteSpace: 'nowrap' }}>
-                          {inferenceMode === 'direct' ? '直接' : '提取'}
+                          {inferenceMode === 'direct' ? '直接推断' : '提取信息元'}
                         </span>
                         <Switch 
                           size="small"

@@ -50,9 +50,10 @@ Always check if inferred information falls into sensitive categories:
 - Criminal history
 
 ## Risk Level Criteria
-- **HIGH**: Sensitive personal data (health, beliefs, biometrics, children's data) can be directly inferred or strongly suggested
-- **MEDIUM**: Behavioral patterns, preferences, or non-sensitive attributes can be derived with reasonable confidence
-- **LOW**: General trends or public information can be weakly inferred
+**Risk level is determined by the CERTAINTY/CONFIDENCE of privacy inference from input data:**
+- **HIGH**: Input data (combined with context) can DEFINITIVELY or with VERY HIGH CONFIDENCE reveal specific privacy information. The inference chain is direct and unambiguous. Examples: explicit personal identifiers, precise location combined with time patterns that clearly reveal home/work addresses, dietary restrictions with medical records that definitively indicate health conditions.
+- **MEDIUM**: Input data allows privacy inference with MODERATE CONFIDENCE. Some reasoning is required, but the inference is reasonably supported. Examples: behavioral patterns suggesting lifestyle preferences, partial identifiers that narrow down to a small group, indirect health indicators that suggest but don't confirm conditions.
+- **LOW**: Input data provides WEAK or VAGUE clues about privacy. High uncertainty in inference, multiple interpretations possible, or only very general/public information can be derived. Examples: generic demographic trends, broad location areas, ambiguous preferences without clear implications.
 
 ## Output Format
 **CRITICAL - Streaming Optimization**: To enable fast progressive visualization, output fields in THIS EXACT ORDER for each risk:
@@ -83,7 +84,7 @@ Output ONLY valid JSON (no markdown, no explanation):
 7. **Comprehensive Coverage** - Analyze ALL possible privacy angles: direct exposure + implicit inference + contextual correlation (BUT respect Custom Mode restrictions)
 8. **Clear Attribution** - Every risk must trace back to specific information elements with logical reasoning
 9. **used_infons Extraction** - CRITICAL: Extract EXACT KEYWORDS from input that support each risk. Like infons.js DESC/SCEN extraction: concrete entity names, attribute values, temporal expressions, spatial locations. Extract the ORIGINAL TEXT (highlightable keywords), NOT infon IDs, NOT paraphrases. Examples: entity names like "王小明", attribute values like "27", temporal like "今年", spatial like "北京市". DO NOT extract abstract relations or inferred concepts - only concrete observable keywords from the source.
-10. **Prioritize Sensitivity** - Treat health, beliefs, children, biometrics as HIGH risk
+10. **Evaluate Inference Certainty** - Risk level depends on inference confidence: definitive/unambiguous data → HIGH risk; moderate confidence inference → MEDIUM risk; vague/uncertain inference → LOW risk. Consider both data specificity and contextual strength.
 11. **Sort Properly** - HIGH risks first
 12. **Verify Before Output** - Before outputting each risk, find the [LEAF NODE - USE THIS] entry in the provided law tree and copy its exact name. If you cannot find an exact leaf node match, choose the closest leaf node from the tree.
 13. **LANGUAGE CONSISTENCY** - Write privacy_exposure and inference_chain in the SAME language as the input information elements. If the input data is in Chinese, write your analysis in Chinese. If in English, write in English. Match the language of the user's data.
@@ -97,26 +98,34 @@ When you find a privacy risk, you MUST:
 
 Example:
 If input contains "looking for gluten-free restaurant menu", infer:
-- IMPLICIT: User likely has celiac disease or gluten intolerance (health condition = HIGH risk)
+- IMPLICIT: User likely has celiac disease or gluten intolerance (health condition)
+  → RISK LEVEL: MEDIUM-HIGH (dietary restriction provides moderate-to-strong evidence of health condition, but not definitive without medical context)
   → Find the LEAF node for health data in the law tree (e.g., "医疗健康")
   → law_node_name = "医疗健康" (copied exactly from law tree)
   → used_infons: ["gluten-free", "restaurant menu"] (exact keywords from input)
-- DIRECT: User's dietary preference (MEDIUM risk)
+- DIRECT: User's dietary preference
+  → RISK LEVEL: LOW-MEDIUM (general preference, multiple possible interpretations)
   → used_infons: ["gluten-free"] (exact text)
-- CONTEXTUAL: Location search reveals geographic pattern (LOW-MEDIUM risk)
+- CONTEXTUAL: Location search reveals geographic pattern
+  → RISK LEVEL: LOW (single search, insufficient data for confident inference about regular patterns)
   → used_infons: ["restaurant", "location search"] (observable keywords)
 
 If input is "我叫王小明，今年27岁，住在北京市海淀区", extract keywords:
-- Name exposure: used_infons: ["王小明"] (entity name from input)
-- Age exposure: used_infons: ["27", "今年"] (attribute value + temporal expression)
-- Location exposure: used_infons: ["北京市", "海淀区"] (spatial location keywords)
+- Name exposure: RISK LEVEL = HIGH (explicit, unambiguous personal identifier)
+  → used_infons: ["王小明"] (entity name from input)
+- Age exposure: RISK LEVEL = HIGH (explicit, precise demographic attribute)
+  → used_infons: ["27", "今年"] (attribute value + temporal expression)
+- Location exposure: RISK LEVEL = HIGH (precise, specific residential address that can uniquely identify the person when combined with name)
+  → used_infons: ["北京市", "海淀区"] (spatial location keywords)
 
 **Custom Mode Example**:
 If law tree shows "CUSTOM PRIVACY ANALYSIS MODE" with selected items: ["Home Address", "Location/GPS", "Health Data"]
 And input contains: "User attends Friday prayers at mosque and searches for halal restaurants"
 - ✅ REPORT: Dietary preference (halal) → inferred health/dietary need → law_node_name = "Health Data" (selected)
+  → RISK LEVEL: MEDIUM (dietary preference suggests but doesn't definitively prove health condition; moderate inference confidence)
   → used_infons: ["halal", "restaurants"] (exact keywords)
 - ✅ REPORT: Location search pattern → law_node_name = "Location/GPS" (selected)
+  → RISK LEVEL: LOW-MEDIUM (temporal pattern with location but insufficient data for high-confidence inference about home/work)
   → used_infons: ["Friday prayers", "mosque"] (location/time keywords)
 - ❌ DO NOT REPORT: Religious belief inference (Islam) → NOT in selected list, must skip even though it's inferable
 - ❌ DO NOT REPORT: Any privacy category not explicitly listed in the selected items
@@ -246,9 +255,9 @@ OUTPUT FORMAT (EXACT JSON):
   "risks": [
     {
       "law_node_name": "exact leaf node name from legal framework",
-      "risk_level": "HIGH or MEDIUM or LOW",
+      "risk_level": "HIGH | MEDIUM | LOW (based on INFERENCE CERTAINTY: HIGH = definitive/very confident inference, MEDIUM = moderate confidence, LOW = weak/vague clues)",
       "privacy_exposure": "what privacy info is exposed (consider information from ALL messages)",
-      "inference_chain": "reasoning: 1) what data appears in which message(s) 2) how they connect 3) what can be inferred 4) why it matters",
+      "inference_chain": "reasoning: 1) what data appears in which message(s) 2) how they connect 3) what can be inferred 4) why it matters 5) confidence level of this inference",
       "used_infons": ["exact keyword/entity from ANY message", "attribute value", "time expression", "location name"]
     }
   ]
@@ -260,6 +269,7 @@ CRITICAL RULES:
 - used_infons should contain EXACT KEYWORDS from ANY/ALL messages (entities, attribute values, time expressions, locations) that support this risk. Extract concrete nouns, names, values, dates, places from the ENTIRE conversation. DO NOT use infon IDs.
 - If you see "CUSTOM PRIVACY ANALYSIS MODE", ONLY analyze the selected items marked with ✓
 - Deep inference: infer health conditions, beliefs from behaviors across messages (e.g., "gluten-free" in msg1 + "stomach pain" in msg2 → celiac disease)
+- RISK LEVEL ASSIGNMENT: Evaluate inference CERTAINTY based on data clarity and context. More specific/concrete input data + stronger contextual links = HIGH risk. Vague/ambiguous data with weak connections = LOW risk. Balance between = MEDIUM risk.
 - CROSS-MESSAGE ANALYSIS: A single privacy risk may be supported by keywords from multiple messages
 - Sort by risk_level: HIGH first
 - LANGUAGE CONSISTENCY: Write privacy_exposure and inference_chain in the SAME language as the input (if input is in Chinese, respond in Chinese; if in English, respond in English)
@@ -291,9 +301,9 @@ OUTPUT FORMAT (EXACT JSON):
   "risks": [
     {
       "law_node_name": "exact leaf node name from legal framework",
-      "risk_level": "HIGH or MEDIUM or LOW",
+      "risk_level": "HIGH | MEDIUM | LOW (based on INFERENCE CERTAINTY: HIGH = definitive/very confident inference, MEDIUM = moderate confidence, LOW = weak/vague clues)",
       "privacy_exposure": "what privacy info is exposed",
-      "inference_chain": "reasoning: 1) what data shows 2) what it implies 3) why it matters",
+      "inference_chain": "reasoning: 1) what data shows 2) what it implies 3) why it matters 4) confidence level of this inference",
       "used_infons": ["exact entity/attribute keyword", "time expression", "location name", "value from input"]
     }
   ]
@@ -305,6 +315,7 @@ CRITICAL RULES:
 - used_infons should contain EXACT KEYWORDS from the input data that support this risk. Extract concrete information elements: entity names, attribute values, temporal expressions, spatial locations (like DESC.attribute and SCEN.temporal/spatial from infons.js). DO NOT use infon IDs like "desc:r1_1".
 - If you see "CUSTOM PRIVACY ANALYSIS MODE", ONLY analyze the selected items marked with ✓
 - Deep inference: infer health conditions, beliefs from behaviors (e.g., gluten-free → celiac disease)
+- RISK LEVEL ASSIGNMENT: Evaluate inference CERTAINTY based on data clarity and context. More specific/concrete input data + stronger contextual links = HIGH risk. Vague/ambiguous data with weak connections = LOW risk. Balance between = MEDIUM risk.
 - Sort by risk_level: HIGH first
 - LANGUAGE CONSISTENCY: Write privacy_exposure and inference_chain in the SAME language as the input data (if input is in Chinese, respond in Chinese; if in English, respond in English)
 
