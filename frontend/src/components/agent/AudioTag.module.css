@@ -119,25 +119,23 @@
   font-size: 12px;
   font-weight: 400;
   color: #262626;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  word-break: break-word;
   line-height: 1.4;
-  display: inline-block;
+  display: block;
   width: 100%;
+  text-align: left;
+}
+
+/* 使用 antd TextArea 的样式覆盖 */
+.transcriptInput :global(.ant-input) {
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+  padding: 2px 6px !important;
 }
 
 .transcriptInput {
   width: 100%;
-  font-size: 12px;
-  font-weight: 400;
-  color: #262626;
-  line-height: 1.4;
-  border: 1px solid #1890ff;
-  border-radius: 2px;
-  padding: 0 4px;
-  outline: none;
-  background: #fff;
 }
 
 .duration {

@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Space, Tooltip } from 'antd'
+import { Space, Tooltip, Input } from 'antd'
 import { PlayCircleOutlined, PauseCircleOutlined, CloseOutlined, SoundOutlined } from '@ant-design/icons'
 import styles from './AudioTag.module.css'
+
+const { TextArea } = Input
 
 /**
  * 音频可视化标签组件
@@ -99,7 +101,8 @@ const AudioTag = ({ audioData, onRemove, removable = true, variant = 'input', on
   }
 
   const handleTranscriptKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Ctrl+Enter 或 Cmd+Enter 保存
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       handleTranscriptBlur()
     } else if (e.key === 'Escape') {
@@ -143,20 +146,21 @@ const AudioTag = ({ audioData, onRemove, removable = true, variant = 'input', on
           {audioData?.transcript && (
             <div className={styles.transcriptContainer}>
               {isEditingTranscript ? (
-                <input
+                <TextArea
                   ref={transcriptInputRef}
-                  type="text"
                   className={styles.transcriptInput}
                   value={editedTranscript}
                   onChange={(e) => setEditedTranscript(e.target.value)}
                   onBlur={handleTranscriptBlur}
                   onKeyDown={handleTranscriptKeyDown}
+                  autoSize={{ minRows: 1, maxRows: 6 }}
+                  placeholder="输入转录文本"
                 />
               ) : (
                 <span 
                   className={styles.transcript} 
                   onClick={handleTranscriptClick}
-                  title={editable ? '点击编辑转录文本' : audioData.transcript}
+                  title={editable ? '点击编辑转录文本 (Ctrl+Enter保存)' : audioData.transcript}
                   style={{ cursor: editable ? 'text' : 'default' }}
                 >
                   {renderHighlightedText ? renderHighlightedText(audioData.transcript) : audioData.transcript}

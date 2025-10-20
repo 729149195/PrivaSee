@@ -151,7 +151,10 @@ const AudioRecorder = ({ onAudioAdded, disabled = false }) => {
       formData.append('audio', wavBlob, 'recording.wav')
       formData.append('language', 'auto') // 自动检测中英文
       
-      const response = await fetch('/whisper/transcribe', {
+      // 使用环境变量或默认到本地服务
+      const whisperUrl = import.meta.env.VITE_WHISPER_URL || 'http://127.0.0.1:5000/api/transcribe'
+      
+      const response = await fetch(whisperUrl, {
         method: 'POST',
         body: formData,
       })
