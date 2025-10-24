@@ -1,15 +1,15 @@
 import React, { useState } from 'react'
 import { Modal, Input, Button, Tabs, message, Avatar, Dropdown } from 'antd'
-import { UserOutlined, LoginOutlined, LogoutOutlined, SettingOutlined } from '@ant-design/icons'
+import { UserOutlined, LoginOutlined, LogoutOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useUserStore, validateLogin } from './userStore'
-import SettingsModal from './SettingsModal'
+import { useStore } from '../store'
 import styles from './UserAuth.module.css'
 
 export default function UserAuth() {
   const { currentUser, isLoggedIn, login, logout, register } = useUserStore()
+  const { clearAllData } = useStore()
   const [modalOpen, setModalOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('login')
-  const [settingsOpen, setSettingsOpen] = useState(false)
   
   // 登录表单
   const [loginUsername, setLoginUsername] = useState('')
@@ -107,6 +107,21 @@ export default function UserAuth() {
       }
     })
   }
+  
+  // 处理清除全部记录
+  const handleClearAll = () => {
+    Modal.confirm({
+      title: '确认清除全部记录',
+      content: '此操作将清除所有会话、信息元、隐私推理结果等数据，且无法恢复。确定要继续吗？',
+      okText: '确定',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        clearAllData()
+        message.success('已清除全部记录')
+      }
+    })
+  }
 
   // 未登录状态的下拉菜单
   const guestMenuItems = [
@@ -136,19 +151,17 @@ export default function UserAuth() {
       type: 'divider'
     },
     {
-      key: 'settings',
-      icon: <SettingOutlined />,
-      label: '设置',
-      onClick: () => {
-        setSettingsOpen(true)
-      }
+      key: 'clear',
+      icon: <DeleteOutlined />,
+      label: '清除全部记录',
+      onClick: handleClearAll,
+      danger: true
     },
     {
       key: 'logout',
       icon: <LogoutOutlined />,
       label: '退出登录',
-      onClick: handleLogout,
-      danger: true
+      onClick: handleLogout
     }
   ]
 
@@ -291,12 +304,6 @@ export default function UserAuth() {
           ]}
         />
       </Modal>
-      
-      {/* 设置 Modal */}
-      <SettingsModal 
-        open={settingsOpen} 
-        onClose={() => setSettingsOpen(false)} 
-      />
     </>
   )
 }

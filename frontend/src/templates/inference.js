@@ -217,7 +217,7 @@ export function fillPromptTemplate(infons, lawData, directInput = null, historic
     // 构建历史关键词上下文
     let keywordsContext = ''
     if (historicalKeywords && historicalKeywords.length > 0) {
-      keywordsContext = `\n\nKNOWN PRIVACY KEYWORDS (already identified in previous analyses):
+      keywordsContext = `\n\nKNOWN PRIVACY KEYWORDS:
 ${historicalKeywords.join(', ')}
 
 IMPORTANT: The above keywords are from previous messages. When analyzing the complete conversation below, you MUST:

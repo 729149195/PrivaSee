@@ -1,0 +1,13 @@
+.modelConfigModal :global(.ant-modal-content) {
+  border-radius: 12px;
+}
+
+.modelConfigModal :global(.ant-modal-header) {
+  border-bottom: 1px solid var(--color-border-secondary);
+  padding: 16px 24px;
+}
+
+.modelConfigModal :global(.ant-modal-body) {
+  padding: 24px;
+}
+

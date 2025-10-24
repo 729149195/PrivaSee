@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { buildSystemPrompt } from './templates/infons.js'
 import { loadUserSessions, saveUserSessions } from './users/historyStorage'
+import { getDefaultModelsConfig } from './config/defaultModelsConfig'
+import { getModelModalities } from './utils/modelUtils'
 
 // 说明：
 // 1) 本 store 管理 ChatGPT 风格的多会话、消息流与流式生成状态；
@@ -526,11 +528,19 @@ export const useStore = create((set, get) => ({
   currentUserId: null,
   
   // 模型配置（中文注释）：用户可自定义的模型选择
-  infonExtractionModel: 'deepseek-chat', // 信息元提取模型
-  privacyInferenceModel: 'deepseek-chat', // 隐私推理模型
+  // 直接推理模式的模型配置
+  directInferenceModel: getDefaultModelsConfig().directInferenceModel, // 直接推理模式：隐私推理模型
+  
+  // 提取信息元模式的模型配置
+  infonExtractionModel: getDefaultModelsConfig().infonExtractionModel, // 提取信息元模式：信息元提取模型
+  infonPrivacyInferenceModel: getDefaultModelsConfig().infonPrivacyInferenceModel, // 提取信息元模式：隐私推理模型
+  
+  // 共用的模型配置
+  imageParsingModel: getDefaultModelsConfig().imageParsingModel, // 图片解析模型（共用）
+  protectionSuggestionModel: getDefaultModelsConfig().protectionSuggestionModel, // Privacy Protection Suggestions模型（共用，仅限API key模型）
   
   // 推断模式（中文注释）：extract（提取信息元）或 direct（直接推断）
-  inferenceMode: 'extract', // 默认为提取信息元模式
+  inferenceMode: getDefaultModelsConfig().inferenceMode, // 默认为提取信息元模式
   
   // Pending用户输入（中文注释）：用于直接推断模式下获取未发送的输入
   pendingUserInput: '',
@@ -541,14 +551,38 @@ export const useStore = create((set, get) => ({
   // Pending图片（中文注释）：用于直接推断模式下获取未发送的图片分析
   pendingImages: [],
   
-  // 设置信息元提取模型
+  // 设置模型配置
+  setDirectInferenceModel: (modelId) => {
+    set({ directInferenceModel: modelId })
+  },
+  
   setInfonExtractionModel: (modelId) => {
     set({ infonExtractionModel: modelId })
   },
   
-  // 设置隐私推理模型
-  setPrivacyInferenceModel: (modelId) => {
-    set({ privacyInferenceModel: modelId })
+  setInfonPrivacyInferenceModel: (modelId) => {
+    set({ infonPrivacyInferenceModel: modelId })
+  },
+  
+  setImageParsingModel: (modelId) => {
+    set({ imageParsingModel: modelId })
+  },
+  
+  setProtectionSuggestionModel: (modelId) => {
+    set({ protectionSuggestionModel: modelId })
+  },
+  
+  // 恢复默认模型配置
+  resetToDefaultModels: () => {
+    const defaultConfig = getDefaultModelsConfig()
+    set({
+      directInferenceModel: defaultConfig.directInferenceModel,
+      infonExtractionModel: defaultConfig.infonExtractionModel,
+      infonPrivacyInferenceModel: defaultConfig.infonPrivacyInferenceModel,
+      imageParsingModel: defaultConfig.imageParsingModel,
+      protectionSuggestionModel: defaultConfig.protectionSuggestionModel,
+      inferenceMode: defaultConfig.inferenceMode,
+    })
   },
   
   // 设置推断模式
@@ -594,9 +628,11 @@ export const useStore = create((set, get) => ({
   // 分析图片内容（用于直接推断模式）
   async analyzeImage(imageDataUrl) {
     try {
-      // 使用 Ollama 的本地 gemma3:12b 模型分析图片
-      const apiUrl = get().baseUrl
-      const model = 'gemma3:12b'
+      // 使用配置的图片解析模型
+      const configuredModel = get().imageParsingModel || 'gemma3:12b'
+      const provider = get().customProviders?.[configuredModel]
+      const apiUrl = provider ? provider.baseUrl : get().baseUrl
+      const model = configuredModel
       
       // 精心设计的提示词：提取图片中的所有细节和可能关联到个人隐私的内容
       const systemPrompt = `You are a privacy-focused AI assistant. Analyze the provided image and extract ALL details that could potentially be used to infer personal information or be associated with other data to deduce privacy-related information.
@@ -618,11 +654,19 @@ Output format:
 
       const userPrompt = 'Analyze this image and extract all details as instructed.'
       
+      const headers = { 'Content-Type': 'application/json' }
+      if (provider?.apiKey) {
+        headers['Authorization'] = `Bearer ${provider.apiKey}`
+      }
+      
+      // 根据模型类型确定 max_tokens（omni 系列限制为 2048）
+      const modelName = model.toLowerCase()
+      const isOmni = modelName.includes('omni')
+      const maxTokens = isOmni ? 1000 : 2000
+      
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           model: model,
           messages: [
@@ -636,7 +680,7 @@ Output format:
             }
           ],
           temperature: 0.3,
-          max_tokens: 1000,
+          max_tokens: maxTokens,
         })
       })
       
@@ -683,6 +727,21 @@ Output format:
       infonSessions: {},
       privacyInferences: {},
       sessionKeywords: {} // 清空关键词
+    })
+  },
+  
+  // 清除全部记录
+  clearAllData: () => {
+    const emptySession = createEmptySession()
+    set({ 
+      sessions: [emptySession],
+      currentSessionId: emptySession.id,
+      infonSessions: {},
+      privacyInferences: {},
+      sessionKeywords: {},
+      protectionSuggestions: {},
+      customPrivacyItems: [],
+      selectedPrivacyItems: []
     })
   },
 
@@ -928,6 +987,29 @@ Output format:
       customModels: Array.from(new Set([...(state.customModels || []), id])),
       models: Array.from(new Set([...(state.models || []), id]))
     }))
+  },
+  
+  // 删除自定义API模型
+  removeApiModel(id) {
+    if (!id) return
+    set((state) => {
+      const newProviders = { ...state.customProviders }
+      delete newProviders[id]
+      
+      return {
+        customProviders: newProviders,
+        customModels: (state.customModels || []).filter(m => m !== id),
+        models: (state.models || []).filter(m => m !== id),
+        // 如果删除的是当前选中的模型，切换到默认模型
+        model: state.model === id ? 'gemma3:12b' : state.model,
+        // 如果删除的是配置的模型，重置为默认值
+        directInferenceModel: state.directInferenceModel === id ? 'deepseek-chat' : state.directInferenceModel,
+        infonExtractionModel: state.infonExtractionModel === id ? 'deepseek-chat' : state.infonExtractionModel,
+        infonPrivacyInferenceModel: state.infonPrivacyInferenceModel === id ? 'deepseek-chat' : state.infonPrivacyInferenceModel,
+        imageParsingModel: state.imageParsingModel === id ? 'gemma3:12b' : state.imageParsingModel,
+        protectionSuggestionModel: state.protectionSuggestionModel === id ? 'deepseek-chat' : state.protectionSuggestionModel,
+      }
+    })
   },
 
   // 切换会话
@@ -1578,50 +1660,109 @@ Output format:
     }
     get()._appendInfonRun(session.id, run)
 
-    // 自定义提供商通常不支持图片
-    const provider = get().customProviders?.[get().model]
-    if (provider) {
+    // 使用用户配置的图片解析模型（中文注释）
+    const configuredModel = get().imageParsingModel || 'gemma3:12b'
+    const customProviders = get().customProviders
+    
+    // 检查模型是否支持图片
+    const modalities = getModelModalities(configuredModel, customProviders)
+    if (!modalities.image) {
       get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'error', error: 'Image messages are not supported for this model' }))
       return
     }
-
-    const apiBase = (get().baseUrl || '').replace(/\/?v1\/?$/, '/api')
-    const stripDataUrl = (s) => {
-      if (typeof s !== 'string') return s
-      const i = s.indexOf(',')
-      if (i >= 0 && s.slice(0, i).includes('base64')) return s.slice(i + 1)
-      return s
-    }
-
+    
+    const provider = customProviders?.[configuredModel]
     const nowISO = new Date().toISOString()
     const systemPrompt = buildInfonSystemPrompt(['image'], nowISO, { currentRound, existingInfons })
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: 'Extract Situation Theory infons as a strict single JSON object.', images: [stripDataUrl(dataUrl)] },
-    ]
-
+    
     const controller = new AbortController()
     get()._updateInfonRun(session.id, runId, (r) => ({ ...r, controller }))
 
     try {
-      const res = await fetch(`${apiBase}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: get().model, messages, stream: true, options: { temperature: 0 } }),
-        signal: controller.signal,
-      })
+      let res, reader
+      
+      // 如果是 API 模型，使用 OpenAI Vision API 格式
+      if (provider) {
+        const messages = [
+          { role: 'system', content: systemPrompt },
+          { 
+            role: 'user', 
+            content: [
+              {
+                type: 'text',
+                text: 'Extract Situation Theory infons as a strict single JSON object.'
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: dataUrl // 保持 data:image/... 格式
+                }
+              }
+            ]
+          },
+        ]
+        
+        const baseUrl = provider.baseUrl
+        const headers = { 'Content-Type': 'application/json' }
+        if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`
+        
+        res = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            ...headers,
+            'Connection': 'keep-alive'
+          },
+          body: JSON.stringify({
+            model: configuredModel,
+            messages,
+            temperature: 0,
+            stream: true,
+            max_tokens: 4096,
+            top_p: 0.95,
+            frequency_penalty: 0.0,
+            presence_penalty: 0.0,
+          }),
+          signal: controller.signal,
+          keepalive: true
+        })
+      } else {
+        // 本地 Ollama 模型：使用 /api/chat 格式
+        const apiBase = (get().baseUrl || '').replace(/\/?v1\/?$/, '/api')
+        const stripDataUrl = (s) => {
+          if (typeof s !== 'string') return s
+          const i = s.indexOf(',')
+          if (i >= 0 && s.slice(0, i).includes('base64')) return s.slice(i + 1)
+          return s
+        }
+        
+        const messages = [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: 'Extract Situation Theory infons as a strict single JSON object.', images: [stripDataUrl(dataUrl)] },
+        ]
+        
+        res = await fetch(`${apiBase}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: configuredModel, messages, stream: true, options: { temperature: 0 } }),
+          signal: controller.signal,
+        })
+      }
+      
       if (!res.ok) {
         const errText = await res.text().catch(() => '')
         get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'error', error: errText || 'Request failed' }))
         return
       }
-      const reader = res.body?.getReader()
+      
+      reader = res.body?.getReader()
       if (!reader) {
         get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'error', error: 'No stream' }))
         return
       }
 
-      await streamOllamaChatResponse(reader, async ({ content, finish }) => {
+      // 使用对应的流式响应处理器
+      const streamHandler = provider ? streamOpenAIResponse : streamOllamaChatResponse
+      await streamHandler(reader, async ({ content, finish }) => {
         if (typeof content === 'string' && content.length) {
           // 流式增量解析（中文注释）：逐步提取infons
           const currentRun = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)
@@ -1961,13 +2102,12 @@ Output format:
     const session = get().getCurrentSession()
     if (!session) return
 
-    // 如历史对话包含图片或音频，则改走多模态 /api/chat，并将图片并入上下文
+    // 如历史对话包含图片或音频，则改走多模态路径
     const hasHistoricalImages = (session.messages || []).some(m => Array.isArray(m.images) && m.images.length > 0)
     const hasHistoricalAudios = (session.messages || []).some(m => Array.isArray(m.audios) && m.audios.length > 0)
     const hasAudios = Array.isArray(audioDataArray) && audioDataArray.length > 0
-    const providerForModel = get().customProviders?.[get().model]
-    if ((hasHistoricalImages || hasHistoricalAudios || hasAudios) && !providerForModel) {
-      // 委托到多模态路径（其本身也会"立即返回"）
+    if (hasHistoricalImages || hasHistoricalAudios || hasAudios) {
+      // 委托到多模态路径（支持本地模型和 API 模型）
       return await get().sendMessageWithImages(text, [], audioDataArray)
     }
 
@@ -2155,9 +2295,15 @@ Output format:
       createdAt: Date.now(),
     })
 
-    // 如果是自定义提供商，暂不支持图片：直接写入错误并返回
-    const provider = get().customProviders?.[get().model]
-    if (provider) {
+    // 检查模型是否支持图片
+    const currentModel = get().model
+    const customProviders = get().customProviders
+    const modalities = getModelModalities(currentModel, customProviders)
+    
+    console.log('[sendMessageWithImages] 当前模型:', currentModel, '支持图片:', modalities.image, 'API模型:', !!customProviders?.[currentModel])
+    
+    if (!modalities.image) {
+      // 模型不支持图片，返回错误
       const assistantMsgId = generateId()
       get()._appendMessage(session.id, {
         id: assistantMsgId,
@@ -2171,6 +2317,9 @@ Output format:
       })
       return userMsgId
     }
+    
+    const provider = get().customProviders?.[get().model]
+    console.log('[sendMessageWithImages] 使用', provider ? 'API 模型' : '本地 Ollama 模型', '处理图片')
 
     // 预创建助手空消息用于流式写入
     const assistantMsgId = generateId()
@@ -2184,6 +2333,222 @@ Output format:
       createdAt: Date.now(),
     })
 
+    const controller = new AbortController()
+    set({ isGenerating: true, abortController: controller })
+
+    // 如果是 API 模型，使用 OpenAI Vision API 格式
+    if (provider) {
+      ;(async () => {
+        try {
+          const sessionMsgs = get().getCurrentSession().messages
+          
+          // 过滤掉刚创建的空 assistant 消息（避免发送空消息到 API）
+          const filteredMsgs = sessionMsgs.filter(m => {
+            // 排除当前正在生成的助手消息
+            if (m.id === assistantMsgId) return false
+            // 排除空的 assistant 消息
+            if (m.role === 'assistant' && (!m.content || m.content.trim() === '')) return false
+            return true
+          })
+          
+          // 转换消息为 OpenAI Vision API 格式
+          const payloadMessages = filteredMsgs.map((m) => {
+            // 如果消息有图片，使用 content 数组格式
+            if (m.role === 'user' && Array.isArray(m.images) && m.images.length > 0) {
+              const contentArray = []
+              
+              // 添加文本内容
+              if (m.content && m.content.trim()) {
+                contentArray.push({
+                  type: 'text',
+                  text: m.content
+                })
+              }
+              
+              // 添加图片
+              m.images.forEach(img => {
+                contentArray.push({
+                  type: 'image_url',
+                  image_url: {
+                    url: img // 保持 data:image/... 格式
+                  }
+                })
+              })
+              
+              return { role: m.role, content: contentArray }
+            }
+            
+            // 普通消息
+            return { role: m.role, content: m.content }
+          })
+
+          const baseUrl = provider.baseUrl
+          const headers = { 'Content-Type': 'application/json' }
+          if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`
+
+          // 检查是否有图片消息
+          const hasImages = filteredMsgs.some(m => Array.isArray(m.images) && m.images.length > 0)
+          
+          // 判断是否使用流式响应（根据模型特性）
+          const currentModelName = get().model.toLowerCase()
+          const isOmniModel = currentModelName.includes('omni') // omni 系列必须使用流式
+          const isVLModel = currentModelName.includes('vl') && !isOmniModel // vl 系列不能使用流式（除了 omni）
+          
+          // 决定是否使用流式
+          let useStreaming = true // 默认使用流式
+          if (hasImages && isVLModel) {
+            useStreaming = false // vl 模型处理图片时不能使用流式
+          } else if (hasImages && isOmniModel) {
+            useStreaming = true // omni 模型必须使用流式
+          } else if (!hasImages) {
+            useStreaming = true // 纯文本消息使用流式
+          }
+          
+          // 根据模型类型确定 max_tokens
+          const maxTokens = isOmniModel ? 2000 : 4096 // omni 系列限制为 2048，使用 2000 安全值
+          
+          // 构建请求体
+          const requestBody = (hasImages && isVLModel) ? {
+            // vl 模型处理图片：使用简化配置（无 stream）
+            model: get().model,
+            messages: payloadMessages,
+            temperature: 0.3,
+            max_tokens: 2000,
+          } : {
+            // 其他情况：使用流式配置
+            model: get().model,
+            messages: payloadMessages,
+            temperature: 0.7,
+            stream: true,
+            max_tokens: maxTokens,
+            top_p: 0.9,
+            frequency_penalty: 0.0,
+            presence_penalty: 0.0,
+          }
+          
+          console.log('[sendMessageWithImages API] 请求地址:', `${baseUrl}/chat/completions`)
+          console.log('[sendMessageWithImages API] 模型类型:', { 
+            name: get().model, 
+            isVL: isVLModel, 
+            isOmni: isOmniModel,
+            hasImages,
+            useStreaming,
+            maxTokens
+          })
+          console.log('[sendMessageWithImages API] 原始消息数:', sessionMsgs.length, '过滤后:', filteredMsgs.length, '→ payload:', payloadMessages.length)
+          console.log('[sendMessageWithImages API] 请求配置:', (hasImages && isVLModel) ? 'vl模型简化配置（无stream）' : `omni/文本流式配置 (max_tokens: ${maxTokens})`)
+          console.log('[sendMessageWithImages API] 最后一条消息:', JSON.stringify(payloadMessages[payloadMessages.length - 1], null, 2).substring(0, 500))
+
+          const res = await fetch(`${baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers,  // 使用简单的 headers，不添加额外的
+            body: JSON.stringify(requestBody),
+            signal: controller.signal,
+          })
+
+          if (!res.ok) {
+            const textErr = await res.text().catch(() => '')
+            console.error('[sendMessageWithImages API] 请求失败:', res.status, res.statusText, textErr)
+            get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: textErr || 'Request failed', content: m.content }))
+            set({ isGenerating: false, abortController: null })
+            return
+          }
+
+          // 如果使用非流式响应（vl 模型处理图片时）
+          if (!useStreaming && hasImages && isVLModel) {
+            const result = await res.json()
+            const content = result.choices?.[0]?.message?.content || ''
+            
+            console.log('[sendMessageWithImages API] vl模型非流式响应接收完成，内容长度:', content.length)
+            
+            // 更新消息内容
+            get()._updateMessage(session.id, assistantMsgId, (m) => ({ 
+              ...m, 
+              content: content,
+              streaming: false, 
+              phase: 'done' 
+            }))
+            set({ isGenerating: false, abortController: null })
+            return
+          }
+
+          // 流式响应处理（omni 模型或纯文本消息）
+          console.log('[sendMessageWithImages API] 使用流式响应处理')
+          
+          const reader = res.body?.getReader()
+          if (!reader) {
+            get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: 'No stream', content: m.content }))
+            set({ isGenerating: false, abortController: null })
+            return
+          }
+
+          let inThink = false
+          await streamOpenAIResponse(reader, ({ content, reasoning, finish }) => {
+            if (reasoning) {
+              get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, reasoning: (m.reasoning || '') + reasoning }))
+            }
+
+            if (typeof content === 'string' && content.length) {
+              let rest = content
+              while (rest && rest.length) {
+                if (inThink) {
+                  const endIdx = rest.indexOf('</think>')
+                  if (endIdx >= 0) {
+                    const head = rest.slice(0, endIdx)
+                    const tail = rest.slice(endIdx + 8)
+                    if (head) {
+                      get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, reasoning: (m.reasoning || '') + head }))
+                    }
+                    inThink = false
+                    rest = tail
+                    continue
+                  } else {
+                    get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, reasoning: (m.reasoning || '') + rest }))
+                    rest = ''
+                    break
+                  }
+                } else {
+                  const startIdx = rest.indexOf('<think>')
+                  if (startIdx >= 0) {
+                    const before = rest.slice(0, startIdx)
+                    const tail = rest.slice(startIdx + 7)
+                    if (before) {
+                      get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, content: (m.content || '') + before, phase: 'answering' }))
+                    }
+                    inThink = true
+                    rest = tail
+                    continue
+                  } else {
+                    get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, content: (m.content || '') + rest, phase: 'answering' }))
+                    rest = ''
+                    break
+                  }
+                }
+              }
+            }
+
+            if (finish) {
+              get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, phase: 'done' }))
+            }
+          })
+        } catch (err) {
+          console.error('[sendMessageWithImages API] 捕获到错误:', err)
+          console.error('[sendMessageWithImages API] 错误详情:', {
+            name: err?.name,
+            message: err?.message,
+            stack: err?.stack
+          })
+          const msg = (err && (err.name === 'AbortError')) ? 'Aborted' : `Network error: ${err?.message || '未知错误'}`
+          get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: msg }))
+        } finally {
+          set({ isGenerating: false, abortController: null })
+        }
+      })()
+      
+      return userMsgId
+    }
+
+    // 本地 Ollama 模型：使用 /api/chat 格式
     // 将历史消息转换为 Ollama /api/chat 的 messages：携带 images 时去掉 data: 前缀
     const stripDataUrl = (s) => {
       if (typeof s !== 'string') return s
@@ -2193,12 +2558,20 @@ Output format:
     }
 
     const sessionMsgs = get().getCurrentSession().messages
+    
+    // 过滤掉刚创建的空 assistant 消息
+    const filteredMsgs = sessionMsgs.filter(m => {
+      if (m.id === assistantMsgId) return false
+      if (m.role === 'assistant' && (!m.content || m.content.trim() === '')) return false
+      return true
+    })
+    
     let lastImageIdx = -1
-    for (let i = sessionMsgs.length - 1; i >= 0; i--) {
-      const m = sessionMsgs[i]
+    for (let i = filteredMsgs.length - 1; i >= 0; i--) {
+      const m = filteredMsgs[i]
       if (Array.isArray(m.images) && m.images.length > 0 && m.role === 'user') { lastImageIdx = i; break }
     }
-    const history = sessionMsgs.map((m, idx) => {
+    const history = filteredMsgs.map((m, idx) => {
       const o = { role: m.role, content: m.content }
       if (idx === lastImageIdx && Array.isArray(m.images) && m.images.length) {
         o.images = m.images.map(stripDataUrl)
@@ -2209,8 +2582,8 @@ Output format:
     // 计算 /api 基址：将 baseUrl 的 /v1 替换为 /api
     const apiBase = (get().baseUrl || '').replace(/\/?v1\/?$/, '/api')
 
-    const controller = new AbortController()
-    set({ isGenerating: true, abortController: controller })
+    console.log('[sendMessageWithImages Ollama] 请求地址:', `${apiBase}/chat`)
+    console.log('[sendMessageWithImages Ollama] 原始消息数:', sessionMsgs.length, '过滤后:', filteredMsgs.length, '→ history:', history.length)
 
     ;(async () => {
       try {
@@ -2249,7 +2622,13 @@ Output format:
           }
         })
       } catch (err) {
-        const msg = (err && (err.name === 'AbortError')) ? 'Aborted' : 'Network error'
+        console.error('[sendMessageWithImages Ollama] 捕获到错误:', err)
+        console.error('[sendMessageWithImages Ollama] 错误详情:', {
+          name: err?.name,
+          message: err?.message,
+          stack: err?.stack
+        })
+        const msg = (err && (err.name === 'AbortError')) ? 'Aborted' : `Network error: ${err?.message || '未知错误'}`
         get()._updateMessage(session.id, assistantMsgId, (m) => ({ ...m, streaming: false, error: msg }))
       } finally {
         set({ isGenerating: false, abortController: null })
@@ -2476,8 +2855,14 @@ Output format:
     }))
     
     try {
-      // 使用用户配置的隐私推理模型（中文注释）：优先使用配置，回退到 DeepSeek
-      const configuredModel = get().privacyInferenceModel || 'deepseek-chat'
+      // 使用用户配置的隐私推理模型（中文注释）：根据推断模式选择不同的模型
+      const inferenceMode = get().inferenceMode
+      let configuredModel
+      if (inferenceMode === 'direct') {
+        configuredModel = get().directInferenceModel || 'deepseek-chat'
+      } else {
+        configuredModel = get().infonPrivacyInferenceModel || 'deepseek-chat'
+      }
       let provider = get().customProviders?.[configuredModel]
       
       // 如果配置的模型是 deepseek-chat 但尚未添加，则自动添加默认配置
@@ -3032,9 +3417,25 @@ Output format:
     }))
     
     try {
-      // 使用配置的模型生成建议
-      const configuredModel = get().privacyInferenceModel || 'deepseek-chat'
+      // 使用配置的Privacy Protection Suggestions模型（必须是API key模型）
+      const configuredModel = get().protectionSuggestionModel || 'deepseek-chat'
       let provider = get().customProviders?.[configuredModel]
+      
+      // 验证是否是API key模型
+      if (!provider) {
+        console.warn('[Protection] Privacy Protection Suggestions只能使用API key模型')
+        set(state => ({
+          protectionSuggestions: {
+            ...state.protectionSuggestions,
+            [session.id]: {
+              status: 'error',
+              error: 'Privacy Protection Suggestions requires an API key model. Please configure one in Settings.',
+              suggestions: []
+            }
+          }
+        }))
+        return
+      }
       
       if (configuredModel === 'deepseek-chat' && !provider) {
         try {
@@ -3043,7 +3444,7 @@ Output format:
         provider = get().customProviders?.[configuredModel]
       }
       
-      const apiUrl = provider ? provider.baseUrl : get().baseUrl
+      const apiUrl = provider.baseUrl
       const apiKey = provider?.apiKey || ''
       
       // 确保 apiUrl 格式正确
@@ -3271,8 +3672,12 @@ Output format:
           customPrivacyItems: data.customPrivacyItems || [],
           selectedLawIdx: data.selectedLawIdx ?? 0,
           selectedPrivacyItems: data.selectedPrivacyItems || [],
+          // 模型配置
+          directInferenceModel: data.directInferenceModel || 'deepseek-chat',
           infonExtractionModel: data.infonExtractionModel || 'deepseek-chat',
-          privacyInferenceModel: data.privacyInferenceModel || 'deepseek-chat',
+          infonPrivacyInferenceModel: data.infonPrivacyInferenceModel || 'deepseek-chat',
+          imageParsingModel: data.imageParsingModel || 'gemma3:12b',
+          protectionSuggestionModel: data.protectionSuggestionModel || 'deepseek-chat',
           inferenceMode: data.inferenceMode || 'extract' // 加载推断模式
         })
         console.log('[PrivaSee] 用户历史数据已加载（包含关键词）')
@@ -3299,7 +3704,21 @@ Output format:
   // 内部：保存用户历史数据
   _saveUserHistory(userId) {
     try {
-      const { sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel, inferenceMode, sessionKeywords } = get()
+      const { 
+        sessions, 
+        infonSessions, 
+        privacyInferences, 
+        customPrivacyItems, 
+        selectedLawIdx, 
+        selectedPrivacyItems, 
+        directInferenceModel,
+        infonExtractionModel, 
+        infonPrivacyInferenceModel,
+        imageParsingModel,
+        protectionSuggestionModel,
+        inferenceMode, 
+        sessionKeywords 
+      } = get()
       
       // 清理不可序列化的字段（中文注释）：移除 abortController
       const serializableInferences = {}
@@ -3311,7 +3730,7 @@ Output format:
         }
       })
       
-      saveUserSessions(userId, sessions, infonSessions, serializableInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel, inferenceMode, sessionKeywords)
+      saveUserSessions(userId, sessions, infonSessions, serializableInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, directInferenceModel, infonExtractionModel, infonPrivacyInferenceModel, imageParsingModel, protectionSuggestionModel, inferenceMode, sessionKeywords)
     } catch (error) {
       console.error('[PrivaSee] 保存用户历史失败:', error)
     }

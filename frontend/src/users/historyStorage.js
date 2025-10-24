@@ -2,7 +2,7 @@
 // 为每个登录用户单独保存会话历史和信息元数据
 
 // 保存用户的所有会话数据
-export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, infonExtractionModel, privacyInferenceModel, inferenceMode, sessionKeywords) {
+export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, directInferenceModel, infonExtractionModel, infonPrivacyInferenceModel, imageParsingModel, protectionSuggestionModel, inferenceMode, sessionKeywords) {
   if (!userId) return
   
   try {
@@ -27,8 +27,12 @@ export function saveUserSessions(userId, sessions, infonSessions, privacyInferen
       customPrivacyItems: customPrivacyItems || [],
       selectedLawIdx: selectedLawIdx ?? 0,
       selectedPrivacyItems: selectedPrivacyItems || [],
+      // 模型配置
+      directInferenceModel: directInferenceModel || 'deepseek-chat',
       infonExtractionModel: infonExtractionModel || 'deepseek-chat',
-      privacyInferenceModel: privacyInferenceModel || 'deepseek-chat',
+      infonPrivacyInferenceModel: infonPrivacyInferenceModel || 'deepseek-chat',
+      imageParsingModel: imageParsingModel || 'gemma3:12b',
+      protectionSuggestionModel: protectionSuggestionModel || 'deepseek-chat',
       inferenceMode: inferenceMode || 'extract', // 保存推断模式
       sessionKeywords: serializedKeywords, // 保存关键词（数组格式）
       savedAt: Date.now()
@@ -72,8 +76,12 @@ export function loadUserSessions(userId) {
       customPrivacyItems: parsed.customPrivacyItems || [],
       selectedLawIdx: parsed.selectedLawIdx ?? 0,
       selectedPrivacyItems: parsed.selectedPrivacyItems || [],
+      // 模型配置
+      directInferenceModel: parsed.directInferenceModel || 'deepseek-chat',
       infonExtractionModel: parsed.infonExtractionModel || 'deepseek-chat',
-      privacyInferenceModel: parsed.privacyInferenceModel || 'deepseek-chat',
+      infonPrivacyInferenceModel: parsed.infonPrivacyInferenceModel || 'deepseek-chat',
+      imageParsingModel: parsed.imageParsingModel || 'gemma3:12b',
+      protectionSuggestionModel: parsed.protectionSuggestionModel || 'deepseek-chat',
       inferenceMode: parsed.inferenceMode || 'extract', // 加载推断模式
       sessionKeywords: deserializedKeywords, // 加载关键词（Set格式）
       savedAt: parsed.savedAt
@@ -153,8 +161,11 @@ export function importUserData(userId, file) {
           data.customPrivacyItems,
           data.selectedLawIdx,
           data.selectedPrivacyItems,
+          data.directInferenceModel,
           data.infonExtractionModel,
-          data.privacyInferenceModel,
+          data.infonPrivacyInferenceModel,
+          data.imageParsingModel,
+          data.protectionSuggestionModel,
           data.inferenceMode,
           data.sessionKeywords || {}
         )

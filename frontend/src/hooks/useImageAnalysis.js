@@ -66,7 +66,7 @@ export function useImageAnalysis(inferenceMode) {
               ? { ...img, status: 'done', analysis: analysisText }
               : img
           ))
-          console.log('[Image Analysis] 图片分析完成:', imageId, analysisText.substring(0, 100))
+          console.log('[Image Analysis] 图片分析完成:', imageId, analysisText)
         })
         .catch(error => {
           // 分析失败

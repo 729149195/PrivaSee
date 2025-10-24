@@ -1,7 +1,9 @@
 import React, { useState } from 'react'
 import { Select, Button, Modal, Input, message } from 'antd'
+import { SettingOutlined, FileTextOutlined, PictureOutlined, SoundOutlined, ThunderboltOutlined, KeyOutlined } from '@ant-design/icons'
 import styles from '../AgentPage.module.css'
-import { isModelMultimodal } from '../../utils/modelUtils'
+import { isModelMultimodal, getModelModalities, supportsChainOfThought } from '../../utils/modelUtils'
+import ModelConfigPanel from './ModelConfigPanel'
 
 /**
  * 模型选择工具栏组件
@@ -23,6 +25,7 @@ const ModelPickerToolbar = ({
   selectedImagesCount
 }) => {
   const [apiModalOpen, setApiModalOpen] = useState(false)
+  const [configPanelOpen, setConfigPanelOpen] = useState(false)
   const [apiModelId, setApiModelId] = useState('')
   const [apiBaseUrl, setApiBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -56,24 +59,65 @@ const ModelPickerToolbar = ({
             options={(() => {
               return [model, ...(models || [])]
                 .filter((v, i, a) => v && a.indexOf(v) === i)
-                .map((v) => ({
-                  label: `${v}${isModelMultimodal(v, customProviders) ? ' (multimodal)' : ' (text-only)'}`,
-                  value: v,
-                  disabled: (requireMultimodal && !isModelMultimodal(v, customProviders))
-                }))
+                .map((v) => {
+                  const modalities = getModelModalities(v, customProviders)
+                  const cot = supportsChainOfThought(v, customProviders)
+                  const isApiModel = customProviders?.[v]
+                  
+                  return {
+                    label: (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'space-between' }}>
+                        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {isApiModel && (
+                            <KeyOutlined style={{ fontSize: 12, color: '#8b5cf6' }} title="API Key 模型" />
+                          )}
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          {modalities.text && (
+                            <FileTextOutlined style={{ fontSize: 12, color: '#3b82f6' }} title="支持文本" />
+                          )}
+                          {modalities.image && (
+                            <PictureOutlined style={{ fontSize: 12, color: '#10b981' }} title="支持图像" />
+                          )}
+                          {modalities.audio && (
+                            <SoundOutlined style={{ fontSize: 12, color: '#f59e0b' }} title="支持音频" />
+                          )}
+                          {cot && (
+                            <ThunderboltOutlined style={{ fontSize: 12, color: '#ef4444' }} title="支持思维链" />
+                          )}
+                        </div>
+                      </div>
+                    ),
+                    value: v,
+                    disabled: (requireMultimodal && !isModelMultimodal(v, customProviders))
+                  }
+                })
             })()}
           />
-          <Button onClick={() => setApiModalOpen(true)}>Add API model</Button>
+          <Button onClick={() => setApiModalOpen(true)}>添加 API 模型</Button>
         </div>
+        <Button 
+          icon={<SettingOutlined />} 
+          onClick={() => setConfigPanelOpen(true)}
+        >
+          设置
+        </Button>
       </div>
+      <ModelConfigPanel 
+        visible={configPanelOpen} 
+        onClose={() => setConfigPanelOpen(false)} 
+      />
       <Modal
-        title="Add API model"
+        title="添加 API 模型"
         open={apiModalOpen}
         onCancel={() => setApiModalOpen(false)}
         onOk={handleAddApiModel}
+        okText="添加"
+        cancelText="取消"
       >
         <div style={{ display: 'grid', gap: 8 }}>
-          <Input placeholder="Model ID" value={apiModelId} onChange={(e) => setApiModelId(e.target.value)} />
+          <Input placeholder="模型 ID" value={apiModelId} onChange={(e) => setApiModelId(e.target.value)} />
           <Input placeholder="Base URL" value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} />
           <Input.Password placeholder="API Key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
         </div>
