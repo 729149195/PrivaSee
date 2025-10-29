@@ -7,19 +7,19 @@
 export const DEFAULT_MODELS_CONFIG = {
   // 直接推理模式的默认模型配置
   directInference: {
-    model: 'qwen2.5:7b-instruct', // 直接推理模式：隐私推理模型
+    model: 'phi4-mini:latest', // 直接推理模式：隐私推理模型
   },
   
   // 提取信息元模式的默认模型配置
   infonExtraction: {
-    extractionModel: 'qwen2.5:7b-instruct', // 提取信息元模式：信息元提取模型
-    privacyInferenceModel: 'qwen2.5:7b-instruct', // 提取信息元模式：隐私推理模型
+    extractionModel: 'phi4-mini:latest', // 提取信息元模式：信息元提取模型
+    privacyInferenceModel: 'phi4-mini:latest', // 提取信息元模式：隐私推理模型
   },
   
   // 共用模型的默认配置
   shared: {
     imageParsingModel: 'qwen3-vl-8b-instruct', // 图片解析模型（共用）
-    protectionSuggestionModel: 'qwen2.5:7b-instruct', // Privacy Protection Suggestions模型（共用，仅限API key模型）
+    protectionSuggestionModel: 'phi4-mini:latest', // Privacy Protection Suggestions模型（共用，仅限API key模型）
   },
   
   // 推断模式的默认值
