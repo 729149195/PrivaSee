@@ -360,13 +360,13 @@ const ModelConfigPanel = ({ visible, onClose }) => {
                 style={{ width: '100%' }}
                 value={protectionSuggestionModel}
                 onChange={setProtectionSuggestionModel}
-                options={apiKeyModels.map(renderModelOption)}
-                placeholder={apiKeyModels.length === 0 ? '没有可用的 API Key 模型' : '选择模型'}
-                disabled={apiKeyModels.length === 0}
+                options={allModels.map(renderModelOption)}
+                placeholder={allModels.length === 0 ? '没有可用的模型' : '选择模型'}
+                disabled={allModels.length === 0}
               />
-              {apiKeyModels.length === 0 && (
+              {allModels.length === 0 && (
                 <div style={{ fontSize: 11, color: '#ef4444', marginTop: 4 }}>
-                  请至少添加一个 API Key 模型以使用隐私保护建议功能
+                  请至少添加一个模型以使用隐私保护建议功能
                 </div>
               )}
             </div>
