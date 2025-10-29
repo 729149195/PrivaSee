@@ -233,102 +233,123 @@ const ModelConfigPanel = ({ visible, onClose }) => {
 
   return (
     <Modal
-      title="设置"
+      title={
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 8 }}>
+          <span>设置</span>
+          <Popconfirm
+            title="确认恢复默认配置"
+            description="这将把所有模型配置重置为默认值，确定继续吗？"
+            onConfirm={handleResetToDefaultModels}
+            okText="确定"
+            cancelText="取消"
+          >
+            <Button 
+              icon={<UndoOutlined />}
+              style={{ fontSize: 12, marginRight: 16 }}
+            >
+              恢复默认
+            </Button>
+          </Popconfirm>
+        </div>
+      }
       open={visible}
       onCancel={onClose}
       footer={null}
       width={700}
       className={styles.modelConfigModal}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {/* 图标说明 */}
         <div style={{ 
           padding: 12, 
           background: 'var(--color-bg-secondary)', 
           borderRadius: 8,
           fontSize: 11,
-          color: 'var(--color-text-tertiary)'
+          color: 'var(--color-text-tertiary)',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 12
         }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>图标说明：</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <FileTextOutlined style={{ fontSize: 12, color: '#3b82f6' }} />
-              <span>文本</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <PictureOutlined style={{ fontSize: 12, color: '#10b981' }} />
-              <span>图像</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <SoundOutlined style={{ fontSize: 12, color: '#f59e0b' }} />
-              <span>音频</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <ThunderboltOutlined style={{ fontSize: 12, color: '#ef4444' }} />
-              <span>思维链</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <KeyOutlined style={{ fontSize: 12, color: '#8b5cf6' }} />
-              <span>API Key 模型</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <DeleteOutlined style={{ fontSize: 11, color: '#94a3b8' }} />
-              <span>删除</span>
-            </div>
+          <div style={{ fontWeight: 600 }}>图标说明：</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <FileTextOutlined style={{ fontSize: 12, color: '#3b82f6' }} />
+            <span>文本</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <PictureOutlined style={{ fontSize: 12, color: '#10b981' }} />
+            <span>图像</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <SoundOutlined style={{ fontSize: 12, color: '#f59e0b' }} />
+            <span>音频</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <ThunderboltOutlined style={{ fontSize: 12, color: '#ef4444' }} />
+            <span>思维链</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <KeyOutlined style={{ fontSize: 12, color: '#8b5cf6' }} />
+            <span>API Key 模型</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <DeleteOutlined style={{ fontSize: 11, color: '#94a3b8' }} />
+            <span>删除</span>
           </div>
         </div>
 
         <Divider style={{ margin: 0 }} />
 
-        {/* 直接推理模式 */}
-        <div>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: 'var(--color-text-primary)' }}>
-            直接推理模式
-          </div>
-          <div style={{ display: 'grid', gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
-                隐私推理模型
+        {/* 推理模式配置 - 双栏布局 */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          {/* 直接推理模式 */}
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: 'var(--color-text-primary)' }}>
+              直接推理模式
+            </div>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
+                  隐私推理模型
+                </div>
+                <Select
+                  style={{ width: '100%' }}
+                  value={directInferenceModel}
+                  onChange={setDirectInferenceModel}
+                  options={allModels.map(renderModelOption)}
+                />
               </div>
-              <Select
-                style={{ width: '100%' }}
-                value={directInferenceModel}
-                onChange={setDirectInferenceModel}
-                options={allModels.map(renderModelOption)}
-              />
             </div>
           </div>
-        </div>
 
-        <Divider style={{ margin: 0 }} />
-
-        {/* 提取信息元模式 */}
-        <div>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: 'var(--color-text-primary)' }}>
-            提取信息元模式
-          </div>
-          <div style={{ display: 'grid', gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
-                信息元提取模型
-              </div>
-              <Select
-                style={{ width: '100%' }}
-                value={infonExtractionModel}
-                onChange={setInfonExtractionModel}
-                options={allModels.map(renderModelOption)}
-              />
+          {/* 提取信息元模式 */}
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: 'var(--color-text-primary)' }}>
+              提取信息元模式
             </div>
-            <div>
-              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
-                隐私推理模型
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
+                  信息元提取模型
+                </div>
+                <Select
+                  style={{ width: '100%' }}
+                  value={infonExtractionModel}
+                  onChange={setInfonExtractionModel}
+                  options={allModels.map(renderModelOption)}
+                />
               </div>
-              <Select
-                style={{ width: '100%' }}
-                value={infonPrivacyInferenceModel}
-                onChange={setInfonPrivacyInferenceModel}
-                options={allModels.map(renderModelOption)}
-              />
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
+                  隐私推理模型
+                </div>
+                <Select
+                  style={{ width: '100%' }}
+                  value={infonPrivacyInferenceModel}
+                  onChange={setInfonPrivacyInferenceModel}
+                  options={allModels.map(renderModelOption)}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -370,32 +391,6 @@ const ModelConfigPanel = ({ visible, onClose }) => {
                 </div>
               )}
             </div>
-          </div>
-        </div>
-
-        <Divider style={{ margin: 0 }} />
-
-        {/* 恢复默认模型配置 */}
-        <div>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: 'var(--color-text-primary)' }}>
-            模型配置管理
-          </div>
-          <Popconfirm
-            title="确认恢复默认配置"
-            description="这将把所有模型配置重置为默认值，确定继续吗？"
-            onConfirm={handleResetToDefaultModels}
-            okText="确定"
-            cancelText="取消"
-          >
-            <Button 
-              icon={<UndoOutlined />}
-              style={{ width: '100%' }}
-            >
-              恢复默认模型配置
-            </Button>
-          </Popconfirm>
-          <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 8 }}>
-            点击此按钮可将所有模型配置恢复为系统默认值
           </div>
         </div>
 
@@ -454,7 +449,7 @@ const ModelConfigPanel = ({ visible, onClose }) => {
           )}
           
           {Object.keys(customProviders || {}).length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {Object.entries(customProviders).map(([id, config]) => (
                 <div key={id} style={{ 
                   padding: 8, 
@@ -500,12 +495,11 @@ const ModelConfigPanel = ({ visible, onClose }) => {
             数据管理
           </div>
           
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 8 }}>
             <Button 
               icon={<DownloadOutlined />} 
               onClick={handleExportData}
               disabled={!currentUser?.id}
-              style={{ flex: 1 }}
             >
               导出我的数据
             </Button>
@@ -515,6 +509,7 @@ const ModelConfigPanel = ({ visible, onClose }) => {
               beforeUpload={handleImportData}
               showUploadList={false}
               disabled={!currentUser?.id}
+              style={{ width: '100%' }}
             >
               <Button 
                 icon={<UploadOutlined />}

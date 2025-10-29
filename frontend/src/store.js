@@ -1465,6 +1465,10 @@ Output format:
     const headers = { 'Content-Type': 'application/json' }
     if (provider?.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`
     
+    // 根据模型类型确定 max_tokens（omni 系列限制为 2048）
+    const isOmniModel = configuredModel.toLowerCase().includes('omni')
+    const maxTokens = isOmniModel ? 2000 : 4096
+    
     console.log(`[Infon Extraction] 使用模型: ${configuredModel}, API: ${baseUrl}`)
 
     const nowISO = new Date().toISOString()
@@ -1489,7 +1493,7 @@ Output format:
           messages, 
           temperature: 0,
           stream: true,
-          max_tokens: 4096, // 限制输出长度
+          max_tokens: maxTokens, // 根据模型限制输出长度
           top_p: 0.95, // 核采样
           frequency_penalty: 0.0,
           presence_penalty: 0.0,
@@ -1706,6 +1710,10 @@ Output format:
         const headers = { 'Content-Type': 'application/json' }
         if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`
         
+        // 根据模型类型确定 max_tokens（omni 系列限制为 2048）
+        const isOmniModel = configuredModel.toLowerCase().includes('omni')
+        const maxTokens = isOmniModel ? 2000 : 4096
+        
         res = await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
@@ -1717,7 +1725,7 @@ Output format:
             messages,
             temperature: 0,
             stream: true,
-            max_tokens: 4096,
+            max_tokens: maxTokens,
             top_p: 0.95,
             frequency_penalty: 0.0,
             presence_penalty: 0.0,
@@ -1938,6 +1946,10 @@ Output format:
     const headers = { 'Content-Type': 'application/json' }
     if (provider?.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`
 
+    // 根据模型类型确定 max_tokens（omni 系列限制为 2048）
+    const isOmniModel = configuredModel.toLowerCase().includes('omni')
+    const maxTokens = isOmniModel ? 2000 : 4096
+
     const nowISO = new Date().toISOString()
     const systemPrompt = buildInfonSystemPrompt(['audio'], nowISO, { currentRound, existingInfons })
     const messages = [
@@ -1960,7 +1972,7 @@ Output format:
           messages, 
           temperature: 0,
           stream: true,
-          max_tokens: 4096, // 限制输出长度
+          max_tokens: maxTokens, // 根据模型限制输出长度
           top_p: 0.95, // 核采样
           frequency_penalty: 0.0,
           presence_penalty: 0.0,
@@ -2165,6 +2177,11 @@ Output format:
         const headers = { 'Content-Type': 'application/json' }
         if (provider?.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`
 
+        // 根据模型类型确定 max_tokens（omni 系列限制为 2048）
+        const currentModelName = get().model.toLowerCase()
+        const isOmniModel = currentModelName.includes('omni')
+        const maxTokens = isOmniModel ? 2000 : 4096
+
         const res = await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
@@ -2176,7 +2193,7 @@ Output format:
             messages: payloadMessages,
             temperature: 0.7,
             stream: true,
-            max_tokens: 4096, // 限制输出长度
+            max_tokens: maxTokens, // 根据模型限制输出长度
             top_p: 0.9, // 核采样
             frequency_penalty: 0.0,
             presence_penalty: 0.0,
@@ -2877,6 +2894,10 @@ Output format:
       const apiUrl = provider ? provider.baseUrl : get().baseUrl
       const apiKey = provider?.apiKey || ''
       
+      // 根据模型类型确定 max_tokens（omni 系列限制为 2048）
+      const isOmniModel = configuredModel.toLowerCase().includes('omni')
+      const maxTokens = isOmniModel ? 2000 : 4096
+      
       // 构建推理提示词（中文注释）：根据模式传递不同的参数
       const { fillPromptTemplate } = await import('./templates/inference.js')
       
@@ -2904,7 +2925,7 @@ Output format:
           messages: [{ role: 'user', content: prompt }],
           stream: true,
           temperature: 0.5, // 适中温度以平衡创造性和准确性
-          max_tokens: 4096, // 限制最大输出tokens，避免过长响应
+          max_tokens: maxTokens, // 根据模型限制最大输出tokens
           top_p: 0.9, // 核采样，提升生成速度和质量
           frequency_penalty: 0.0,
           presence_penalty: 0.0,
@@ -3459,6 +3480,10 @@ Output format:
       const { fillProtectionPrompt } = await import('./templates/protection.js')
       const prompt = fillProtectionPrompt(text, privacyRisks, validInfons)
       
+      // 根据模型类型确定 max_tokens（omni 系列限制为 2048）
+      const isOmniModel = configuredModel.toLowerCase().includes('omni')
+      const maxTokens = isOmniModel ? 2000 : 4096
+      
       console.log(`[Protection] 发起建议生成请求到 ${fullUrl}`)
       console.log(`[Protection] 使用模型: ${configuredModel}`)
       console.log(`[Protection] Prompt 长度: ${prompt.length} 字符`)
@@ -3475,7 +3500,7 @@ Output format:
             messages: [{ role: 'user', content: prompt }],
             stream: true, // 使用流式生成
             temperature: 0.7,
-            max_tokens: 4096,
+            max_tokens: maxTokens,
           }),
           signal: abortController.signal
         })
