@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { buildSystemPrompt } from './templates/infons.js'
 import { loadUserSessions, saveUserSessions } from './users/historyStorage'
 import { getDefaultModelsConfig } from './config/defaultModelsConfig'
+import { getDefaultApiModels, getDefaultApiModelIds } from './config/defaultApiModelsConfig'
 import { getModelModalities } from './utils/modelUtils'
 
 // 说明：
@@ -520,9 +521,9 @@ export const useStore = create((set, get) => ({
   // 基础配置：指向本地 Ollama OpenAI 兼容接口
   baseUrl: '/v1',
   model: 'gemma3:12b',
-  models: [], // 可选模型列表
-  customModels: [], // 通过 API key 添加的自定义模型
-  customProviders: {}, // { [modelId]: { baseUrl, apiKey } }
+  models: [...getDefaultApiModelIds()], // 可选模型列表，初始化时包含内置 API 模型
+  customModels: [...getDefaultApiModelIds()], // 通过 API key 添加的自定义模型，初始化时包含内置 API 模型
+  customProviders: getDefaultApiModels(), // { [modelId]: { baseUrl, apiKey } }，初始化时加载内置 API 模型
 
   // 用户状态标识（中文注释）：用于判断是否启用历史数据持久化
   currentUserId: null,
@@ -1127,14 +1128,7 @@ Output format:
     try {
       // 使用 DeepSeek API 生成标题
       const configuredModel = get().infonExtractionModel || 'deepseek-chat'
-      let provider = get().customProviders?.[configuredModel]
-      
-      if (configuredModel === 'deepseek-chat' && !provider) {
-        try {
-          get().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
-        } catch (_) { }
-        provider = get().customProviders?.[configuredModel]
-      }
+      const provider = get().customProviders?.[configuredModel]
       
       const apiUrl = provider ? provider.baseUrl : get().baseUrl
       const apiKey = provider ? provider.apiKey : null
@@ -1450,15 +1444,7 @@ Output format:
 
     // 使用用户配置的信息元提取模型（中文注释）：优先使用配置，回退到 DeepSeek
     const configuredModel = get().infonExtractionModel || 'deepseek-chat'
-    let provider = get().customProviders?.[configuredModel]
-    
-    // 如果配置的模型是 deepseek-chat 但尚未添加，则自动添加默认配置
-    if (configuredModel === 'deepseek-chat' && !provider) {
-      try {
-        get().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
-      } catch (_) { }
-      provider = get().customProviders?.[configuredModel]
-    }
+    const provider = get().customProviders?.[configuredModel]
     
     // 如果有provider（自定义API模型），使用provider配置；否则使用本地baseUrl（Ollama）
     const baseUrl = provider ? provider.baseUrl : get().baseUrl
@@ -1931,15 +1917,7 @@ Output format:
 
     // 使用用户配置的信息元提取模型（中文注释）：优先使用配置，回退到 DeepSeek
     const configuredModel = get().infonExtractionModel || 'deepseek-chat'
-    let provider = get().customProviders?.[configuredModel]
-    
-    // 如果配置的模型是 deepseek-chat 但尚未添加，则自动添加默认配置
-    if (configuredModel === 'deepseek-chat' && !provider) {
-      try {
-        get().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
-      } catch (_) { }
-      provider = get().customProviders?.[configuredModel]
-    }
+    const provider = get().customProviders?.[configuredModel]
     
     // 如果有provider（自定义API模型），使用provider配置；否则使用本地baseUrl（Ollama）
     const baseUrl = provider ? provider.baseUrl : get().baseUrl
@@ -2880,15 +2858,7 @@ Output format:
       } else {
         configuredModel = get().infonPrivacyInferenceModel || 'deepseek-chat'
       }
-      let provider = get().customProviders?.[configuredModel]
-      
-      // 如果配置的模型是 deepseek-chat 但尚未添加，则自动添加默认配置
-      if (configuredModel === 'deepseek-chat' && !provider) {
-        try {
-          get().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
-        } catch (_) { }
-        provider = get().customProviders?.[configuredModel]
-      }
+      const provider = get().customProviders?.[configuredModel]
       
       // 如果有provider（自定义API模型），使用provider配置；否则使用本地baseUrl（Ollama）
       const apiUrl = provider ? provider.baseUrl : get().baseUrl
@@ -3440,7 +3410,7 @@ Output format:
     try {
       // 使用配置的Privacy Protection Suggestions模型（必须是API key模型）
       const configuredModel = get().protectionSuggestionModel || 'deepseek-chat'
-      let provider = get().customProviders?.[configuredModel]
+      const provider = get().customProviders?.[configuredModel]
       
       // 验证是否是API key模型
       if (!provider) {
@@ -3456,13 +3426,6 @@ Output format:
           }
         }))
         return
-      }
-      
-      if (configuredModel === 'deepseek-chat' && !provider) {
-        try {
-          get().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
-        } catch (_) { }
-        provider = get().customProviders?.[configuredModel]
       }
       
       const apiUrl = provider.baseUrl

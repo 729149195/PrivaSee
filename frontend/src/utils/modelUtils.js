@@ -14,7 +14,7 @@ export function isModelMultimodal(id, customProviders = {}) {
     if (!id) return false
     // 先基于模型 ID 关键词判断：优先识别已知多模态家族
     const s = String(id).toLowerCase()
-    if (/(vision|vl|multi.?modal|llava|idefics|qwen[-_]?vl|qwen.*vl|gpt-?4o|xcomposer|internvl|minicpm-?v|pixtral|gemma[-_]?3|omni)/.test(s)) return true
+    if (/(vision|vl|multi.?modal|llava|idefics|qwen[-_]?vl|qwen.*vl|gpt-?4o|xcomposer|internvl|minicpm-?v|pixtral|gemma[-_]?3|omni|ocr)/.test(s)) return true
     // 自定义提供商（OpenAI 兼容 API）通常不支持图片；若上面未命中则认为是文本
     if (customProviders?.[id]) return false
     return false
@@ -41,7 +41,7 @@ export function getModelModalities(id, customProviders = {}) {
     }
     
     // 图像模态检测
-    if (/(vision|vl|multi.?modal|llava|idefics|qwen[-_]?vl|qwen.*vl|gpt-?4o|xcomposer|internvl|minicpm-?v|pixtral|gemma[-_]?3|omni)/.test(s)) {
+    if (/(vision|vl|multi.?modal|llava|idefics|qwen[-_]?vl|qwen.*vl|gpt-?4o|xcomposer|internvl|minicpm-?v|pixtral|gemma[-_]?3|omni|ocr)/.test(s)) {
       modalities.image = true
     }
     

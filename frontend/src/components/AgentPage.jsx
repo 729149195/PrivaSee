@@ -628,17 +628,7 @@ export default function AgentPage() {
   // 获取当前会话的保护建议（中文注释）
   const suggestions = useMemo(() => (currentSession ? protectionSuggestions?.[currentSession.id] : null), [currentSession, protectionSuggestions])
 
-  // 默认注册内置模型：仅添加一次，已存在则跳过
-  useEffect(() => {
-    try {
-      // DeepSeek
-      useStore.getState().addApiModel?.({ id: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-8c2ee9474f2f44f5969dcd5de280e634' })
-      // Qwen系列
-      useStore.getState().addApiModel?.({ id: 'qwen-flash', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: 'sk-050b8f5117124731a5c962e5890500aa' })
-      useStore.getState().addApiModel?.({ id: 'qwen3-vl-8b-instruct', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: 'sk-050b8f5117124731a5c962e5890500aa' })
-      useStore.getState().addApiModel?.({ id: 'qwen2.5-omni-7b', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: 'sk-050b8f5117124731a5c962e5890500aa' })
-    } catch (_) { }
-  }, [])
+  // 内置模型已在 defaultApiModelsConfig.js 中配置，无需手动注册
   const contextTokensUsed = useMemo(() => estimateTokens(currentSession?.messages || [], model), [currentSession?.messages, model])
   const contextPercent = useMemo(() => {
     if (typeof maxContextTokens !== 'number' || maxContextTokens <= 0) return 0
