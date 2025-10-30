@@ -23,12 +23,12 @@ export const DEFAULT_API_MODELS = {
   },
   
   // DeepSeek OCR 模型（硅基流动）
-  'deepseek-ai/DeepSeek-OCR': {
-    url: 'https://api.siliconflow.cn/v1',
-    model: 'deepseek-ai/DeepSeek-OCR',
-    apikey: 'sk-tjsfubvyogeavgnopvuupghnpdanakzxxsrnqfyxkchadcpc',
-    description: 'DeepSeek OCR - 专业图像文字识别'
-  },
+  // 'deepseek-ai/DeepSeek-OCR': {
+  //   url: 'https://api.siliconflow.cn/v1',
+  //   model: 'deepseek-ai/DeepSeek-OCR',
+  //   apikey: 'sk-tjsfubvyogeavgnopvuupghnpdanakzxxsrnqfyxkchadcpc',
+  //   description: 'DeepSeek OCR - 专业图像文字识别'
+  // },
   
   // Qwen Flash 模型
   'qwen-flash': {
