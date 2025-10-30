@@ -151,12 +151,16 @@ const AudioRecorder = ({ onAudioAdded, disabled = false }) => {
       formData.append('audio', wavBlob, 'recording.wav')
       formData.append('language', 'auto') // 自动检测中英文
       
-      // 使用环境变量或默认到本地服务
-      const whisperUrl = import.meta.env.VITE_WHISPER_URL || 'http://127.0.0.1:5000/api/transcribe'
+      // 使用代理路径避免混合内容问题（HTTPS -> HTTP）
+      // 代理配置：/whisper-api -> http://127.0.0.1:5000/api
+      const whisperUrl = import.meta.env.VITE_WHISPER_URL || '/whisper-api/transcribe'
       
       const response = await fetch(whisperUrl, {
         method: 'POST',
         body: formData,
+        // 不设置 Content-Type，让浏览器自动设置（FormData 需要 multipart/form-data）
+        mode: 'cors', // 明确指定 CORS 模式
+        credentials: 'omit', // 不发送凭证
       })
       
       if (!response.ok) {

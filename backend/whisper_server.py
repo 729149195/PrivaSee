@@ -22,27 +22,19 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # 配置CORS：允许所有来源（开发环境）
-CORS(app, resources={
-    r"/api/*": {
-        "origins": "*",
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"],
-        "expose_headers": ["Content-Type"],
-        "supports_credentials": False,
-        "max_age": 3600
-    }
-})
+# 使用最简单的配置确保跨域请求正常工作
+CORS(app)
 
 # 全局变量：Whisper模型
 whisper_model = None
 MODEL_SIZE = 'base'  # 可选: tiny, base, small, medium, large
 
-# 添加CORS响应头
+# 添加CORS响应头（确保所有响应都包含CORS头）
 @app.after_request
 def after_request(response):
     """为所有响应添加CORS头"""
     response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     response.headers.add('Access-Control-Max-Age', '3600')
     return response

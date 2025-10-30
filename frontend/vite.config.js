@@ -14,6 +14,19 @@ export default defineConfig({
       '*.ts.net'
     ],
     proxy: {
+      // Whisper API 代理 - 必须放在 /api 之前，避免路径冲突
+      '/whisper-api': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/whisper-api/, '/api')
+      },
+      '/whisper': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/whisper/, '')
+      },
       '/api': {
         target: 'http://127.0.0.1:11434',
         changeOrigin: true,
@@ -37,12 +50,6 @@ export default defineConfig({
             try { proxyReq.setHeader('host', '127.0.0.1:11434') } catch (_) {}
           })
         }
-      },
-      '/whisper': {
-        target: 'http://127.0.0.1:5000',
-        changeOrigin: true,
-        secure: false,
-        rewrite: (path) => path.replace(/^\/whisper/, '/api')
       }
     }
   }
