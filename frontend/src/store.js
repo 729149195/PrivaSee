@@ -4,6 +4,7 @@ import { loadUserSessions, saveUserSessions } from './users/historyStorage'
 import { getDefaultModelsConfig } from './config/defaultModelsConfig'
 import { getDefaultApiModels, getDefaultApiModelIds } from './config/defaultApiModelsConfig'
 import { getModelModalities } from './utils/modelUtils'
+import { callDeepseekOcr } from './utils/deepseekOcrApi'
 
 // 说明：
 // 1) 本 store 管理 ChatGPT 风格的多会话、消息流与流式生成状态；
@@ -520,7 +521,7 @@ async function streamOllamaChatResponse(reader, onDelta) {
 export const useStore = create((set, get) => ({
   // 基础配置：指向本地 Ollama OpenAI 兼容接口
   baseUrl: '/v1',
-  model: 'gemma3:12b',
+  model: getDefaultModelsConfig().conversationModel,
   models: [...getDefaultApiModelIds()], // 可选模型列表，初始化时包含内置 API 模型
   customModels: [...getDefaultApiModelIds()], // 通过 API key 添加的自定义模型，初始化时包含内置 API 模型
   customProviders: getDefaultApiModels(), // { [modelId]: { baseUrl, apiKey } }，初始化时加载内置 API 模型
@@ -721,10 +722,11 @@ Output format:
     }
     // 清空会话，重置为一个空会话（无痕模式）
     const emptySession = createEmptySession()
-    set({ 
+    set({
       currentUserId: null,
       sessions: [emptySession],
       currentSessionId: emptySession.id,
+      model: getDefaultModelsConfig().conversationModel, // 重置为默认对话模型
       infonSessions: {},
       privacyInferences: {},
       sessionKeywords: {} // 清空关键词
@@ -734,9 +736,10 @@ Output format:
   // 清除全部记录
   clearAllData: () => {
     const emptySession = createEmptySession()
-    set({ 
+    set({
       sessions: [emptySession],
       currentSessionId: emptySession.id,
+      model: getDefaultModelsConfig().conversationModel, // 重置为默认对话模型
       infonSessions: {},
       privacyInferences: {},
       sessionKeywords: {},
@@ -1002,7 +1005,7 @@ Output format:
         customModels: (state.customModels || []).filter(m => m !== id),
         models: (state.models || []).filter(m => m !== id),
         // 如果删除的是当前选中的模型，切换到默认模型
-        model: state.model === id ? 'gemma3:12b' : state.model,
+        model: state.model === id ? getDefaultModelsConfig().conversationModel : state.model,
         // 如果删除的是配置的模型，重置为默认值
         directInferenceModel: state.directInferenceModel === id ? 'deepseek-chat' : state.directInferenceModel,
         infonExtractionModel: state.infonExtractionModel === id ? 'deepseek-chat' : state.infonExtractionModel,
@@ -2257,6 +2260,145 @@ Output format:
   },
 
   // 发送带图片的多模态消息：立即返回用户消息 ID，流式在后台执行
+  async sendMessageWithDeepSeekOCR(text, selectedCommands, selectedFiles) {
+    const state = get()
+    state._ensureCurrentSession()
+    const session = get().getCurrentSession()
+    if (!session) return
+
+    // 写入用户消息：包含命令标签和文件
+    const userMsgId = generateId()
+
+    // 构建消息内容：文本 + 命令标签
+    let messageContent = text
+    if (selectedCommands.length > 0) {
+      const commandLabels = selectedCommands.map(cmd => `[${cmd.label}]`).join(' ')
+      messageContent = commandLabels + (text ? ' ' + text : '')
+    }
+
+    get()._appendMessage(session.id, {
+      id: userMsgId,
+      role: 'user',
+      content: messageContent,
+      files: selectedFiles, // 保存文件数据用于UI显示
+      commands: selectedCommands, // 保存命令数据
+      createdAt: Date.now(),
+    })
+
+    // 检查模型配置
+    const currentModel = get().model
+    const customProviders = get().customProviders
+    const provider = customProviders?.[currentModel]
+
+    if (!provider) {
+      throw new Error(`模型 ${currentModel} 的配置不存在`)
+    }
+
+    console.log('[sendMessageWithDeepSeekOCR] 开始处理 OCR 请求', {
+      commands: selectedCommands.length,
+      files: selectedFiles.length,
+      text: text
+    })
+
+    // 设置消息状态为处理中
+    get()._updateMessage(session.id, userMsgId, {
+      ocrStatus: 'processing',
+      ocrProgress: 0
+    })
+
+    try {
+      // 处理每个文件
+      const results = []
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const file = selectedFiles[i]
+        const command = selectedCommands[i] || selectedCommands[0] // 如果命令数量少于文件，使用第一个命令
+
+        console.log(`[sendMessageWithDeepSeekOCR] 处理文件 ${i + 1}/${selectedFiles.length}: ${file.name}`)
+
+        try {
+          const result = await callDeepseekOcr({
+            file: file,
+            commandId: command.id,
+            provider: provider,
+            onProgress: ({ value, stage }) => {
+              const progress = Math.round(((i + (value / 100)) / selectedFiles.length) * 100)
+              get()._updateMessage(session.id, userMsgId, {
+                ocrStatus: 'processing',
+                ocrProgress: progress,
+                ocrStage: stage
+              })
+            }
+          })
+
+          results.push({
+            fileName: file.name,
+            command: command.label,
+            result: result
+          })
+
+          console.log(`[sendMessageWithDeepSeekOCR] 文件 ${file.name} 处理完成`)
+        } catch (error) {
+          console.error(`[sendMessageWithDeepSeekOCR] 文件 ${file.name} 处理失败:`, error)
+          results.push({
+            fileName: file.name,
+            command: command.label,
+            error: error.message
+          })
+        }
+      }
+
+      // 生成最终的响应消息
+      const assistantMsgId = generateId()
+      let responseContent = ''
+
+      if (results.length === 1) {
+        const result = results[0]
+        if (result.error) {
+          responseContent = `处理文件 "${result.fileName}" 时出错：${result.error}`
+        } else {
+          responseContent = result.result
+        }
+      } else {
+        responseContent = results.map((result, index) => {
+          const prefix = `文件 ${index + 1} (${result.fileName}) - ${result.command}:\n`
+          if (result.error) {
+            return prefix + `处理出错：${result.error}`
+          } else {
+            return prefix + result.result
+          }
+        }).join('\n\n---\n\n')
+      }
+
+      // 添加助手回复
+      get()._appendMessage(session.id, {
+        id: assistantMsgId,
+        role: 'assistant',
+        content: responseContent,
+        createdAt: Date.now(),
+      })
+
+      // 更新用户消息状态为完成
+      get()._updateMessage(session.id, userMsgId, {
+        ocrStatus: 'completed',
+        ocrProgress: 100
+      })
+
+      console.log('[sendMessageWithDeepSeekOCR] OCR 处理完成')
+      return userMsgId
+
+    } catch (error) {
+      console.error('[sendMessageWithDeepSeekOCR] OCR 处理失败:', error)
+
+      // 更新消息状态为失败
+      get()._updateMessage(session.id, userMsgId, {
+        ocrStatus: 'error',
+        ocrError: error.message
+      })
+
+      throw error
+    }
+  },
+
   async sendMessageWithImages(text, imageDataUrls, audioDataArray = [], imageAnalysisMap = {}) {
     const state = get()
     state._ensureCurrentSession()
@@ -3648,7 +3790,7 @@ Output format:
   // 内部：加载用户历史数据
   _loadUserHistory(userId) {
     try {
-      const data = loadUserSessions(userId)
+      const data = loadUserSessions(userId, getDefaultModelsConfig())
       
       if (data && data.sessions && data.sessions.length > 0) {
         set({
@@ -3661,12 +3803,13 @@ Output format:
           selectedLawIdx: data.selectedLawIdx ?? 0,
           selectedPrivacyItems: data.selectedPrivacyItems || [],
           // 模型配置
-          directInferenceModel: data.directInferenceModel || 'deepseek-chat',
-          infonExtractionModel: data.infonExtractionModel || 'deepseek-chat',
-          infonPrivacyInferenceModel: data.infonPrivacyInferenceModel || 'deepseek-chat',
-          imageParsingModel: data.imageParsingModel || 'gemma3:12b',
-          protectionSuggestionModel: data.protectionSuggestionModel || 'deepseek-chat',
-          inferenceMode: data.inferenceMode || 'extract' // 加载推断模式
+          model: data.conversationModel || getDefaultModelsConfig().conversationModel,
+          directInferenceModel: data.directInferenceModel || getDefaultModelsConfig().directInferenceModel,
+          infonExtractionModel: data.infonExtractionModel || getDefaultModelsConfig().infonExtractionModel,
+          infonPrivacyInferenceModel: data.infonPrivacyInferenceModel || getDefaultModelsConfig().infonPrivacyInferenceModel,
+          imageParsingModel: data.imageParsingModel || getDefaultModelsConfig().imageParsingModel,
+          protectionSuggestionModel: data.protectionSuggestionModel || getDefaultModelsConfig().protectionSuggestionModel,
+          inferenceMode: data.inferenceMode || getDefaultModelsConfig().inferenceMode // 加载推断模式
         })
         console.log('[PrivaSee] 用户历史数据已加载（包含关键词）')
       } else {
@@ -3692,20 +3835,21 @@ Output format:
   // 内部：保存用户历史数据
   _saveUserHistory(userId) {
     try {
-      const { 
-        sessions, 
-        infonSessions, 
-        privacyInferences, 
-        customPrivacyItems, 
-        selectedLawIdx, 
-        selectedPrivacyItems, 
+      const {
+        sessions,
+        infonSessions,
+        privacyInferences,
+        customPrivacyItems,
+        selectedLawIdx,
+        selectedPrivacyItems,
+        model,
         directInferenceModel,
-        infonExtractionModel, 
+        infonExtractionModel,
         infonPrivacyInferenceModel,
         imageParsingModel,
         protectionSuggestionModel,
-        inferenceMode, 
-        sessionKeywords 
+        inferenceMode,
+        sessionKeywords
       } = get()
       
       // 清理不可序列化的字段（中文注释）：移除 abortController
@@ -3718,7 +3862,7 @@ Output format:
         }
       })
       
-      saveUserSessions(userId, sessions, infonSessions, serializableInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, directInferenceModel, infonExtractionModel, infonPrivacyInferenceModel, imageParsingModel, protectionSuggestionModel, inferenceMode, sessionKeywords)
+      saveUserSessions(userId, sessions, infonSessions, serializableInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, model, directInferenceModel, infonExtractionModel, infonPrivacyInferenceModel, imageParsingModel, protectionSuggestionModel, inferenceMode, sessionKeywords)
     } catch (error) {
       console.error('[PrivaSee] 保存用户历史失败:', error)
     }

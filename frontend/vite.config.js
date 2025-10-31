@@ -14,7 +14,14 @@ export default defineConfig({
       '*.ts.net'
     ],
     proxy: {
-      // Whisper API 代理 - 必须放在 /api 之前，避免路径冲突
+      // DeepSeek OCR API 代理 - 端口 5001
+      '/ocr-api': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/ocr-api/, '/api')
+      },
+      // Whisper API 代理 - 端口 5000，必须放在 /api 之前，避免路径冲突
       '/whisper-api': {
         target: 'http://127.0.0.1:5000',
         changeOrigin: true,

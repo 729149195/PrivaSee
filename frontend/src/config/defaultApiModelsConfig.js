@@ -19,23 +19,28 @@ export const DEFAULT_API_MODELS = {
     url: 'https://api.deepseek.com/v1',
     model: 'deepseek-chat',
     apikey: 'sk-8c2ee9474f2f44f5969dcd5de280e634',
-    description: 'DeepSeek Chat - 通用对话和推理'
+    description: 'DeepSeek Chat - 通用对话和推理',
+    contextLength: 32768
   },
   
-  // DeepSeek OCR 模型（硅基流动）
-  // 'deepseek-ai/DeepSeek-OCR': {
-  //   url: 'https://api.siliconflow.cn/v1',
-  //   model: 'deepseek-ai/DeepSeek-OCR',
-  //   apikey: 'sk-tjsfubvyogeavgnopvuupghnpdanakzxxsrnqfyxkchadcpc',
-  //   description: 'DeepSeek OCR - 专业图像文字识别'
-  // },
+  // DeepSeek OCR 模型（本地部署）
+  'deepseek-ocr': {
+    url: 'https://api.siliconflow.cn/v1',
+    model: 'deepseek-ai/DeepSeek-OCR',
+    apikey: 'sk-tjsfubvyogeavgnopvuupghnpdanakzxxsrnqfyxkchadcpc',
+    description: 'DeepSeek OCR - 本地 OCR 服务（支持多种文档处理功能）',
+    contextLength: 32768,
+    isLocal: true,
+    capabilities: ['ocr', 'markdown', 'table', 'formula', 'visual_qa']
+  },
   
   // Qwen Flash 模型
   'qwen-flash': {
     url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen-turbo-latest',
     apikey: 'sk-050b8f5117124731a5c962e5890500aa',
-    description: 'Qwen Flash - 快速响应模型'
+    description: 'Qwen Flash - 快速响应模型',
+    contextLength: 131072
   },
   
   // Qwen3 VL 8B 模型
@@ -43,7 +48,8 @@ export const DEFAULT_API_MODELS = {
     url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen-vl-max-latest',
     apikey: 'sk-050b8f5117124731a5c962e5890500aa',
-    description: 'Qwen3 VL 8B - 视觉语言模型'
+    description: 'Qwen3 VL 8B - 视觉语言模型',
+    contextLength: 32768
   },
   
   // Qwen 2.5 Omni 7B 模型
@@ -51,26 +57,28 @@ export const DEFAULT_API_MODELS = {
     url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen2.5-omni-7b-instruct',
     apikey: 'sk-050b8f5117124731a5c962e5890500aa',
-    description: 'Qwen 2.5 Omni 7B - 多模态模型'
+    description: 'Qwen 2.5 Omni 7B - 多模态模型',
+    contextLength: 32768
   },
 }
 
 /**
  * 获取所有内置 API 模型配置（转换为 customProviders 格式）
- * @returns {Object} API 模型配置对象，格式：{ modelId: { baseUrl, apiKey } }
+ * @returns {Object} API 模型配置对象，格式：{ modelId: { baseUrl, apiKey, modelId, description, contextLength } }
  */
 export const getDefaultApiModels = () => {
   const result = {}
-  
+
   Object.entries(DEFAULT_API_MODELS).forEach(([id, config]) => {
     result[id] = {
       baseUrl: config.url,
       apiKey: config.apikey,
       modelId: config.model,
-      description: config.description
+      description: config.description,
+      contextLength: config.contextLength
     }
   })
-  
+
   return result
 }
 
@@ -82,12 +90,13 @@ export const getDefaultApiModels = () => {
 export const getApiModelConfig = (modelId) => {
   const config = DEFAULT_API_MODELS[modelId]
   if (!config) return null
-  
+
   return {
     baseUrl: config.url,
     apiKey: config.apikey,
     modelId: config.model,
-    description: config.description
+    description: config.description,
+    contextLength: config.contextLength
   }
 }
 

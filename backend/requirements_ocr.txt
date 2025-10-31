@@ -1,0 +1,28 @@
+# DeepSeek-OCR 服务依赖包
+# Python 3.10+
+
+# 深度学习框架
+torch==2.6.0
+transformers==4.47.1
+tokenizers==0.21.0
+
+# Flash Attention (加速推理)
+# 注意：需要 CUDA 11.8+ 和 GPU 支持
+# 如果没有 GPU，可以不安装此包（模型会自动降级）
+# flash-attn==2.7.3  # 需要单独安装：pip install flash-attn==2.7.3 --no-build-isolation
+
+# 图像处理
+Pillow==11.0.0
+
+# Web 服务
+flask==3.0.0
+flask-cors==4.0.0
+
+# 工具库
+einops
+addict
+easydict
+
+# 通用依赖（可能已在 whisper 环境中安装）
+numpy==1.26.3
+

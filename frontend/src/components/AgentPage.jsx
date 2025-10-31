@@ -180,6 +180,8 @@ export default function AgentPage() {
   const [input, setInput] = useState('')
   const [landingInput, setLandingInput] = useState('')
   const [selectedAudios, setSelectedAudios] = useState([]) // 已选择的音频
+  const [selectedFiles, setSelectedFiles] = useState([]) // 已选择的文件（deepseek-ocr模式）
+  const [selectedCommand, setSelectedCommand] = useState(null) // 已选择的命令（deepseek-ocr模式）
   const mainScrollRef = useRef(null) // 主滚动区域
   const leftPaneScrollRef = useRef(null) // 左侧面板滚动区域
   const [maxContextTokens, setMaxContextTokens] = useState(null)
@@ -692,49 +694,57 @@ export default function AgentPage() {
     } catch (_) { }
   }, [model, models, contextHasImages, selectedImages, setModel, isModelMultimodal])
 
-  // 根据当前模型查询实际上下文窗口（中文注释）：优先 /api/show，其次 /v1/models
+  // 根据当前模型查询实际上下文窗口（中文注释）：优先 API模型预定义值，其次 /api/show，再次 /v1/models
   useEffect(() => {
     const fetchCtx = async () => {
       try {
-        const apiBase = (baseUrl || '').replace(/\/?v1\/?$/, '/api')
         let ctxVal = null
 
-        // 优先：Ollama /api/show
-        try {
-          const res = await fetch(`${apiBase}/show`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: model }),
-          })
-          if (res.ok) {
-            const j = await res.json().catch(() => ({}))
-            const pickNum = (v) => {
-              if (typeof v === 'number') return v
-              if (typeof v === 'string') {
-                const n = parseInt(v, 10)
-                return Number.isFinite(n) ? n : null
+        // 优先：检查是否是 API 模型，有预定义的 contextLength
+        const apiProvider = customProviders?.[model]
+        if (apiProvider && typeof apiProvider.contextLength === 'number') {
+          ctxVal = apiProvider.contextLength
+        }
+
+        // 如果不是 API 模型或没有预定义值，则尝试查询 Ollama /api/show
+        if (!ctxVal) {
+          const apiBase = (baseUrl || '').replace(/\/?v1\/?$/, '/api')
+          try {
+            const res = await fetch(`${apiBase}/show`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: model }),
+            })
+            if (res.ok) {
+              const j = await res.json().catch(() => ({}))
+              const pickNum = (v) => {
+                if (typeof v === 'number') return v
+                if (typeof v === 'string') {
+                  const n = parseInt(v, 10)
+                  return Number.isFinite(n) ? n : null
+                }
+                return null
               }
-              return null
-            }
-            ctxVal = (
-              pickNum(j?.parameters?.num_ctx) ||
-              pickNum(j?.details?.context_length) ||
-              pickNum(j?.model_info?.context) ||
-              pickNum(j?.model_info?.num_ctx) ||
-              pickNum(j?.context) ||
-              null
-            )
-            // 额外扫描 model_info 中的可能键（如 llama.context_length 等）
-            if (!ctxVal && j && typeof j === 'object' && j.model_info && typeof j.model_info === 'object') {
-              for (const [k, v] of Object.entries(j.model_info)) {
-                if (/(context|num_ctx|max_context|max_tokens)/i.test(String(k))) {
-                  const n = pickNum(v)
-                  if (n && n > 0) { ctxVal = n; break }
+              ctxVal = (
+                pickNum(j?.parameters?.num_ctx) ||
+                pickNum(j?.details?.context_length) ||
+                pickNum(j?.model_info?.context) ||
+                pickNum(j?.model_info?.num_ctx) ||
+                pickNum(j?.context) ||
+                null
+              )
+              // 额外扫描 model_info 中的可能键（如 llama.context_length 等）
+              if (!ctxVal && j && typeof j === 'object' && j.model_info && typeof j.model_info === 'object') {
+                for (const [k, v] of Object.entries(j.model_info)) {
+                  if (/(context|num_ctx|max_context|max_tokens)/i.test(String(k))) {
+                    const n = pickNum(v)
+                    if (n && n > 0) { ctxVal = n; break }
+                  }
                 }
               }
             }
-          }
-        } catch (_) { }
+          } catch (_) { }
+        }
 
         // 回退：OpenAI 兼容 /v1/models（某些服务会返回 context_length 等）
         if (!ctxVal) {
@@ -769,7 +779,7 @@ export default function AgentPage() {
       } catch (_) { }
     }
     fetchCtx()
-  }, [baseUrl, model])
+  }, [baseUrl, model, customProviders])
 
   const contextLabel = useMemo(() => {
     if (typeof maxContextTokens === 'number' && maxContextTokens > 0) {
@@ -938,16 +948,18 @@ export default function AgentPage() {
   const handleSend = async () => {
     // 隐私保护流程未完成时禁止发送（中文注释）
     if (sendLockState.locked) return
-    
+
     const text = (input || '').trim()
     // 提取图片 URL（兼容字符串和对象格式）
     const imgs = selectedImages.map(img => typeof img === 'string' ? img : img.url)
     const audios = [...selectedAudios]
     const hasImages = imgs.length > 0
     const hasAudios = audios.length > 0
-    
-    // 检查是否有内容（文本、图片或音频）
-    if (!text && !hasImages && !hasAudios) return
+    const hasFiles = selectedFiles.length > 0
+    const hasCommand = selectedCommand != null
+
+    // 检查是否有内容（文本、图片、音频、文件或命令）
+    if (!text && !hasImages && !hasAudios && !hasFiles && !hasCommand) return
     
     // 在发送前，先获取当前的 pending runs 用于后续签名计算
     const currentRuns = infonSessions?.[currentSession.id]?.runs || []
@@ -970,7 +982,31 @@ export default function AgentPage() {
       })
     }
     
-    if (hasImages || hasAudios) {
+    if (model === 'deepseek-ocr') {
+      // deepseek-ocr 模式：处理命令和文件
+      const userId = await useStore.getState().sendMessageWithDeepSeekOCR(text, selectedCommand ? [selectedCommand] : [], selectedFiles)
+      try {
+        // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
+        if (pendingRunIds.length > 0) {
+          const messageSignature = pendingRunIds.join('|')
+          lastInferenceRunCountRef.current = messageSignature
+          console.log('[Send] 提前更新签名，避免重复推理', { signature: messageSignature })
+        }
+
+        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
+        if (result.adopted === 0 && inferenceMode === 'extract') {
+          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
+          startMessageInfons?.(userId)
+        }
+      } catch (_) {}
+      // 清空输入、命令和文件
+      setInput('')
+      setSelectedCommand(null)
+      setSelectedFiles([])
+      // 清空 pending 图片（直接推断模式）
+      useStore.getState().setPendingImages([])
+      // 标志会在 useEffect 中检测并重置
+    } else if (hasImages || hasAudios) {
       const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios, imageAnalysisMap)
       try {
         // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
@@ -979,7 +1015,7 @@ export default function AgentPage() {
           lastInferenceRunCountRef.current = messageSignature
           console.log('[Send] 提前更新签名，避免重复推理', { signature: messageSignature })
         }
-        
+
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
         if (result.adopted === 0 && inferenceMode === 'extract') {
           // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
@@ -1002,7 +1038,7 @@ export default function AgentPage() {
           lastInferenceRunCountRef.current = messageSignature
           console.log('[Send] 提前更新签名，避免重复推理', { signature: messageSignature })
         }
-        
+
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
         if (result.adopted === 0 && inferenceMode === 'extract') {
           // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
@@ -1266,9 +1302,16 @@ export default function AgentPage() {
       pendingTimerRef.current = null
     }
     
-    // 若无输入也无图片也无音频，则清空旧的 pending 并返回（中文注释）
+    // 若无输入也无图片也无音频也无文件，也无有效的命令标签，则清空旧的 pending 并返回（中文注释）
     // 但如果正在采纳pending信息元（发送消息过程中），则不清空
-    if (!textToUse && imgs.length === 0 && audios.length === 0) {
+    // deepseek-ocr模式下，只有命令标签而没有实际文本内容时，也不触发隐私推理
+    const hasValidContent = textToUse ||
+      imgs.length > 0 ||
+      audios.length > 0 ||
+      selectedFiles.length > 0 ||
+      (model === 'deepseek-ocr' ? false : false) // deepseek-ocr的命令标签不算有效内容
+
+    if (!hasValidContent) {
       setIsWaitingForDebounce(false)
       if (!isAdoptingPendingRef.current) {
         try { clearAllPendingInfons?.() } catch (_) {}
@@ -1448,6 +1491,12 @@ export default function AgentPage() {
                     renderHighlightedText={renderHighlightedText}
                     inferenceMode={inferenceMode}
                     processImageUpload={processImageUpload}
+                    model={model}
+                    selectedFiles={selectedFiles}
+                    setSelectedFiles={setSelectedFiles}
+                    onRemoveFile={(index) => setSelectedFiles((prev) => prev.filter((_, i) => i !== index))}
+                    selectedCommand={selectedCommand}
+                    setSelectedCommand={setSelectedCommand}
                   />
                 )}
               </div>
@@ -1477,6 +1526,12 @@ export default function AgentPage() {
                   renderHighlightedText={renderHighlightedText}
                   inferenceMode={inferenceMode}
                   processImageUpload={processImageUpload}
+                  model={model}
+                  selectedFiles={selectedFiles}
+                  setSelectedFiles={setSelectedFiles}
+                  onRemoveFile={(index) => setSelectedFiles((prev) => prev.filter((_, i) => i !== index))}
+                  selectedCommand={selectedCommand}
+                  setSelectedCommand={setSelectedCommand}
                 />
               )}
             </Splitter.Panel>
