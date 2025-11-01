@@ -95,8 +95,9 @@ const LandingView = ({
 
   // 监听输入变化，检测斜杠命令
   const handleInputChange = (newValue) => {
-    // 检测是否输入了单个 "/" 且当前模型是 deepseek-ocr
-    if (newValue === '/' && model === 'deepseek-ocr') {
+    // 检测是否输入了单个 "/" 且当前模型是 OCR 模式
+    const isOcrMode = model === 'deepseek-ocr' || model === 'deepseek-ocr-local'
+    if (newValue === '/' && isOcrMode) {
       // 计算命令菜单位置
       setTimeout(() => {
         // 尝试多种方式找到输入框（HighlightInput 使用 contentEditable div）
@@ -214,8 +215,9 @@ const LandingView = ({
 
     setShowDocumentUploader(false)
 
-    if (model === 'deepseek-ocr') {
-      // deepseek-ocr 模式：将文件添加到 selectedFiles
+    const isOcrMode = model === 'deepseek-ocr' || model === 'deepseek-ocr-local'
+    if (isOcrMode) {
+      // OCR 模式：将文件添加到 selectedFiles
       const file = files[0]
       const fileData = {
         id: Date.now() + '_' + Math.random(),
@@ -322,8 +324,8 @@ const LandingView = ({
             ))}
           </div>
         )}
-        {/* 文件预览（deepseek-ocr模式） */}
-        {model === 'deepseek-ocr' && selectedFiles.length > 0 && (
+        {/* 文件预览（OCR模式） */}
+        {(model === 'deepseek-ocr' || model === 'deepseek-ocr-local') && selectedFiles.length > 0 && (
           <div
             className={styles.composerFiles}
             style={{
@@ -420,8 +422,8 @@ const LandingView = ({
         )}
         <div className={styles.landingInputArea}>
           <div className={styles.landingControls}>
-            {model === 'deepseek-ocr' ? (
-              // deepseek-ocr 模式：显示文件上传按钮 + 功能标签
+            {(model === 'deepseek-ocr' || model === 'deepseek-ocr-local') ? (
+              // OCR 模式：显示文件上传按钮 + 功能标签
               <>
                 <Button
                   icon={<PlusOutlined />}
@@ -582,7 +584,7 @@ const LandingView = ({
             <HighlightInput
               className={styles.landingInput}
               placeholder={
-                model === 'deepseek-ocr' && landingInput.trim() === ''
+                (model === 'deepseek-ocr' || model === 'deepseek-ocr-local') && landingInput.trim() === ''
                   ? "Type your question (输入 / 使用 OCR 功能)..."
                   : "Type your question..."
               }
@@ -597,8 +599,8 @@ const LandingView = ({
               icon={sendLockState.stage === 'ready' ? <SendOutlined /> : null}
               onClick={onSend}
               disabled={
-                (model === 'deepseek-ocr'
-                  ? (!landingInput.trim() && selectedFiles.length === 0)
+                ((model === 'deepseek-ocr' || model === 'deepseek-ocr-local')
+                  ? (!landingInput.trim() && selectedFiles.length === 0 && !selectedCommand)
                   : (!landingInput.trim() && selectedImages.length === 0 && selectedAudios.length === 0)
                 ) || sendLockState.locked
               }

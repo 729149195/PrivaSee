@@ -216,8 +216,9 @@ const MessageComposer = ({
 
     setShowDocumentUploader(false)
 
-    if (model === 'deepseek-ocr') {
-      // deepseek-ocr 模式：将文件添加到 selectedFiles
+    const isOcrMode = model === 'deepseek-ocr' || model === 'deepseek-ocr-local'
+    if (isOcrMode) {
+      // OCR 模式：将文件添加到 selectedFiles
       const file = files[0]
       const fileData = {
         id: Date.now() + '_' + Math.random(),
@@ -316,8 +317,8 @@ const MessageComposer = ({
             ))}
           </div>
         )}
-        {/* 文件预览在输入框上方（deepseek-ocr模式） */}
-        {model === 'deepseek-ocr' && selectedFiles.length > 0 && (
+        {/* 文件预览在输入框上方（OCR模式） */}
+        {(model === 'deepseek-ocr' || model === 'deepseek-ocr-local') && selectedFiles.length > 0 && (
           <div
             className={styles.composerFiles}
             style={{
@@ -416,7 +417,7 @@ const MessageComposer = ({
           <HighlightInput
             className={styles.composerInput}
             placeholder={
-              model === 'deepseek-ocr' && input.trim() === ''
+              (model === 'deepseek-ocr' || model === 'deepseek-ocr-local') && input.trim() === ''
                 ? "Message ChatGPT (输入 / 使用 OCR 功能)"
                 : "Message ChatGPT"
             }
@@ -428,8 +429,8 @@ const MessageComposer = ({
             disabled={isEditingMessage}
           />
           <div className={styles.composerButtons}>
-            {model === 'deepseek-ocr' ? (
-              // deepseek-ocr 模式：显示文件上传按钮 + 功能标签
+            {(model === 'deepseek-ocr' || model === 'deepseek-ocr-local') ? (
+              // OCR 模式：显示文件上传按钮 + 功能标签
               <>
                 <Button
                   icon={<PlusOutlined />}
@@ -592,7 +593,7 @@ const MessageComposer = ({
                 type={sendLockState.locked ? "default" : "primary"}
                 icon={sendLockState.stage === 'ready' ? <SendOutlined /> : null}
                 disabled={
-                  (model === 'deepseek-ocr'
+                  ((model === 'deepseek-ocr' || model === 'deepseek-ocr-local')
                     ? (!input.trim() && selectedFiles.length === 0 && !selectedCommand)
                     : (!input.trim() && selectedImages.length === 0 && selectedAudios.length === 0)
                   ) || sendLockState.locked

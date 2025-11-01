@@ -1504,7 +1504,7 @@ Output format:
       // Debounce配置：减少解析频率
       let parseTimer = null
       let lastParseTime = 0
-      const PARSE_DEBOUNCE_MS = 100
+      const PARSE_DEBOUNCE_MS = 200
 
       await streamOpenAIResponse(reader, async ({ content, finish }) => {
         if (typeof content === 'string' && content.length) {
@@ -1975,7 +1975,7 @@ Output format:
       // Debounce配置：减少解析频率
       let parseTimer = null
       let lastParseTime = 0
-      const PARSE_DEBOUNCE_MS = 100
+      const PARSE_DEBOUNCE_MS = 200
 
       await streamOpenAIResponse(reader, async ({ content, finish }) => {
         if (typeof content === 'string' && content.length) {
@@ -2269,18 +2269,38 @@ Output format:
     // 写入用户消息：包含命令标签和文件
     const userMsgId = generateId()
 
-    // 构建消息内容：文本 + 命令标签
-    let messageContent = text
-    if (selectedCommands.length > 0) {
-      const commandLabels = selectedCommands.map(cmd => `[${cmd.label}]`).join(' ')
-      messageContent = commandLabels + (text ? ' ' + text : '')
-    }
+    // 将 File 对象转换为可序列化的格式（包含 data URL）
+    const serializableFiles = await Promise.all(
+      selectedFiles.map(async (fileData) => {
+        const file = fileData.file
+        if (!file) return fileData
+
+        // 读取文件内容为 data URL
+        const dataUrl = await new Promise((resolve) => {
+          const reader = new FileReader()
+          reader.onload = (e) => resolve(e.target.result)
+          reader.onerror = () => resolve(null)
+          reader.readAsDataURL(file)
+        })
+
+        return {
+          id: fileData.id,
+          name: fileData.name,
+          size: fileData.size,
+          type: fileData.type,
+          dataUrl: dataUrl // 保存 data URL，用于持久化和预览
+        }
+      })
+    )
+
+    // 消息内容只保留文本，不包含标签文本
+    const messageContent = text || ''
 
     get()._appendMessage(session.id, {
       id: userMsgId,
       role: 'user',
       content: messageContent,
-      files: selectedFiles, // 保存文件数据用于UI显示
+      files: serializableFiles, // 保存文件数据用于UI显示
       commands: selectedCommands, // 保存命令数据
       createdAt: Date.now(),
     })
@@ -2307,17 +2327,18 @@ Output format:
     })
 
     try {
-      // 处理每个文件
+      // 处理每个文件（使用原始的selectedFiles，因为需要File对象）
       const results = []
       for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i]
+        const fileData = selectedFiles[i]
+        const file = fileData.file // 获取原始 File 对象
         const command = selectedCommands[i] || selectedCommands[0] // 如果命令数量少于文件，使用第一个命令
 
-        console.log(`[sendMessageWithDeepSeekOCR] 处理文件 ${i + 1}/${selectedFiles.length}: ${file.name}`)
+        console.log(`[sendMessageWithDeepSeekOCR] 处理文件 ${i + 1}/${selectedFiles.length}: ${fileData.name}`)
 
         try {
           const result = await callDeepseekOcr({
-            file: file,
+            file: file, // 传入原始 File 对象
             commandId: command.id,
             provider: provider,
             onProgress: ({ value, stage }) => {
@@ -3061,7 +3082,7 @@ Output format:
       // Debounce配置：减少解析频率，提升性能
       let parseTimer = null
       let lastParseTime = 0
-      const PARSE_DEBOUNCE_MS = 100 // 100ms debounce间隔
+      const PARSE_DEBOUNCE_MS = 200 // 100ms debounce间隔
       
       // 定义解析函数（复用逻辑）
       const performParsing = async () => {

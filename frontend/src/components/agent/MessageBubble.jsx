@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Button, Tooltip } from 'antd'
 import { CopyOutlined, EditOutlined, RedoOutlined } from '@ant-design/icons'
 import styles from '../AgentPage.module.css'
@@ -7,6 +7,9 @@ import RelationConnections from './RelationConnections'
 import RelationTags from './RelationTags'
 import MessageEditor from './MessageEditor'
 import AudioTag from './AudioTag'
+import DocumentTag from './DocumentTag'
+import CommandTag from './CommandTag'
+import DocumentPreviewModal from './DocumentPreviewModal'
 
 // 导入 vite.svg 图标
 const ViteIcon = '/vite.svg'
@@ -72,6 +75,7 @@ const MessageBubble = ({
   processImageUpload
 }) => {
   const isEditing = editingMessageId === message.id
+  const [previewFile, setPreviewFile] = useState(null)
 
   // 辅助函数：从消息内容中移除 <audio>...</audio> 标签
   // 音频转写文本完全通过 AudioTag 组件显示
@@ -86,9 +90,10 @@ const MessageBubble = ({
 
   if (isUser) {
     return (
-      <div className={`${styles.msgRow} ${styles.rowUser}`}>
-        <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-          {isEditing ? (
+      <>
+        <div className={`${styles.msgRow} ${styles.rowUser}`}>
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+            {isEditing ? (
             <MessageEditor
               editingContent={editingContent}
               setEditingContent={setEditingContent}
@@ -116,6 +121,26 @@ const MessageBubble = ({
               <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`} style={{ position: 'relative' }}>
                 {messageRelations.length > 0 && (
                   <RelationConnections messageId={message.id} relations={messageRelations} infonIndex={infonIndex} />
+                )}
+                {/* 命令标签 */}
+                {Array.isArray(message.commands) && message.commands.length > 0 && (
+                  <div style={{ marginBottom: '8px' }}>
+                    {message.commands.map((command, idx) => (
+                      <CommandTag key={command.id || idx} command={command} />
+                    ))}
+                  </div>
+                )}
+                {/* 文档标签 */}
+                {Array.isArray(message.files) && message.files.length > 0 && (
+                  <div style={{ marginBottom: '8px' }}>
+                    {message.files.map((file, idx) => (
+                      <DocumentTag 
+                        key={file.id || idx} 
+                        file={file} 
+                        onClick={() => setPreviewFile(file)}
+                      />
+                    ))}
+                  </div>
                 )}
                 {displayContent && (
                   <div className={styles.msgContent} style={{ position: 'relative', zIndex: 2 }}>
@@ -183,6 +208,12 @@ const MessageBubble = ({
         </div>
         <div className={styles.avatar}>U</div>
       </div>
+      {/* 文档预览 Modal */}
+      <DocumentPreviewModal 
+        file={previewFile} 
+        onClose={() => setPreviewFile(null)} 
+      />
+    </>
     )
   }
 

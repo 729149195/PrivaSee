@@ -982,8 +982,11 @@ export default function AgentPage() {
       })
     }
     
-    if (model === 'deepseek-ocr') {
-      // deepseek-ocr 模式：处理命令和文件
+    // 判断是否是 OCR 模式（包括 API 和本地版本）
+    const isOcrMode = model === 'deepseek-ocr' || model === 'deepseek-ocr-local'
+    
+    if (isOcrMode) {
+      // OCR 模式：处理命令和文件
       const userId = await useStore.getState().sendMessageWithDeepSeekOCR(text, selectedCommand ? [selectedCommand] : [], selectedFiles)
       try {
         // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
@@ -1081,9 +1084,11 @@ export default function AgentPage() {
     const audios = [...selectedAudios]
     const hasImages = imgs.length > 0
     const hasAudios = audios.length > 0
+    const hasFiles = selectedFiles.length > 0
+    const hasCommand = selectedCommand != null
     
-    // 检查是否有内容（文本、图片或音频）
-    if (!text && !hasImages && !hasAudios) return
+    // 检查是否有内容（文本、图片、音频、文件或命令）
+    if (!text && !hasImages && !hasAudios && !hasFiles && !hasCommand) return
     
     // 在发送前，先获取当前的 pending runs 用于后续签名计算
     const currentRuns = infonSessions?.[currentSession.id]?.runs || []
@@ -1106,7 +1111,34 @@ export default function AgentPage() {
       })
     }
     
-    if (hasImages || hasAudios) {
+    // 判断是否是 OCR 模式（包括 API 和本地版本）
+    const isOcrMode = model === 'deepseek-ocr' || model === 'deepseek-ocr-local'
+    
+    if (isOcrMode) {
+      // OCR 模式：处理命令和文件
+      const userId = await useStore.getState().sendMessageWithDeepSeekOCR(text, selectedCommand ? [selectedCommand] : [], selectedFiles)
+      try {
+        // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
+        if (pendingRunIds.length > 0) {
+          const messageSignature = pendingRunIds.join('|')
+          lastInferenceRunCountRef.current = messageSignature
+          console.log('[LandingSend] 提前更新签名，避免重复推理', { signature: messageSignature })
+        }
+
+        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
+        if (result.adopted === 0 && inferenceMode === 'extract') {
+          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
+          startMessageInfons?.(userId)
+        }
+      } catch (_) {}
+      // 清空输入、命令和文件
+      setLandingInput('')
+      setSelectedCommand(null)
+      setSelectedFiles([])
+      // 清空 pending 图片（直接推断模式）
+      useStore.getState().setPendingImages([])
+      // 标志会在 useEffect 中检测并重置
+    } else if (hasImages || hasAudios) {
       const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios, imageAnalysisMap)
       try {
         // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
@@ -1309,7 +1341,7 @@ export default function AgentPage() {
       imgs.length > 0 ||
       audios.length > 0 ||
       selectedFiles.length > 0 ||
-      (model === 'deepseek-ocr' ? false : false) // deepseek-ocr的命令标签不算有效内容
+      ((model === 'deepseek-ocr' || model === 'deepseek-ocr-local') ? false : false) // OCR模式的命令标签不算有效内容
 
     if (!hasValidContent) {
       setIsWaitingForDebounce(false)

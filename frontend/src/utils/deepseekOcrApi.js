@@ -94,57 +94,61 @@ export async function callDeepseekOcr({
     max_tokens: 2048
   }
 
-  let response
-  try {
-    response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-      signal
-    })
-  } catch (error) {
-    throw new Error(`网络请求失败: ${error.message || error}`)
-  }
+  // ========== API 调用已注释掉，只使用本地 deepseek-ocr-local ==========
+  // let response
+  // try {
+  //   response = await fetch(`${baseUrl}/chat/completions`, {
+  //     method: 'POST',
+  //     headers,
+  //     body: JSON.stringify(payload),
+  //     signal
+  //   })
+  // } catch (error) {
+  //   throw new Error(`网络请求失败: ${error.message || error}`)
+  // }
 
-  if (!response.ok) {
-    let errMessage = `HTTP ${response.status}`
-    try {
-      const errJson = await response.json()
-      if (errJson?.error?.message) {
-        errMessage = errJson.error.message
-      } else if (errJson?.error) {
-        errMessage = typeof errJson.error === 'string' ? errJson.error : JSON.stringify(errJson.error)
-      }
-    } catch (_) {
-      try {
-        const errText = await response.text()
-        if (errText) errMessage = errText
-      } catch (_) {}
-    }
-    throw new Error(`OCR 处理失败: ${errMessage}`)
-  }
+  // if (!response.ok) {
+  //   let errMessage = `HTTP ${response.status}`
+  //   try {
+  //     const errJson = await response.json()
+  //     if (errJson?.error?.message) {
+  //       errMessage = errJson.error.message
+  //     } else if (errJson?.error) {
+  //       errMessage = typeof errJson.error === 'string' ? errJson.error : JSON.stringify(errJson.error)
+  //     }
+  //   } catch (_) {
+  //     try {
+  //       const errText = await response.text()
+  //       if (errText) errMessage = errText
+  //     } catch (_) {}
+  //   }
+  //   throw new Error(`OCR 处理失败: ${errMessage}`)
+  // }
 
-  reportProgress(70, '解析结果...')
+  // reportProgress(70, '解析结果...')
 
-  let data
-  try {
-    data = await response.json()
-  } catch (error) {
-    throw new Error(`解析响应失败: ${error.message || error}`)
-  }
+  // let data
+  // try {
+  //   data = await response.json()
+  // } catch (error) {
+  //   throw new Error(`解析响应失败: ${error.message || error}`)
+  // }
 
-  const text = data?.choices?.[0]?.message?.content?.trim()
-  if (!text) {
-    throw new Error('OCR 接口未返回文本内容')
-  }
+  // const text = data?.choices?.[0]?.message?.content?.trim()
+  // if (!text) {
+  //   throw new Error('OCR 接口未返回文本内容')
+  // }
 
-  reportProgress(100, '处理完成')
+  // reportProgress(100, '处理完成')
 
-  return {
-    text,
-    raw: data,
-    command
-  }
+  // return {
+  //   text,
+  //   raw: data,
+  //   command
+  // }
+  
+  // 现在只使用本地的 deepseek-ocr-local，API 调用已禁用
+  throw new Error('API 版本的 deepseek-ocr 已被禁用，请使用 deepseek-ocr-local 本地版本')
 }
 
 export async function callDeepseekOcrBatch({ files, commandId, provider, signal, onProgress }) {

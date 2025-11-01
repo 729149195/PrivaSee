@@ -26,7 +26,7 @@ export const DEFAULT_API_MODELS = {
   // DeepSeek OCR 模型（本地部署）
   // 注意：需要先启动本地 DeepSeek-OCR 服务器（端口5001）
   // 运行: bash backend/start_deepseek_ocr_new.sh
-  'deepseek-ocr-local': {
+  'deepseek-ocr': {
     url: 'http://localhost:5001/api',
     model: 'deepseek-ai/DeepSeek-OCR',
     apikey: '',
@@ -35,15 +35,15 @@ export const DEFAULT_API_MODELS = {
     capabilities: ['ocr', 'markdown', 'table', 'formula', 'visual_qa']
   },
 
-  // DeepSeek OCR 模型（使用 SiliconFlow - 尝试不同的模型名称）
-  'deepseek-ocr': {
-    url: 'https://api.siliconflow.cn/v1',
-    model: 'Qwen/Qwen2-VL-7B-Instruct',
-    apikey: 'sk-tjsfubvyogeavgnopvuupghnpdanakzxxsrnqfyxkchadcpc',
-    description: 'DeepSeek OCR （基于 Qwen2-VL，支持文档处理）',
-    contextLength: 32768,
-    capabilities: ['ocr', 'markdown', 'table', 'formula', 'visual_qa']
-  },
+  // ========== DeepSeek OCR API 版本已禁用，只使用本地版本 ==========
+  // 'deepseek-ocr': {
+  //   url: 'https://api.siliconflow.cn/v1',
+  //   model: 'Qwen/Qwen2-VL-7B-Instruct',
+  //   apikey: 'sk-tjsfubvyogeavgnopvuupghnpdanakzxxsrnqfyxkchadcpc',
+  //   description: 'DeepSeek OCR （基于 Qwen2-VL，支持文档处理）',
+  //   contextLength: 32768,
+  //   capabilities: ['ocr', 'markdown', 'table', 'formula', 'visual_qa']
+  // },
   
   // Qwen Flash 模型
   'qwen-flash': {
