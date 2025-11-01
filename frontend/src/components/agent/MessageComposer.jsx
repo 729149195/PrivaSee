@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Button, Upload, message } from 'antd'
-import { SendOutlined, StopOutlined, CameraOutlined, PlusOutlined, DeleteOutlined, CloseOutlined } from '@ant-design/icons'
+import { SendOutlined, StopOutlined, CameraOutlined, PlusOutlined, DeleteOutlined, CloseOutlined, FileTextOutlined } from '@ant-design/icons'
 import styles from '../AgentPage.module.css'
 import HighlightInput from '../HighlightInput'
 import RelationTags from './RelationTags'
@@ -593,7 +593,7 @@ const MessageComposer = ({
                 icon={sendLockState.stage === 'ready' ? <SendOutlined /> : null}
                 disabled={
                   (model === 'deepseek-ocr'
-                    ? (!input.trim() && selectedFiles.length === 0)
+                    ? (!input.trim() && selectedFiles.length === 0 && !selectedCommand)
                     : (!input.trim() && selectedImages.length === 0 && selectedAudios.length === 0)
                   ) || sendLockState.locked
                 }
