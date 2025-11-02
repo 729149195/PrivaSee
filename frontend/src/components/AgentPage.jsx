@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { useStore } from '../store'
 import styles from './AgentPage.module.css'
-import { Splitter, Progress, Spin, Switch, Tooltip } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { Splitter, Progress, Spin, Switch, Tooltip, Button } from 'antd'
+import { PlusOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import WordCloud from './WordCloud'
 import LawTree from './LawTree'
 import Timeline from './Timeline'
@@ -182,6 +182,7 @@ export default function AgentPage() {
   const [selectedAudios, setSelectedAudios] = useState([]) // 已选择的音频
   const [selectedFiles, setSelectedFiles] = useState([]) // 已选择的文件（deepseek-ocr模式）
   const [selectedCommand, setSelectedCommand] = useState(null) // 已选择的命令（deepseek-ocr模式）
+  const [selectedResolution, setSelectedResolution] = useState('gundam') // 已选择的分辨率模式（deepseek-ocr模式）
   const mainScrollRef = useRef(null) // 主滚动区域
   const leftPaneScrollRef = useRef(null) // 左侧面板滚动区域
   const [maxContextTokens, setMaxContextTokens] = useState(null)
@@ -191,6 +192,9 @@ export default function AgentPage() {
   const [isWaitingForDebounce, setIsWaitingForDebounce] = useState(false)
   // 时间线选中的时间：用于筛选 WordCloud 中的信息元
   const [selectedTime, setSelectedTime] = useState(null)
+  
+  // 右边栏显示/隐藏状态
+  const [rightPanelVisible, setRightPanelVisible] = useState(true)
   
   // 左侧栏编辑状态：用于追踪正在编辑的 session 和编辑的标题
   const [editingSessionId, setEditingSessionId] = useState(null)
@@ -987,7 +991,20 @@ export default function AgentPage() {
     
     if (isOcrMode) {
       // OCR 模式：处理命令和文件
-      const userId = await useStore.getState().sendMessageWithDeepSeekOCR(text, selectedCommand ? [selectedCommand] : [], selectedFiles)
+      // 立即清空输入、命令、文件和分辨率（不等待处理完成）
+      const commandsToSend = selectedCommand ? [selectedCommand] : []
+      const filesToSend = selectedFiles
+      const resolutionToSend = selectedResolution
+      const textToSend = text
+      
+      setInput('')
+      setSelectedCommand(null)
+      setSelectedFiles([])
+      setSelectedResolution('gundam') // 重置为默认分辨率
+      useStore.getState().setPendingImages([])
+      
+      // 异步处理 OCR（不阻塞UI）
+      const userId = await useStore.getState().sendMessageWithDeepSeekOCR(textToSend, commandsToSend, filesToSend, resolutionToSend)
       try {
         // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
         if (pendingRunIds.length > 0) {
@@ -1002,12 +1019,6 @@ export default function AgentPage() {
           startMessageInfons?.(userId)
         }
       } catch (_) {}
-      // 清空输入、命令和文件
-      setInput('')
-      setSelectedCommand(null)
-      setSelectedFiles([])
-      // 清空 pending 图片（直接推断模式）
-      useStore.getState().setPendingImages([])
       // 标志会在 useEffect 中检测并重置
     } else if (hasImages || hasAudios) {
       const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios, imageAnalysisMap)
@@ -1116,7 +1127,20 @@ export default function AgentPage() {
     
     if (isOcrMode) {
       // OCR 模式：处理命令和文件
-      const userId = await useStore.getState().sendMessageWithDeepSeekOCR(text, selectedCommand ? [selectedCommand] : [], selectedFiles)
+      // 立即清空输入、命令、文件和分辨率（不等待处理完成）
+      const commandsToSend = selectedCommand ? [selectedCommand] : []
+      const filesToSend = selectedFiles
+      const resolutionToSend = selectedResolution
+      const textToSend = text
+      
+      setLandingInput('')
+      setSelectedCommand(null)
+      setSelectedFiles([])
+      setSelectedResolution('gundam') // 重置为默认分辨率
+      useStore.getState().setPendingImages([])
+      
+      // 异步处理 OCR（不阻塞UI）
+      const userId = await useStore.getState().sendMessageWithDeepSeekOCR(textToSend, commandsToSend, filesToSend, resolutionToSend)
       try {
         // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
         if (pendingRunIds.length > 0) {
@@ -1131,12 +1155,6 @@ export default function AgentPage() {
           startMessageInfons?.(userId)
         }
       } catch (_) {}
-      // 清空输入、命令和文件
-      setLandingInput('')
-      setSelectedCommand(null)
-      setSelectedFiles([])
-      // 清空 pending 图片（直接推断模式）
-      useStore.getState().setPendingImages([])
       // 标志会在 useEffect 中检测并重置
     } else if (hasImages || hasAudios) {
       const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios, imageAnalysisMap)
@@ -1456,6 +1474,37 @@ export default function AgentPage() {
             <Splitter.Panel style={{ overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
               {/* 信息元类型图例 - 仅在提取模式下显示 */}
               {inferenceMode !== 'direct' && <InfonLegend />}
+              
+              {/* 右边栏切换按钮 */}
+              {!rightPanelVisible && (
+                <div style={{ 
+                  position: 'absolute', 
+                  top: '16px', 
+                  right: '16px', 
+                  zIndex: 10 
+                }}>
+                  <Tooltip title="显示右边栏">
+                    <Button
+                      type="text"
+                      icon={<LeftOutlined />}
+                      onClick={() => setRightPanelVisible(true)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '32px',
+                        height: '32px',
+                        borderRadius: '6px',
+                        background: 'var(--color-bg-secondary)',
+                        border: '1px solid var(--color-border-light)',
+                        color: 'var(--color-text-secondary)',
+                        transition: 'all 0.2s'
+                      }}
+                    />
+                  </Tooltip>
+                </div>
+              )}
+              
               <div className={styles.leftPaneScroll} ref={leftPaneScrollRef} style={{ flex: 1, overflow: 'auto' }}>
                 {hasMessages ? (
                   <div className={styles.column}>
@@ -1529,6 +1578,8 @@ export default function AgentPage() {
                     onRemoveFile={(index) => setSelectedFiles((prev) => prev.filter((_, i) => i !== index))}
                     selectedCommand={selectedCommand}
                     setSelectedCommand={setSelectedCommand}
+                    selectedResolution={selectedResolution}
+                    setSelectedResolution={setSelectedResolution}
                   />
                 )}
               </div>
@@ -1564,44 +1615,66 @@ export default function AgentPage() {
                   onRemoveFile={(index) => setSelectedFiles((prev) => prev.filter((_, i) => i !== index))}
                   selectedCommand={selectedCommand}
                   setSelectedCommand={setSelectedCommand}
+                  selectedResolution={selectedResolution}
+                  setSelectedResolution={setSelectedResolution}
                 />
               )}
             </Splitter.Panel>
-            <Splitter.Panel defaultSize="35%" min="25%" max="50%">
-              <div className={styles.rightPaneScroll}>
-                <div className={styles.rightPaneHeader}>
-                  <div className={styles.rightPaneTitle}>
-                    Privacy inference
-                    {/* 推断模式开关（中文注释）：低调样式，紧贴标题右侧 */}
-                    <Tooltip title={inferenceMode === 'direct' ? '直接推断：跳过信息元提取，直接对输入进行隐私推断' : '提取信息元：先提取信息元，再基于信息元进行隐私推断'}>
-                      <div style={{ 
-                        display: 'inline-flex', 
-                        alignItems: 'center', 
-                        gap: 6, 
-                        marginLeft: 12,
-                        fontSize: 11, 
-                        color: 'var(--color-text-tertiary)',
-                        opacity: 0.7,
-                        transition: 'opacity 0.2s'
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
-                      onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
-                      >
-                        <span style={{ userSelect: 'none', whiteSpace: 'nowrap' }}>
-                          {inferenceMode === 'direct' ? '直接推断' : '提取信息元'}
-                        </span>
-                        <Switch 
+            {rightPanelVisible && (
+              <Splitter.Panel defaultSize="35%" min="25%" max="50%">
+                <div className={styles.rightPaneScroll}>
+                  <div className={styles.rightPaneHeader}>
+                    <div className={styles.rightPaneTitle} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        Privacy inference
+                        {/* 推断模式开关（中文注释）：低调样式，紧贴标题右侧 */}
+                        <Tooltip title={inferenceMode === 'direct' ? '直接推断：跳过信息元提取，直接对输入进行隐私推断' : '提取信息元：先提取信息元，再基于信息元进行隐私推断'}>
+                          <div style={{ 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: 6, 
+                          marginLeft: 12,
+                          fontSize: 11, 
+                          color: 'var(--color-text-tertiary)',
+                          opacity: 0.7,
+                          transition: 'opacity 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                        onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
+                        >
+                          <span style={{ userSelect: 'none', whiteSpace: 'nowrap' }}>
+                            {inferenceMode === 'direct' ? '直接推断' : '提取信息元'}
+                          </span>
+                          <Switch 
+                            size="small"
+                            checked={inferenceMode === 'direct'}
+                            onChange={(checked) => {
+                              const newMode = checked ? 'direct' : 'extract'
+                              setInferenceMode(newMode)
+                            }}
+                          />
+                        </div>
+                      </Tooltip>
+                      </div>
+                      
+                      {/* 隐藏右边栏按钮 */}
+                      <Tooltip title="隐藏右边栏">
+                        <Button
+                          type="text"
+                          icon={<RightOutlined />}
+                          onClick={() => setRightPanelVisible(false)}
                           size="small"
-                          checked={inferenceMode === 'direct'}
-                          onChange={(checked) => {
-                            const newMode = checked ? 'direct' : 'extract'
-                            setInferenceMode(newMode)
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: 'var(--color-text-tertiary)',
+                            transition: 'all 0.2s'
                           }}
                         />
-                      </div>
-                    </Tooltip>
+                      </Tooltip>
+                    </div>
                   </div>
-                </div>
                 <div className={styles.rightPaneBody}>
                   {/* 法规 treemap 可视化（中文注释） */}
                   <LawTree />
@@ -1647,6 +1720,7 @@ export default function AgentPage() {
                 </div>
               </div>
             </Splitter.Panel>
+            )}
           </Splitter>
         </div>
       </section>

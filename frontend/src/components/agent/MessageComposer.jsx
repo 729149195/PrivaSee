@@ -9,6 +9,7 @@ import AudioTag from './AudioTag'
 import ImagePreview from './ImagePreview'
 import SlashCommands from './SlashCommands'
 import DocumentUploader from './DocumentUploader'
+import CommandTag from './CommandTag'
 import { compressImage, checkFileSize, getFileSizeText } from '../../utils/imageCompression'
 import { useStore } from '../../store'
 import { callDeepseekOcr } from '../../utils/deepseekOcrApi'
@@ -70,7 +71,9 @@ const MessageComposer = ({
   setSelectedFiles,
   onRemoveFile,
   selectedCommand,
-  setSelectedCommand
+  setSelectedCommand,
+  selectedResolution = 'gundam',
+  setSelectedResolution
 }) => {
   // 斜杠命令状态
   const [showSlashCommands, setShowSlashCommands] = useState(false)
@@ -439,95 +442,31 @@ const MessageComposer = ({
                   title="上传文档进行 OCR 处理"
                 />
                 {selectedCommand && (
-                  <div
-                    style={{
-                      position: 'relative',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      marginLeft: '8px',
-                      padding: '6px 12px 6px 12px',
-                      borderRadius: '16px',
-                      backgroundColor: 'rgba(24, 144, 255, 0.08)',
-                      border: '1px solid rgba(24, 144, 255, 0.2)',
-                      transition: 'all 0.2s ease',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap'
-                    }}
-                    onClick={(e) => {
-                      // 点击标签本身（不是删除按钮）时打开命令菜单
-                      if (!e.target.closest('.command-delete-btn')) {
-                        // 计算命令菜单位置
-                        const rect = e.currentTarget.getBoundingClientRect()
-                        const estimatedMenuHeight = 7 * 50 + 20
-                        let menuTop
-                        if (rect.top > estimatedMenuHeight + 10) {
-                          menuTop = rect.top - estimatedMenuHeight - 10
-                        } else {
-                          menuTop = rect.bottom + 10
-                        }
-                        setSlashCommandPosition({
-                          top: menuTop,
-                          left: rect.left
-                        })
-                        setShowSlashCommands(true)
+                  <CommandTag
+                    command={selectedCommand}
+                    resolution={selectedResolution}
+                    onResolutionChange={setSelectedResolution}
+                    removable={true}
+                    onRemove={() => setSelectedCommand(null)}
+                    showResolutionSelector={true}
+                    commandMenuOpen={showSlashCommands}
+                    onTagClick={(e) => {
+                      // 点击标签打开命令菜单
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      const estimatedMenuHeight = 7 * 50 + 20
+                      let menuTop
+                      if (rect.top > estimatedMenuHeight + 10) {
+                        menuTop = rect.top - estimatedMenuHeight - 10
+                      } else {
+                        menuTop = rect.bottom + 10
                       }
+                      setSlashCommandPosition({
+                        top: menuTop,
+                        left: rect.left
+                      })
+                      setShowSlashCommands(true)
                     }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'rgba(24, 144, 255, 0.12)'
-                      e.currentTarget.style.borderColor = 'rgba(24, 144, 255, 0.3)'
-                      e.currentTarget.style.padding = '6px 28px 6px 12px'
-                      const deleteBtn = e.currentTarget.querySelector('.command-delete-btn')
-                      if (deleteBtn) deleteBtn.style.opacity = '1'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'rgba(24, 144, 255, 0.08)'
-                      e.currentTarget.style.borderColor = 'rgba(24, 144, 255, 0.2)'
-                      e.currentTarget.style.padding = '6px 12px 6px 12px'
-                      const deleteBtn = e.currentTarget.querySelector('.command-delete-btn')
-                      if (deleteBtn) deleteBtn.style.opacity = '0'
-                    }}
-                  >
-                    <span style={{
-                      fontSize: '13px',
-                      color: '#1890ff',
-                      fontWeight: 500,
-                      userSelect: 'none'
-                    }}>
-                      {selectedCommand.label}
-                    </span>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<CloseOutlined />}
-                      onClick={() => setSelectedCommand(null)}
-                      className="command-delete-btn"
-                      style={{
-                        position: 'absolute',
-                        right: '2px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        color: '#666',
-                        opacity: 0,
-                        transition: 'opacity 0.2s ease',
-                        padding: '4px',
-                        width: '24px',
-                        height: '24px',
-                        minWidth: '24px',
-                        borderRadius: '50%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
-                      onMouseEnter={(e) => {
-                        e.stopPropagation()
-                        e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.04)'
-                      }}
-                      onMouseLeave={(e) => {
-                        e.stopPropagation()
-                        e.currentTarget.style.backgroundColor = 'transparent'
-                      }}
-                    />
-                  </div>
+                  />
                 )}
               </>
             ) : (

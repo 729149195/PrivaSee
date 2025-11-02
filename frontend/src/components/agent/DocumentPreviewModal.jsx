@@ -1,13 +1,38 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { Modal } from 'antd'
 import { FileTextOutlined } from '@ant-design/icons'
 
 /**
  * 文档预览 Modal
- * @param {object} file - 文件数据 {id, name, size, type, dataUrl}
+ * @param {object} file - 文件数据 {id, name, size, type}
+ * @param {File} fileObject - File 对象（用于生成预览）
  * @param {function} onClose - 关闭回调
  */
-const DocumentPreviewModal = ({ file, onClose }) => {
+const DocumentPreviewModal = ({ file, fileObject, onClose }) => {
+  const [previewUrl, setPreviewUrl] = useState(null)
+
+  useEffect(() => {
+    // 如果有 File 对象，创建临时的 dataUrl 用于预览
+    if (fileObject && fileObject instanceof File) {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        setPreviewUrl(e.target.result)
+      }
+      reader.onerror = () => {
+        console.error('[DocumentPreview] 读取文件失败')
+        setPreviewUrl(null)
+      }
+      reader.readAsDataURL(fileObject)
+      
+      // 清理函数：组件卸载时释放 URL（如果是通过 URL.createObjectURL 创建的）
+      return () => {
+        // FileReader 不需要释放，仅在使用 createObjectURL 时需要
+      }
+    } else {
+      setPreviewUrl(null)
+    }
+  }, [fileObject])
+
   if (!file) return null
 
   const getFileSizeText = (fileData) => {
@@ -24,7 +49,7 @@ const DocumentPreviewModal = ({ file, onClose }) => {
       footer={null}
       width="80%"
       style={{ maxWidth: '1200px', top: 20 }}
-      bodyStyle={{ padding: 0, maxHeight: 'calc(100vh - 120px)', overflow: 'hidden' }}
+      styles={{ body: { padding: 0, maxHeight: 'calc(100vh - 120px)', overflow: 'hidden' } }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)' }}>
         {/* 文件信息头部 */}
@@ -48,10 +73,10 @@ const DocumentPreviewModal = ({ file, onClose }) => {
         
         {/* 文件预览内容 */}
         <div style={{ flex: 1, overflow: 'auto', padding: '24px', backgroundColor: '#fff' }}>
-          {file.dataUrl ? (
+          {previewUrl ? (
             file.type === 'application/pdf' ? (
               <embed
-                src={file.dataUrl}
+                src={previewUrl}
                 type="application/pdf"
                 width="100%"
                 height="100%"
@@ -59,7 +84,7 @@ const DocumentPreviewModal = ({ file, onClose }) => {
               />
             ) : file.type.startsWith('image/') ? (
               <img 
-                src={file.dataUrl} 
+                src={previewUrl} 
                 alt={file.name} 
                 style={{ 
                   maxWidth: '100%', 
@@ -88,7 +113,10 @@ const DocumentPreviewModal = ({ file, onClose }) => {
               color: '#8c8c8c' 
             }}>
               <FileTextOutlined style={{ fontSize: '64px', marginBottom: '16px' }} />
-              <p>文件内容不可用</p>
+              <p>文件预览不可用</p>
+              <p style={{ fontSize: '12px', marginTop: '8px' }}>
+                {!fileObject ? '文件内容仅在会话期间可用，刷新后无法预览' : '正在加载...'}
+              </p>
             </div>
           )}
         </div>

@@ -10,6 +10,7 @@ import AudioTag from './AudioTag'
 import DocumentTag from './DocumentTag'
 import CommandTag from './CommandTag'
 import DocumentPreviewModal from './DocumentPreviewModal'
+import { useStore } from '../../store'
 
 // 导入 vite.svg 图标
 const ViteIcon = '/vite.svg'
@@ -76,6 +77,13 @@ const MessageBubble = ({
 }) => {
   const isEditing = editingMessageId === message.id
   const [previewFile, setPreviewFile] = useState(null)
+  
+  // 从 store 中获取当前会话和 File 对象映射
+  const currentSessionId = useStore((state) => state.currentSessionId)
+  const ocrFileObjects = useStore((state) => state.ocrFileObjects)
+  
+  // 获取当前消息的 File 对象映射
+  const messageFileObjects = ocrFileObjects?.[currentSessionId]?.[message.id] || {}
 
   // 辅助函数：从消息内容中移除 <audio>...</audio> 标签
   // 音频转写文本完全通过 AudioTag 组件显示
@@ -210,7 +218,8 @@ const MessageBubble = ({
       </div>
       {/* 文档预览 Modal */}
       <DocumentPreviewModal 
-        file={previewFile} 
+        file={previewFile}
+        fileObject={previewFile ? messageFileObjects[previewFile.id] : null}
         onClose={() => setPreviewFile(null)} 
       />
     </>

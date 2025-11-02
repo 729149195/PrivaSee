@@ -38,7 +38,8 @@ export async function callDeepseekOcr({
   provider,
   signal,
   onProgress,
-  question
+  question,
+  resolution = 'gundam' // 默认使用 gundam 分辨率模式
 }) {
   if (!file) {
     throw new Error('未提供需要识别的文件')
@@ -64,91 +65,204 @@ export async function callDeepseekOcr({
     }
   }
 
-  reportProgress(5, '读取文件...')
-  const dataUrl = await readFileAsDataUrl(file)
+  reportProgress(5, '准备文件...')
+
+  // 使用 FormData 上传文件（适配新后端）
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('function', commandId)
+  formData.append('resolution', resolution)
+  formData.append('save_results', 'false')
+  
+  // 如果是视觉问答，添加自定义问题
+  if (command.id === 'visual_qa' && question) {
+    formData.append('question', question)
+  }
 
   reportProgress(25, '调用 OCR 接口...')
 
-  const headers = { 'Content-Type': 'application/json' }
+  const headers = {}
   if (provider.apiKey) {
     headers['Authorization'] = `Bearer ${provider.apiKey}`
   }
 
-  const instruction = command.id === 'visual_qa' && question
-    ? `${command.instruction}\n问题: ${question}`
-    : command.instruction
-
-  const payload = {
-    model: provider.modelId || 'deepseek-ai/DeepSeek-OCR',
-    messages: [
-      {
-        role: 'system',
-        content: getOcrSystemPrompt()
-      },
-      {
-        role: 'user',
-        content: buildUserContent(instruction, dataUrl)
-      }
-    ],
-    temperature: 0.0,
-    max_tokens: 2048
+  let response
+  try {
+    response = await fetch(`${baseUrl}/process`, {
+      method: 'POST',
+      headers,
+      body: formData,
+      signal
+    })
+  } catch (error) {
+    throw new Error(`网络请求失败: ${error.message || error}`)
   }
 
-  // ========== API 调用已注释掉，只使用本地 deepseek-ocr-local ==========
-  // let response
-  // try {
-  //   response = await fetch(`${baseUrl}/chat/completions`, {
-  //     method: 'POST',
-  //     headers,
-  //     body: JSON.stringify(payload),
-  //     signal
-  //   })
-  // } catch (error) {
-  //   throw new Error(`网络请求失败: ${error.message || error}`)
-  // }
+  if (!response.ok) {
+    let errMessage = `HTTP ${response.status}`
+    try {
+      const errJson = await response.json()
+      if (errJson?.error) {
+        errMessage = errJson.error
+      } else if (errJson?.message) {
+        errMessage = errJson.message
+      }
+    } catch (_) {
+      try {
+        const errText = await response.text()
+        if (errText) errMessage = errText
+      } catch (_) {}
+    }
+    throw new Error(`OCR 处理失败: ${errMessage}`)
+  }
 
-  // if (!response.ok) {
-  //   let errMessage = `HTTP ${response.status}`
-  //   try {
-  //     const errJson = await response.json()
-  //     if (errJson?.error?.message) {
-  //       errMessage = errJson.error.message
-  //     } else if (errJson?.error) {
-  //       errMessage = typeof errJson.error === 'string' ? errJson.error : JSON.stringify(errJson.error)
-  //     }
-  //   } catch (_) {
-  //     try {
-  //       const errText = await response.text()
-  //       if (errText) errMessage = errText
-  //     } catch (_) {}
-  //   }
-  //   throw new Error(`OCR 处理失败: ${errMessage}`)
-  // }
+  reportProgress(70, '解析结果...')
 
-  // reportProgress(70, '解析结果...')
+  let data
+  try {
+    data = await response.json()
+  } catch (error) {
+    throw new Error(`解析响应失败: ${error.message || error}`)
+  }
 
-  // let data
-  // try {
-  //   data = await response.json()
-  // } catch (error) {
-  //   throw new Error(`解析响应失败: ${error.message || error}`)
-  // }
+  if (!data.success) {
+    throw new Error(data.error || 'OCR 处理失败')
+  }
 
-  // const text = data?.choices?.[0]?.message?.content?.trim()
-  // if (!text) {
-  //   throw new Error('OCR 接口未返回文本内容')
-  // }
-
-  // reportProgress(100, '处理完成')
-
-  // return {
-  //   text,
-  //   raw: data,
-  //   command
-  // }
+  const text = data.text?.trim() || ''
   
-  // 现在只使用本地的 deepseek-ocr-local，API 调用已禁用
-  throw new Error('API 版本的 deepseek-ocr 已被禁用，请使用 deepseek-ocr-local 本地版本')
+  // 如果是视觉问答且没有文本，给出更友好的提示
+  if (!text && command.id === 'visual_qa') {
+    console.warn('[deepseekOcrApi] 视觉问答返回空结果，可能是问题不明确或图片无法理解')
+  }
+
+  reportProgress(100, '处理完成')
+
+  return {
+    text: text || '(未识别到内容)', // 如果为空，返回提示文本
+    raw: data,
+    command,
+    metadata: data.metadata
+  }
+}
+
+/**
+ * 流式调用 DeepSeek OCR (SSE)
+ */
+export async function callDeepseekOcrStream({
+  file,
+  commandId,
+  provider,
+  signal,
+  onProgress,
+  onContent,
+  question,
+  resolution = 'gundam'
+}) {
+  if (!file) {
+    throw new Error('未提供需要识别的文件')
+  }
+
+  if (!provider) {
+    throw new Error('未找到 DeepSeek OCR 的 API 配置')
+  }
+
+  const baseUrl = normalizeBaseUrl(provider.baseUrl)
+  if (!baseUrl) {
+    throw new Error('DeepSeek OCR API 基础地址无效')
+  }
+
+  const command = getOcrCommandById(commandId)
+  if (!command) {
+    throw new Error('暂不支持所选的 OCR 功能')
+  }
+
+  // 准备 FormData
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('function', commandId)
+  formData.append('resolution', resolution)
+  
+  if (command.id === 'visual_qa' && question) {
+    formData.append('question', question)
+  }
+
+  const headers = {}
+  if (provider.apiKey) {
+    headers['Authorization'] = `Bearer ${provider.apiKey}`
+  }
+
+  // 发起 SSE 请求
+  const response = await fetch(`${baseUrl}/process/stream`, {
+    method: 'POST',
+    headers,
+    body: formData,
+    signal
+  })
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`)
+  }
+
+  // 处理 SSE 流
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let fullText = ''
+  let metadata = null
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = JSON.parse(line.slice(6))
+          
+          switch (data.type) {
+            case 'start':
+            case 'progress':
+              if (onProgress) {
+                onProgress({
+                  value: data.progress || 0,
+                  stage: data.stage || data.message || ''
+                })
+              }
+              break
+              
+            case 'content':
+              if (data.text) {
+                fullText += data.text
+                if (onContent) {
+                  onContent(data.text) // 逐块发送
+                }
+              }
+              break
+              
+            case 'done':
+              metadata = data.metadata
+              break
+              
+            case 'error':
+              throw new Error(data.error || 'OCR 处理失败')
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  return {
+    text: fullText,
+    command,
+    metadata
+  }
 }
 
 export async function callDeepseekOcrBatch({ files, commandId, provider, signal, onProgress }) {

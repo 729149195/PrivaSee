@@ -4,7 +4,7 @@ import { loadUserSessions, saveUserSessions } from './users/historyStorage'
 import { getDefaultModelsConfig } from './config/defaultModelsConfig'
 import { getDefaultApiModels, getDefaultApiModelIds } from './config/defaultApiModelsConfig'
 import { getModelModalities } from './utils/modelUtils'
-import { callDeepseekOcr } from './utils/deepseekOcrApi'
+import { callDeepseekOcr, callDeepseekOcrStream } from './utils/deepseekOcrApi'
 
 // 说明：
 // 1) 本 store 管理 ChatGPT 风格的多会话、消息流与流式生成状态；
@@ -549,6 +549,10 @@ export const useStore = create((set, get) => ({
   
   // Pending音频（中文注释）：用于直接推断模式下获取未发送的音频转写
   pendingAudios: [],
+  
+  // OCR 文件对象映射（中文注释）：内存中保存 File 对象用于预览，不持久化
+  // 格式：{ [sessionId]: { [messageId]: { [fileId]: File } } }
+  ocrFileObjects: {},
   
   // Pending图片（中文注释）：用于直接推断模式下获取未发送的图片分析
   pendingImages: [],
@@ -2260,7 +2264,7 @@ Output format:
   },
 
   // 发送带图片的多模态消息：立即返回用户消息 ID，流式在后台执行
-  async sendMessageWithDeepSeekOCR(text, selectedCommands, selectedFiles) {
+  async sendMessageWithDeepSeekOCR(text, selectedCommands, selectedFiles, resolution = 'gundam') {
     const state = get()
     state._ensureCurrentSession()
     const session = get().getCurrentSession()
@@ -2269,29 +2273,33 @@ Output format:
     // 写入用户消息：包含命令标签和文件
     const userMsgId = generateId()
 
-    // 将 File 对象转换为可序列化的格式（包含 data URL）
-    const serializableFiles = await Promise.all(
-      selectedFiles.map(async (fileData) => {
-        const file = fileData.file
-        if (!file) return fileData
+    // 只保存文件元数据，不保存文件内容（避免 localStorage 超限）
+    const fileMetadata = selectedFiles.map((fileData) => ({
+      id: fileData.id,
+      name: fileData.name,
+      size: fileData.size,
+      type: fileData.type
+      // 不再保存 dataUrl，避免存储空间超限
+    }))
 
-        // 读取文件内容为 data URL
-        const dataUrl = await new Promise((resolve) => {
-          const reader = new FileReader()
-          reader.onload = (e) => resolve(e.target.result)
-          reader.onerror = () => resolve(null)
-          reader.readAsDataURL(file)
-        })
+    // 在内存中保存 File 对象的引用，用于预览（不持久化）
+    const fileObjectsMap = {}
+    selectedFiles.forEach((fileData) => {
+      if (fileData.file) {
+        fileObjectsMap[fileData.id] = fileData.file
+      }
+    })
 
-        return {
-          id: fileData.id,
-          name: fileData.name,
-          size: fileData.size,
-          type: fileData.type,
-          dataUrl: dataUrl // 保存 data URL，用于持久化和预览
+    // 将 File 对象映射存储到 store 的非持久化字段中
+    set(state => ({
+      ocrFileObjects: {
+        ...state.ocrFileObjects,
+        [session.id]: {
+          ...state.ocrFileObjects?.[session.id],
+          [userMsgId]: fileObjectsMap
         }
-      })
-    )
+      }
+    }))
 
     // 消息内容只保留文本，不包含标签文本
     const messageContent = text || ''
@@ -2300,7 +2308,7 @@ Output format:
       id: userMsgId,
       role: 'user',
       content: messageContent,
-      files: serializableFiles, // 保存文件数据用于UI显示
+      files: fileMetadata, // 只保存文件元数据用于UI显示
       commands: selectedCommands, // 保存命令数据
       createdAt: Date.now(),
     })
@@ -2317,37 +2325,80 @@ Output format:
     console.log('[sendMessageWithDeepSeekOCR] 开始处理 OCR 请求', {
       commands: selectedCommands.length,
       files: selectedFiles.length,
-      text: text
+      text: text,
+      resolution: resolution
+    })
+
+    // 立即创建助手消息（显示加载状态）
+    const assistantMsgId = generateId()
+    get()._appendMessage(session.id, {
+      id: assistantMsgId,
+      role: 'assistant',
+      content: '',
+      streaming: true,
+      phase: 'thinking',
+      createdAt: Date.now(),
     })
 
     // 设置消息状态为处理中
-    get()._updateMessage(session.id, userMsgId, {
+    get()._updateMessage(session.id, userMsgId, (m) => ({
+      ...m,
       ocrStatus: 'processing',
       ocrProgress: 0
-    })
+    }))
 
     try {
-      // 处理每个文件（使用原始的selectedFiles，因为需要File对象）
+      // 使用流式 API 处理每个文件
       const results = []
+      let currentContent = '' // 累积的内容
+      
       for (let i = 0; i < selectedFiles.length; i++) {
         const fileData = selectedFiles[i]
         const file = fileData.file // 获取原始 File 对象
         const command = selectedCommands[i] || selectedCommands[0] // 如果命令数量少于文件，使用第一个命令
 
-        console.log(`[sendMessageWithDeepSeekOCR] 处理文件 ${i + 1}/${selectedFiles.length}: ${fileData.name}`)
+        console.log(`[sendMessageWithDeepSeekOCR] 流式处理文件 ${i + 1}/${selectedFiles.length}: ${fileData.name}`)
+
+        // 如果是多文件，添加文件分隔符
+        if (selectedFiles.length > 1 && i > 0) {
+          currentContent += '\n\n---\n\n'
+        }
+        
+        if (selectedFiles.length > 1) {
+          const fileHeader = `文件 ${i + 1} (${fileData.name}) - ${command.label}:\n`
+          currentContent += fileHeader
+          // 立即显示文件头
+          get()._updateMessage(session.id, assistantMsgId, (m) => ({
+            ...m,
+            content: currentContent
+          }))
+        }
 
         try {
-          const result = await callDeepseekOcr({
-            file: file, // 传入原始 File 对象
+          // 使用流式 API
+          const result = await callDeepseekOcrStream({
+            file: file,
             commandId: command.id,
             provider: provider,
+            resolution: resolution,
+            question: text || undefined,
             onProgress: ({ value, stage }) => {
               const progress = Math.round(((i + (value / 100)) / selectedFiles.length) * 100)
-              get()._updateMessage(session.id, userMsgId, {
+              get()._updateMessage(session.id, userMsgId, (m) => ({
+                ...m,
                 ocrStatus: 'processing',
                 ocrProgress: progress,
                 ocrStage: stage
-              })
+              }))
+            },
+            onContent: (chunk) => {
+              // 流式接收内容块，实时更新助手消息
+              currentContent += chunk
+              get()._updateMessage(session.id, assistantMsgId, (m) => ({
+                ...m,
+                content: currentContent,
+                streaming: true
+              }))
             }
           })
 
@@ -2357,9 +2408,18 @@ Output format:
             result: result
           })
 
-          console.log(`[sendMessageWithDeepSeekOCR] 文件 ${file.name} 处理完成`)
+          console.log(`[sendMessageWithDeepSeekOCR] 文件 ${file.name} 流式处理完成`)
         } catch (error) {
           console.error(`[sendMessageWithDeepSeekOCR] 文件 ${file.name} 处理失败:`, error)
+          const errorMsg = `处理出错：${error.message}`
+          currentContent += errorMsg
+          
+          // 更新显示错误
+          get()._updateMessage(session.id, assistantMsgId, (m) => ({
+            ...m,
+            content: currentContent
+          }))
+          
           results.push({
             fileName: file.name,
             command: command.label,
@@ -2368,41 +2428,19 @@ Output format:
         }
       }
 
-      // 生成最终的响应消息
-      const assistantMsgId = generateId()
-      let responseContent = ''
-
-      if (results.length === 1) {
-        const result = results[0]
-        if (result.error) {
-          responseContent = `处理文件 "${result.fileName}" 时出错：${result.error}`
-        } else {
-          responseContent = result.result
-        }
-      } else {
-        responseContent = results.map((result, index) => {
-          const prefix = `文件 ${index + 1} (${result.fileName}) - ${result.command}:\n`
-          if (result.error) {
-            return prefix + `处理出错：${result.error}`
-          } else {
-            return prefix + result.result
-          }
-        }).join('\n\n---\n\n')
-      }
-
-      // 添加助手回复
-      get()._appendMessage(session.id, {
-        id: assistantMsgId,
-        role: 'assistant',
-        content: responseContent,
-        createdAt: Date.now(),
-      })
+      // 标记流式传输完成
+      get()._updateMessage(session.id, assistantMsgId, (m) => ({
+        ...m,
+        streaming: false,
+        phase: 'done',
+      }))
 
       // 更新用户消息状态为完成
-      get()._updateMessage(session.id, userMsgId, {
+      get()._updateMessage(session.id, userMsgId, (m) => ({
+        ...m,
         ocrStatus: 'completed',
         ocrProgress: 100
-      })
+      }))
 
       console.log('[sendMessageWithDeepSeekOCR] OCR 处理完成')
       return userMsgId
@@ -2410,11 +2448,21 @@ Output format:
     } catch (error) {
       console.error('[sendMessageWithDeepSeekOCR] OCR 处理失败:', error)
 
-      // 更新消息状态为失败
-      get()._updateMessage(session.id, userMsgId, {
+      // 更新助手消息显示错误
+      get()._updateMessage(session.id, assistantMsgId, (m) => ({
+        ...m,
+        content: `OCR 处理失败：${error.message}`,
+        streaming: false,
+        phase: 'done',
+        error: error.message,
+      }))
+
+      // 更新用户消息状态为失败
+      get()._updateMessage(session.id, userMsgId, (m) => ({
+        ...m,
         ocrStatus: 'error',
         ocrError: error.message
-      })
+      }))
 
       throw error
     }
