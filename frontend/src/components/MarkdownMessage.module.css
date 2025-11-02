@@ -38,10 +38,27 @@
 .markdown ul, .markdown ol {
     margin: 8px 0;
     padding-left: 2em;
+    list-style-position: outside;
 }
 
 .markdown li {
     margin: 4px 0;
+    display: list-item;
+    list-style-position: outside;
+}
+
+.markdown li::marker {
+    display: inline-block;
+}
+
+.markdown li > p {
+    display: inline;
+    margin: 0;
+}
+
+.markdown li > p:not(:last-child) {
+    display: block;
+    margin-bottom: 4px;
 }
 
 .markdown blockquote {

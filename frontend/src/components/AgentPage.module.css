@@ -1169,6 +1169,16 @@
     word-break: break-word;
 }
 
+/* 确保列表项在assistantTextHighlight中正确显示（中文注释） */
+.assistantTextHighlight :is(ul, ol) {
+    white-space: normal;
+}
+
+.assistantTextHighlight li {
+    white-space: normal;
+    display: list-item;
+}
+
 /* 关系标签容器（中文注释） */
 .relationTags {
     display: flex;
