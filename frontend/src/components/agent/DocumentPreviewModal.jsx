@@ -12,21 +12,12 @@ const DocumentPreviewModal = ({ file, fileObject, onClose }) => {
   const [previewUrl, setPreviewUrl] = useState(null)
 
   useEffect(() => {
-    // 如果有 File 对象，创建临时的 dataUrl 用于预览
+    // Prefer blob URL for better compatibility (especially for PDF viewers)
     if (fileObject && fileObject instanceof File) {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        setPreviewUrl(e.target.result)
-      }
-      reader.onerror = () => {
-        console.error('[DocumentPreview] 读取文件失败')
-        setPreviewUrl(null)
-      }
-      reader.readAsDataURL(fileObject)
-      
-      // 清理函数：组件卸载时释放 URL（如果是通过 URL.createObjectURL 创建的）
+      const objectUrl = URL.createObjectURL(fileObject)
+      setPreviewUrl(objectUrl)
       return () => {
-        // FileReader 不需要释放，仅在使用 createObjectURL 时需要
+        URL.revokeObjectURL(objectUrl)
       }
     } else {
       setPreviewUrl(null)
@@ -47,13 +38,19 @@ const DocumentPreviewModal = ({ file, fileObject, onClose }) => {
       open={!!file}
       onCancel={onClose}
       footer={null}
+      title={file?.name || 'Document preview'}
       width="80%"
       style={{ maxWidth: '1200px', top: 20 }}
-      styles={{ body: { padding: 0, maxHeight: 'calc(100vh - 120px)', overflow: 'hidden' } }}
+      styles={{
+        content: { borderRadius: 12, overflow: 'hidden' },
+        header: { padding: '10px 16px', margin: 0, borderBottom: '1px solid #f0f0f0' },
+        body: { padding: 0, height: 'calc(100vh - 180px)', overflow: 'hidden' }
+      }}
+      maskClosable
     >
-      <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)' }}>
-        {/* 文件预览内容 - 直接显示，不带文件名栏 */}
-        <div style={{ flex: 1, overflow: 'auto', padding: '0', backgroundColor: '#fff' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        {/* 文件预览内容 - 固定高度、无额外滚动 */}
+        <div style={{ flex: 1, overflow: 'hidden', padding: '0', backgroundColor: '#fff' }}>
           {previewUrl ? (
             file.type === 'application/pdf' ? (
               <embed
@@ -61,15 +58,16 @@ const DocumentPreviewModal = ({ file, fileObject, onClose }) => {
                 type="application/pdf"
                 width="100%"
                 height="100%"
-                style={{ minHeight: '100%', border: 'none' }}
+                style={{ minHeight: '100%', border: 'none', display: 'block' }}
               />
             ) : file.type.startsWith('image/') ? (
               <div style={{ 
                 display: 'flex', 
                 alignItems: 'center', 
                 justifyContent: 'center',
-                minHeight: '100%',
-                padding: '20px'
+                height: '100%',
+                padding: '20px',
+                overflow: 'auto'
               }}>
                 <img 
                   src={previewUrl} 
@@ -94,9 +92,9 @@ const DocumentPreviewModal = ({ file, fileObject, onClose }) => {
                 color: '#8c8c8c' 
               }}>
                 <FileTextOutlined style={{ fontSize: '64px', marginBottom: '16px' }} />
-                <p>暂不支持此文件类型的预览</p>
+                <p>Preview for this file type is not supported</p>
                 <p style={{ fontSize: '12px', marginTop: '8px' }}>
-                  文件类型: {file.type}
+                  File type: {file.type}
                 </p>
               </div>
             )
@@ -112,9 +110,9 @@ const DocumentPreviewModal = ({ file, fileObject, onClose }) => {
               color: '#8c8c8c' 
             }}>
               <FileTextOutlined style={{ fontSize: '64px', marginBottom: '16px' }} />
-              <p>文件预览不可用</p>
+              <p>Preview is unavailable</p>
               <p style={{ fontSize: '12px', marginTop: '8px' }}>
-                {!fileObject ? '文件内容仅在会话期间可用，刷新后无法预览' : '正在加载...'}
+                {!fileObject ? 'File content is only available during the session. Refresh makes it unavailable.' : 'Loading...'}
               </p>
             </div>
           )}

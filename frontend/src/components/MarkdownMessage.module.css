@@ -6,6 +6,11 @@
     color: #0d1117;
 }
 
+/* 确保 Markdown 容器不继承父级 pre-wrap，避免首部换行被放大显示 */
+.markdown {
+    white-space: normal;
+}
+
 /* 基础文本样式 */
 .markdown :is(h1, h2, h3, h4, h5, h6) {
     margin: 24px 0 16px;

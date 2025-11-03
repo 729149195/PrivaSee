@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkBreaks from 'remark-breaks'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
@@ -22,9 +23,11 @@ import styles from './MarkdownMessage.module.css'
 export default function MarkdownMessage({ content = '' }) {
   const [copiedId, setCopiedId] = useState('')
   
-  // react-markdown 已经可以正确处理所有 Markdown 格式，无需额外预处理
+  // 轻量预处理：去除开头的空行，避免在包含表格等块级元素时被父级样式拉出大空白
   const normalizedContent = useMemo(() => {
-    return String(content ?? '')
+    const raw = String(content ?? '')
+    // 移除最前面的连续空行（包含可能的空格/制表符）
+    return raw.replace(/^(?:[ \t]*\r?\n)+/, '')
   }, [content])
 
   const components = useMemo(() => ({
@@ -151,7 +154,7 @@ export default function MarkdownMessage({ content = '' }) {
     <div className={styles.root}>
       <div className={styles.markdown}>
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
+          remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
           rehypePlugins={[rehypeRaw, rehypeKatex, [rehypeHighlight, { detect: true }]]}
           components={components}
           skipHtml={false}
