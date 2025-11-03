@@ -39,9 +39,10 @@ export async function callDeepseekOcr({
   signal,
   onProgress,
   question,
-  resolution = 'gundam' // 默认使用 gundam 分辨率模式
+  resolution = 'gundam', // 默认使用 gundam 分辨率模式
+  uploadedFilename = null  // 已上传的文件名
 }) {
-  if (!file) {
+  if (!file && !uploadedFilename) {
     throw new Error('未提供需要识别的文件')
   }
 
@@ -69,7 +70,14 @@ export async function callDeepseekOcr({
 
   // 使用 FormData 上传文件（适配新后端）
   const formData = new FormData()
-  formData.append('file', file)
+  
+  // 如果提供了已上传的文件名，使用它；否则上传新文件
+  if (uploadedFilename) {
+    formData.append('uploaded_filename', uploadedFilename)
+  } else {
+    formData.append('file', file)
+  }
+  
   formData.append('function', commandId)
   formData.append('resolution', resolution)
   formData.append('save_results', 'false')
@@ -157,9 +165,10 @@ export async function callDeepseekOcrStream({
   onProgress,
   onContent,
   question,
-  resolution = 'gundam'
+  resolution = 'gundam',
+  uploadedFilename = null  // 已上传的文件名
 }) {
-  if (!file) {
+  if (!file && !uploadedFilename) {
     throw new Error('未提供需要识别的文件')
   }
 
@@ -179,7 +188,14 @@ export async function callDeepseekOcrStream({
 
   // 准备 FormData
   const formData = new FormData()
-  formData.append('file', file)
+  
+  // 如果提供了已上传的文件名，使用它；否则上传新文件
+  if (uploadedFilename) {
+    formData.append('uploaded_filename', uploadedFilename)
+  } else {
+    formData.append('file', file)
+  }
+  
   formData.append('function', commandId)
   formData.append('resolution', resolution)
   

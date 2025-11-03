@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import ReactDOM from 'react-dom'
 import { List } from 'antd'
 import { OCR_COMMANDS } from '../../utils/ocrCommands'
 
@@ -64,7 +65,7 @@ const SlashCommands = ({ onSelectCommand, position, visible }) => {
     return null
   }
 
-  return (
+  const menuContent = (
     <>
       {/* 遮罩层 */}
       <div
@@ -76,7 +77,7 @@ const SlashCommands = ({ onSelectCommand, position, visible }) => {
           left: 0,
           right: 0,
           bottom: 0,
-          zIndex: 9998,
+          zIndex: 99998,
           background: 'transparent'
         }}
       />
@@ -88,7 +89,7 @@ const SlashCommands = ({ onSelectCommand, position, visible }) => {
           position: 'fixed',
           top: `${position?.top || 0}px`,
           left: `${position?.left || 0}px`,
-          zIndex: 9999,
+          zIndex: 99999,
           background: '#fff',
           border: '1px solid #d9d9d9',
           borderRadius: '6px',
@@ -153,6 +154,9 @@ const SlashCommands = ({ onSelectCommand, position, visible }) => {
       </div>
     </>
   )
+
+  // 使用 Portal 将菜单渲染到 body，避免父容器的层叠上下文影响
+  return ReactDOM.createPortal(menuContent, document.body)
 }
 
 export default SlashCommands

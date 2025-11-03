@@ -131,9 +131,15 @@ export default function AgentPage() {
     setEditingImages,
     editingAudios,
     setEditingAudios,
+    editingFiles,
+    setEditingFiles,
+    editingCommands,
+    setEditingCommands,
     originalEditingContent,
     originalEditingImages,
     originalEditingAudios,
+    originalEditingFiles,
+    originalEditingCommands,
     isAdoptingPendingRef,
     handleCopyMessage,
     handleEditMessage,
@@ -194,7 +200,7 @@ export default function AgentPage() {
   const [selectedTime, setSelectedTime] = useState(null)
   
   // 右边栏显示/隐藏状态
-  const [rightPanelVisible, setRightPanelVisible] = useState(true)
+  const [rightPanelVisible, setRightPanelVisible] = useState(false)
   
   // 左侧栏编辑状态：用于追踪正在编辑的 session 和编辑的标题
   const [editingSessionId, setEditingSessionId] = useState(null)
@@ -1526,9 +1532,15 @@ export default function AgentPage() {
                           setEditingImages={setEditingImages}
                           editingAudios={editingAudios}
                           setEditingAudios={setEditingAudios}
+                          editingFiles={editingFiles}
+                          setEditingFiles={setEditingFiles}
+                          editingCommands={editingCommands}
+                          setEditingCommands={setEditingCommands}
                           originalEditingContent={originalEditingContent}
                           originalEditingImages={originalEditingImages}
                           originalEditingAudios={originalEditingAudios}
+                          originalEditingFiles={originalEditingFiles}
+                          originalEditingCommands={originalEditingCommands}
                           onEditingTranscriptChange={handleEditingTranscriptChange}
                           onCopy={handleCopyMessage}
                           onEdit={handleEditMessage}

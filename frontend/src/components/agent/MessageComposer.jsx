@@ -1,6 +1,6 @@
-import React, { useState } from 'react'
-import { Button, Upload, message } from 'antd'
-import { SendOutlined, StopOutlined, CameraOutlined, PlusOutlined, DeleteOutlined, CloseOutlined, FileTextOutlined } from '@ant-design/icons'
+import React, { useState, useRef } from 'react'
+import { Button, Upload, message, Progress } from 'antd'
+import { SendOutlined, StopOutlined, CameraOutlined, PlusOutlined, DeleteOutlined, CloseOutlined, FileTextOutlined, LoadingOutlined } from '@ant-design/icons'
 import styles from '../AgentPage.module.css'
 import HighlightInput from '../HighlightInput'
 import RelationTags from './RelationTags'
@@ -13,6 +13,8 @@ import CommandTag from './CommandTag'
 import { compressImage, checkFileSize, getFileSizeText } from '../../utils/imageCompression'
 import { useStore } from '../../store'
 import { callDeepseekOcr } from '../../utils/deepseekOcrApi'
+import { uploadFile } from '../../utils/fileUpload'
+import { saveFile } from '../../utils/fileStorage'
 
 /**
  * 消息输入组合器组件（底部固定输入框）
@@ -83,6 +85,10 @@ const MessageComposer = ({
 
   const customProviders = useStore((state) => state.customProviders)
   const deepseekProvider = customProviders?.['deepseek-ocr']
+  const currentSessionId = useStore((state) => state.currentSessionId)
+
+  // 文件选择器引用（OCR模式直接选择文件）
+  const fileInputRef = useRef(null)
 
   const handleAudioAdded = (audioData) => {
     setSelectedAudios?.((prev) => [...prev, audioData])
@@ -209,7 +215,123 @@ const MessageComposer = ({
     }, 0)
   }
 
-  // 处理文档上传
+  // 处理文件选择（OCR模式：直接触发文件选择器）
+  const handleFileSelectClick = () => {
+    const isOcrMode = model === 'deepseek-ocr' || model === 'deepseek-ocr-local'
+    if (isOcrMode) {
+      // OCR 模式：直接打开文件选择器
+      fileInputRef.current?.click()
+    } else {
+      // 其他模式：打开文档上传对话框
+      setShowDocumentUploader(true)
+    }
+  }
+
+  // 处理文件选择变化（OCR模式：立即上传）
+  const handleFileChange = async (e) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+
+    const file = files[0]
+    
+    // 检查文件类型
+    const acceptedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff', 'application/pdf']
+    if (!acceptedTypes.includes(file.type)) {
+      message.error('不支持的文件格式')
+      e.target.value = ''
+      return
+    }
+
+    // 检查文件大小（最大 20MB）
+    const isLt20M = file.size / 1024 / 1024 < 20
+    if (!isLt20M) {
+      message.error('文件大小不能超过 20MB')
+      e.target.value = ''
+      return
+    }
+
+    if (!deepseekProvider) {
+      message.error('未配置 DeepSeek OCR API，请先在设置中添加')
+      e.target.value = ''
+      return
+    }
+
+    // 创建文件数据对象
+    const fileId = Date.now() + '_' + Math.random()
+    const fileData = {
+      id: fileId,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      file: file,
+      uploadStatus: 'uploading', // uploading | completed | error
+      uploadProgress: 0,
+      uploadError: null,
+      serverFilename: null
+    }
+
+    // 添加到文件列表
+    setSelectedFiles?.((prev) => [...prev, fileData])
+
+    // 立即存储到 IndexedDB
+    try {
+      await saveFile(currentSessionId, 'temp_' + fileId, fileId, file)
+      console.log('[MessageComposer] 文件已保存到 IndexedDB:', file.name)
+    } catch (error) {
+      console.error('[MessageComposer] 保存文件到 IndexedDB 失败:', error)
+    }
+
+    // 立即开始上传到服务器
+    try {
+      const result = await uploadFile(file, deepseekProvider, (progress) => {
+        // 更新上传进度
+        setSelectedFiles?.((prev) => 
+          prev.map(f => 
+            f.id === fileId 
+              ? { ...f, uploadProgress: progress }
+              : f
+          )
+        )
+      })
+
+      // 上传成功
+      setSelectedFiles?.((prev) => 
+        prev.map(f => 
+          f.id === fileId 
+            ? { 
+                ...f, 
+                uploadStatus: 'completed', 
+                uploadProgress: 100,
+                serverFilename: result.filename
+              }
+            : f
+        )
+      )
+      
+      message.success('文件上传成功')
+    } catch (error) {
+      // 上传失败
+      setSelectedFiles?.((prev) => 
+        prev.map(f => 
+          f.id === fileId 
+            ? { 
+                ...f, 
+                uploadStatus: 'error', 
+                uploadError: error.message 
+              }
+            : f
+        )
+      )
+      
+      message.error(`文件上传失败: ${error.message}`)
+      console.error('[MessageComposer] 文件上传失败:', error)
+    }
+
+    // 清空input，允许重复选择同一文件
+    e.target.value = ''
+  }
+
+  // 处理文档上传（非OCR模式使用）
   const handleDocumentUpload = async (files) => {
     if (!files || files.length === 0) {
       setShowDocumentUploader(false)
@@ -219,45 +341,30 @@ const MessageComposer = ({
 
     setShowDocumentUploader(false)
 
-    const isOcrMode = model === 'deepseek-ocr' || model === 'deepseek-ocr-local'
-    if (isOcrMode) {
-      // OCR 模式：将文件添加到 selectedFiles
-      const file = files[0]
-      const fileData = {
-        id: Date.now() + '_' + Math.random(),
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        file: file
+    // 其他模式：直接进行 OCR 处理
+    try {
+      if (!deepseekProvider) {
+        throw new Error('未配置 DeepSeek OCR API，请先在设置中添加')
       }
-      setSelectedFiles?.((prev) => [...prev, fileData])
-      message.success('文件上传成功')
-    } else {
-      // 其他模式：直接进行 OCR 处理
+
+      const hide = message.loading(`正在处理: ${selectedOCRCommand.label}`, 0)
+
       try {
-        if (!deepseekProvider) {
-          throw new Error('未配置 DeepSeek OCR API，请先在设置中添加')
-        }
+        const result = await callDeepseekOcr({
+          file: files[0],
+          commandId: selectedOCRCommand.id,
+          provider: deepseekProvider
+        })
 
-        const hide = message.loading(`正在处理: ${selectedOCRCommand.label}`, 0)
-
-        try {
-          const result = await callDeepseekOcr({
-            file: files[0],
-            commandId: selectedOCRCommand.id,
-            provider: deepseekProvider
-          })
-
-          setInput(result.text || '')
-          message.success(`✅ ${selectedOCRCommand.label} 完成`)
-        } finally {
-          hide()
-        }
-
-      } catch (error) {
-        message.error(`OCR 处理失败: ${error.message}`)
-        console.error('OCR Error:', error)
+        setInput(result.text || '')
+        message.success(`✅ ${selectedOCRCommand.label} 完成`)
+      } finally {
+        hide()
       }
+
+    } catch (error) {
+      message.error(`OCR 处理失败: ${error.message}`)
+      console.error('OCR Error:', error)
     }
 
     setSelectedOCRCommand(null)
@@ -341,30 +448,40 @@ const MessageComposer = ({
                   alignItems: 'center',
                   padding: '6px 28px 6px 8px',
                   borderRadius: '6px',
-                  backgroundColor: 'rgba(24, 144, 255, 0.06)',
-                  border: '1px solid rgba(24, 144, 255, 0.15)',
+                  backgroundColor: file.uploadStatus === 'error' ? 'rgba(255, 77, 79, 0.06)' : 'rgba(24, 144, 255, 0.06)',
+                  border: `1px solid ${file.uploadStatus === 'error' ? 'rgba(255, 77, 79, 0.15)' : 'rgba(24, 144, 255, 0.15)'}`,
                   transition: 'all 0.2s ease',
                   cursor: 'default',
                   whiteSpace: 'nowrap'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(24, 144, 255, 0.1)'
-                  e.currentTarget.style.borderColor = 'rgba(24, 144, 255, 0.25)'
+                  if (file.uploadStatus !== 'error') {
+                    e.currentTarget.style.backgroundColor = 'rgba(24, 144, 255, 0.1)'
+                    e.currentTarget.style.borderColor = 'rgba(24, 144, 255, 0.25)'
+                  }
                   const deleteBtn = e.currentTarget.querySelector('.file-delete-btn')
                   if (deleteBtn) deleteBtn.style.opacity = '1'
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(24, 144, 255, 0.06)'
-                  e.currentTarget.style.borderColor = 'rgba(24, 144, 255, 0.15)'
+                  if (file.uploadStatus !== 'error') {
+                    e.currentTarget.style.backgroundColor = 'rgba(24, 144, 255, 0.06)'
+                    e.currentTarget.style.borderColor = 'rgba(24, 144, 255, 0.15)'
+                  }
                   const deleteBtn = e.currentTarget.querySelector('.file-delete-btn')
                   if (deleteBtn) deleteBtn.style.opacity = '0'
                 }}
               >
-                <FileTextOutlined style={{ marginRight: '6px', color: '#1890ff', fontSize: '14px' }} />
+                {file.uploadStatus === 'uploading' ? (
+                  <LoadingOutlined style={{ marginRight: '6px', color: '#1890ff', fontSize: '14px' }} />
+                ) : file.uploadStatus === 'error' ? (
+                  <CloseOutlined style={{ marginRight: '6px', color: '#ff4d4f', fontSize: '14px' }} />
+                ) : (
+                  <FileTextOutlined style={{ marginRight: '6px', color: '#1890ff', fontSize: '14px' }} />
+                )}
                 <span
                   style={{
                     fontSize: '12px',
-                    color: '#262626',
+                    color: file.uploadStatus === 'error' ? '#ff4d4f' : '#262626',
                     fontWeight: 500,
                     userSelect: 'none'
                   }}
@@ -380,6 +497,37 @@ const MessageComposer = ({
                 }}>
                   ({getFileSizeText(file)})
                 </span>
+                
+                {/* 上传进度指示器 */}
+                {file.uploadStatus === 'uploading' && (
+                  <div style={{
+                    position: 'absolute',
+                    right: '28px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: '20px',
+                    height: '20px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <Progress
+                      type="circle"
+                      percent={file.uploadProgress || 0}
+                      size={20}
+                      strokeWidth={6}
+                      strokeColor={{
+                        '0%': '#4285f4',
+                        '50%': '#34a853',
+                        '100%': '#fbbc04'
+                      }}
+                      trailColor="rgba(0, 0, 0, 0.12)"
+                      format={() => ''}
+                      strokeLinecap="round"
+                    />
+                  </div>
+                )}
+                
                 <Button
                   type="text"
                   size="small"
@@ -435,10 +583,18 @@ const MessageComposer = ({
             {(model === 'deepseek-ocr' || model === 'deepseek-ocr-local') ? (
               // OCR 模式：显示文件上传按钮 + 功能标签
               <>
+                {/* 隐藏的文件输入框 */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.tiff,.tif,.pdf"
+                  style={{ display: 'none' }}
+                  onChange={handleFileChange}
+                />
                 <Button
                   icon={<PlusOutlined />}
                   disabled={isEditingMessage}
-                  onClick={() => setShowDocumentUploader(true)}
+                  onClick={handleFileSelectClick}
                   title="上传文档进行 OCR 处理"
                 />
                 {selectedCommand && (
@@ -533,7 +689,11 @@ const MessageComposer = ({
                 icon={sendLockState.stage === 'ready' ? <SendOutlined /> : null}
                 disabled={
                   ((model === 'deepseek-ocr' || model === 'deepseek-ocr-local')
-                    ? (!input.trim() && selectedFiles.length === 0 && !selectedCommand)
+                    ? (
+                        (!input.trim() && selectedFiles.length === 0 && !selectedCommand) ||
+                        // 有文件正在上传时禁用发送按钮
+                        selectedFiles.some(f => f.uploadStatus === 'uploading')
+                      )
                     : (!input.trim() && selectedImages.length === 0 && selectedAudios.length === 0)
                   ) || sendLockState.locked
                 }

@@ -487,34 +487,50 @@ def process_file_stream():
     
     def generate():
         try:
-            # 检查文件
-            if 'file' not in request.files:
-                yield f"data: {json.dumps({'error': '未上传文件'})}\n\n"
-                return
-            
-            file = request.files['file']
-            if file.filename == '':
-                yield f"data: {json.dumps({'error': '文件名为空'})}\n\n"
-                return
-            
             # 获取参数
             function_type = request.form.get('function', 'free_ocr')
             resolution_mode = request.form.get('resolution', 'gundam')
             custom_question = request.form.get('question', '')
+            uploaded_filename = request.form.get('uploaded_filename', '')
             
             # 发送开始事件
             yield f"data: {json.dumps({'type': 'start', 'message': '开始处理...'})}\n\n"
             
-            # 保存文件
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"{timestamp}_{file.filename}"
-            upload_path = os.path.join(UPLOAD_FOLDER, filename)
-            file.save(upload_path)
-            
-            yield f"data: {json.dumps({'type': 'progress', 'stage': '文件已上传', 'progress': 10})}\n\n"
+            # 判断是使用已上传的文件还是新上传的文件
+            if uploaded_filename:
+                # 使用已上传的文件
+                upload_path = os.path.join(UPLOAD_FOLDER, uploaded_filename)
+                if not os.path.exists(upload_path):
+                    yield f"data: {json.dumps({'error': '已上传的文件不存在'})}\n\n"
+                    return
+                filename = uploaded_filename
+                yield f"data: {json.dumps({'type': 'progress', 'stage': '使用已上传文件', 'progress': 10})}\n\n"
+            else:
+                # 新上传文件
+                if 'file' not in request.files:
+                    yield f"data: {json.dumps({'error': '未上传文件'})}\n\n"
+                    return
+                
+                file = request.files['file']
+                if file.filename == '':
+                    yield f"data: {json.dumps({'error': '文件名为空'})}\n\n"
+                    return
+                
+                # 保存文件
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"{timestamp}_{file.filename}"
+                upload_path = os.path.join(UPLOAD_FOLDER, filename)
+                file.save(upload_path)
+                
+                yield f"data: {json.dumps({'type': 'progress', 'stage': '文件已上传', 'progress': 10})}\n\n"
             
             # 准备处理
             file_ext = Path(filename).suffix.lower()
+            # 如果使用已上传文件，从文件名中提取 timestamp；否则使用新的 timestamp
+            if uploaded_filename:
+                timestamp = filename.split('_')[0]  # 从文件名提取时间戳
+            else:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             output_dir = os.path.join(OUTPUT_FOLDER, timestamp)
             os.makedirs(output_dir, exist_ok=True)
             
@@ -645,19 +661,40 @@ def process_file():
         }
     """
     try:
-        # 检查文件
-        if 'file' not in request.files:
-            return jsonify({'error': '未上传文件'}), 400
-        
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': '文件名为空'}), 400
-        
         # 获取参数
         function_type = request.form.get('function', 'free_ocr')
         resolution_mode = request.form.get('resolution', 'gundam')
         custom_question = request.form.get('question', '')
         save_results = request.form.get('save_results', 'false').lower() == 'true'
+        uploaded_filename = request.form.get('uploaded_filename', '')
+        
+        # 判断是使用已上传的文件还是新上传的文件
+        if uploaded_filename:
+            # 使用已上传的文件
+            upload_path = os.path.join(UPLOAD_FOLDER, uploaded_filename)
+            if not os.path.exists(upload_path):
+                return jsonify({
+                    'success': False,
+                    'error': '已上传的文件不存在'
+                }), 400
+            filename = uploaded_filename
+            logger.info(f"使用已上传文件: {filename}")
+        else:
+            # 新上传文件
+            if 'file' not in request.files:
+                return jsonify({'error': '未上传文件'}), 400
+            
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({'error': '文件名为空'}), 400
+            
+            # 保存上传的文件
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{timestamp}_{file.filename}"
+            upload_path = os.path.join(UPLOAD_FOLDER, filename)
+            file.save(upload_path)
+            
+            logger.info(f"新上传文件: {filename}")
         
         # 验证参数
         if function_type not in OCR_FUNCTIONS:
@@ -666,20 +703,19 @@ def process_file():
         if resolution_mode not in RESOLUTION_MODES:
             return jsonify({'error': f'不支持的分辨率模式: {resolution_mode}'}), 400
         
-        # 保存上传文件
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"{timestamp}_{file.filename}"
-        upload_path = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(upload_path)
-        
         logger.info("=" * 70)
-        logger.info(f"收到处理请求: {file.filename}")
+        logger.info(f"收到处理请求: {filename}")
         logger.info(f"功能: {OCR_FUNCTIONS[function_type]['name']}")
         logger.info(f"分辨率: {resolution_mode}")
         
         try:
             # 判断文件类型
             file_ext = Path(filename).suffix.lower()
+            # 如果使用已上传文件，从文件名中提取 timestamp；否则使用新的 timestamp
+            if uploaded_filename:
+                timestamp = filename.split('_')[0]  # 从文件名提取时间戳
+            else:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             output_dir = os.path.join(OUTPUT_FOLDER, timestamp)
             os.makedirs(output_dir, exist_ok=True)
             
@@ -751,6 +787,51 @@ def process_file():
     
     except Exception as e:
         logger.error(f"处理失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/upload', methods=['POST'])
+def upload_file():
+    """
+    仅上传文件到服务器，不进行OCR处理
+    返回上传后的文件路径
+    """
+    try:
+        if 'file' not in request.files:
+            return jsonify({
+                'success': False,
+                'error': '未上传文件'
+            }), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({
+                'success': False,
+                'error': '文件名为空'
+            }), 400
+        
+        # 生成唯一的文件名
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{timestamp}_{file.filename}"
+        upload_path = os.path.join(UPLOAD_FOLDER, filename)
+        
+        # 保存文件
+        file.save(upload_path)
+        
+        logger.info(f"✓ 文件上传成功: {filename}")
+        
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'path': upload_path,
+            'originalName': file.filename,
+            'size': os.path.getsize(upload_path)
+        })
+        
+    except Exception as e:
+        logger.error(f"文件上传失败: {e}", exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)

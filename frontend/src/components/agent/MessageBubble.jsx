@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Button, Tooltip } from 'antd'
 import { CopyOutlined, EditOutlined, RedoOutlined } from '@ant-design/icons'
 import styles from '../AgentPage.module.css'
@@ -11,6 +11,7 @@ import DocumentTag from './DocumentTag'
 import CommandTag from './CommandTag'
 import DocumentPreviewModal from './DocumentPreviewModal'
 import { useStore } from '../../store'
+import { loadFiles } from '../../utils/fileStorage'
 
 // 导入 vite.svg 图标
 const ViteIcon = '/vite.svg'
@@ -53,9 +54,15 @@ const MessageBubble = ({
   setEditingImages,
   editingAudios,
   setEditingAudios,
+  editingFiles,
+  setEditingFiles,
+  editingCommands,
+  setEditingCommands,
   originalEditingContent,
   originalEditingImages,
   originalEditingAudios,
+  originalEditingFiles,
+  originalEditingCommands,
   onEditingTranscriptChange,
   onCopy,
   onEdit,
@@ -77,6 +84,7 @@ const MessageBubble = ({
 }) => {
   const isEditing = editingMessageId === message.id
   const [previewFile, setPreviewFile] = useState(null)
+  const [restorationAttempted, setRestorationAttempted] = useState(false)
   
   // 从 store 中获取当前会话和 File 对象映射
   const currentSessionId = useStore((state) => state.currentSessionId)
@@ -84,6 +92,42 @@ const MessageBubble = ({
   
   // 获取当前消息的 File 对象映射
   const messageFileObjects = ocrFileObjects?.[currentSessionId]?.[message.id] || {}
+  
+  // 从 IndexedDB 恢复文件对象（如果需要）
+  useEffect(() => {
+    const restoreFiles = async () => {
+      // 检查是否有files但没有File对象，且还未尝试过恢复
+      if (message.files && message.files.length > 0 && 
+          Object.keys(messageFileObjects).length === 0 && 
+          !restorationAttempted) {
+        setRestorationAttempted(true)
+        
+        try {
+          console.log('[MessageBubble] 从 IndexedDB 恢复文件...', message.id)
+          const fileIds = message.files.map(f => f.id)
+          const restoredFiles = await loadFiles(currentSessionId, message.id, fileIds)
+          
+          if (Object.keys(restoredFiles).length > 0) {
+            // 直接使用 useStore.setState 更新，避免闭包问题
+            useStore.setState((state) => ({
+              ocrFileObjects: {
+                ...state.ocrFileObjects,
+                [currentSessionId]: {
+                  ...(state.ocrFileObjects?.[currentSessionId] || {}),
+                  [message.id]: restoredFiles
+                }
+              }
+            }))
+            console.log('[MessageBubble] 恢复了 ' + Object.keys(restoredFiles).length + ' 个文件')
+          }
+        } catch (error) {
+          console.error('[MessageBubble] 从 IndexedDB 恢复文件失败:', error)
+        }
+      }
+    }
+    
+    restoreFiles()
+  }, [message.id, message.files, currentSessionId, messageFileObjects, restorationAttempted])
 
   // 辅助函数：从消息内容中移除 <audio>...</audio> 标签
   // 音频转写文本完全通过 AudioTag 组件显示
@@ -126,26 +170,24 @@ const MessageBubble = ({
             />
           ) : (
             <>
-              <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`} style={{ position: 'relative' }}>
+              <div className={`${styles.msgBubble} ${styles.msgBubbleUser}`} style={{ position: 'relative', padding: '14px 16px' }}>
                 {messageRelations.length > 0 && (
                   <RelationConnections messageId={message.id} relations={messageRelations} infonIndex={infonIndex} />
                 )}
-                {/* 命令标签 */}
-                {Array.isArray(message.commands) && message.commands.length > 0 && (
-                  <div style={{ marginBottom: '8px' }}>
-                    {message.commands.map((command, idx) => (
-                      <CommandTag key={command.id || idx} command={command} />
-                    ))}
-                  </div>
-                )}
-                {/* 文档标签 */}
+                {/* 文档标签（包含嵌入的命令标签） */}
                 {Array.isArray(message.files) && message.files.length > 0 && (
-                  <div style={{ marginBottom: '8px' }}>
+                  <div style={{ 
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '8px',
+                    marginBottom: displayContent ? '12px' : '0' 
+                  }}>
                     {message.files.map((file, idx) => (
                       <DocumentTag 
                         key={file.id || idx} 
                         file={file} 
                         onClick={() => setPreviewFile(file)}
+                        command={message.commands?.[idx]}
                       />
                     ))}
                   </div>
@@ -205,7 +247,7 @@ const MessageBubble = ({
                     type="text" 
                     size="small" 
                     icon={<EditOutlined />}
-                    onClick={() => onEdit(message.id, message.content, message.images, message.audios, message.imageAnalysis)}
+                    onClick={() => onEdit(message.id, message.content, message.images, message.audios, message.imageAnalysis, message.files, message.commands)}
                     className={styles.messageActionBtn}
                     disabled={isGenerating}
                   />

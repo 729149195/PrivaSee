@@ -35,6 +35,11 @@
     line-height: 1.6;
 }
 
+/* 移除空段落（中文注释） */
+.markdown p:empty {
+    display: none;
+}
+
 .markdown ul, .markdown ol {
     margin: 8px 0;
     padding-left: 2em;

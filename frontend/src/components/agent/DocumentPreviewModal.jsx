@@ -52,27 +52,8 @@ const DocumentPreviewModal = ({ file, fileObject, onClose }) => {
       styles={{ body: { padding: 0, maxHeight: 'calc(100vh - 120px)', overflow: 'hidden' } }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)' }}>
-        {/* 文件信息头部 */}
-        <div style={{ 
-          padding: '16px 24px', 
-          borderBottom: '1px solid #f0f0f0',
-          backgroundColor: '#fafafa'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <FileTextOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
-            <div>
-              <div style={{ fontSize: '16px', fontWeight: 500, color: '#262626' }}>
-                {file.name}
-              </div>
-              <div style={{ fontSize: '12px', color: '#8c8c8c', marginTop: '4px' }}>
-                {file.type} • {getFileSizeText(file)}
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        {/* 文件预览内容 */}
-        <div style={{ flex: 1, overflow: 'auto', padding: '24px', backgroundColor: '#fff' }}>
+        {/* 文件预览内容 - 直接显示，不带文件名栏 */}
+        <div style={{ flex: 1, overflow: 'auto', padding: '0', backgroundColor: '#fff' }}>
           {previewUrl ? (
             file.type === 'application/pdf' ? (
               <embed
@@ -80,21 +61,34 @@ const DocumentPreviewModal = ({ file, fileObject, onClose }) => {
                 type="application/pdf"
                 width="100%"
                 height="100%"
-                style={{ minHeight: '600px', border: 'none' }}
+                style={{ minHeight: '100%', border: 'none' }}
               />
             ) : file.type.startsWith('image/') ? (
-              <img 
-                src={previewUrl} 
-                alt={file.name} 
-                style={{ 
-                  maxWidth: '100%', 
-                  height: 'auto',
-                  display: 'block',
-                  margin: '0 auto'
-                }} 
-              />
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                minHeight: '100%',
+                padding: '20px'
+              }}>
+                <img 
+                  src={previewUrl} 
+                  alt={file.name} 
+                  style={{ 
+                    maxWidth: '100%', 
+                    maxHeight: '100%',
+                    height: 'auto',
+                    objectFit: 'contain'
+                  }} 
+                />
+              </div>
             ) : (
               <div style={{ 
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: '100%',
                 textAlign: 'center', 
                 padding: '60px 20px', 
                 color: '#8c8c8c' 
@@ -108,6 +102,11 @@ const DocumentPreviewModal = ({ file, fileObject, onClose }) => {
             )
           ) : (
             <div style={{ 
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: '100%',
               textAlign: 'center', 
               padding: '60px 20px', 
               color: '#8c8c8c' 

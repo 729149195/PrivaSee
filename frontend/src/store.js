@@ -5,6 +5,7 @@ import { getDefaultModelsConfig } from './config/defaultModelsConfig'
 import { getDefaultApiModels, getDefaultApiModelIds } from './config/defaultApiModelsConfig'
 import { getModelModalities } from './utils/modelUtils'
 import { callDeepseekOcr, callDeepseekOcrStream } from './utils/deepseekOcrApi'
+import { saveFiles, loadFiles, deleteMessageFiles, deleteSessionFiles } from './utils/fileStorage'
 
 // 说明：
 // 1) 本 store 管理 ChatGPT 风格的多会话、消息流与流式生成状态；
@@ -1044,6 +1045,11 @@ Output format:
         sessionKeywords: updatedKeywords
       }
     })
+    
+    // 异步清理 IndexedDB 中的文件
+    deleteSessionFiles(id).catch(err => 
+      console.error('[deleteSession] 清理 IndexedDB 文件失败:', err)
+    )
   },
 
   // 重命名会话
@@ -2301,6 +2307,22 @@ Output format:
       }
     }))
 
+    // 异步保存文件到 IndexedDB（持久化存储）
+    ;(async () => {
+      try {
+        const filesToSave = selectedFiles
+          .filter(f => f.file)
+          .map(f => ({ id: f.id, file: f.file }))
+        
+        if (filesToSave.length > 0) {
+          await saveFiles(session.id, userMsgId, filesToSave)
+          console.log('[sendMessageWithDeepSeekOCR] 文件已保存到 IndexedDB', { count: filesToSave.length })
+        }
+      } catch (error) {
+        console.error('[sendMessageWithDeepSeekOCR] 保存文件到 IndexedDB 失败:', error)
+      }
+    })()
+
     // 消息内容只保留文本，不包含标签文本
     const messageContent = text || ''
 
@@ -2355,9 +2377,20 @@ Output format:
       for (let i = 0; i < selectedFiles.length; i++) {
         const fileData = selectedFiles[i]
         const file = fileData.file // 获取原始 File 对象
+        const uploadedFilename = fileData.serverFilename // 已上传的文件名
         const command = selectedCommands[i] || selectedCommands[0] // 如果命令数量少于文件，使用第一个命令
 
         console.log(`[sendMessageWithDeepSeekOCR] 流式处理文件 ${i + 1}/${selectedFiles.length}: ${fileData.name}`)
+        
+        // 如果文件还没有上传完成，等待上传
+        if (fileData.uploadStatus === 'uploading') {
+          console.log(`[sendMessageWithDeepSeekOCR] 文件还在上传中，这不应该发生`)
+          throw new Error('文件还在上传中')
+        }
+        
+        if (fileData.uploadStatus === 'error') {
+          throw new Error(`文件上传失败: ${fileData.uploadError}`)
+        }
 
         // 如果是多文件，添加文件分隔符
         if (selectedFiles.length > 1 && i > 0) {
@@ -2375,9 +2408,10 @@ Output format:
         }
 
         try {
-          // 使用流式 API
+          // 使用流式 API，传递已上传的文件名
           const result = await callDeepseekOcrStream({
-            file: file,
+            file: uploadedFilename ? null : file,  // 如果有上传的文件名就不传file
+            uploadedFilename: uploadedFilename,  // 传递已上传的文件名
             commandId: command.id,
             provider: provider,
             resolution: resolution,
@@ -3091,8 +3125,8 @@ Output format:
         : fillPromptTemplate(allInfons, selectedLaw.data, null, [])  // 提取信息元模式：传递信息元列表
       
       console.log(`[Privacy Inference] 发起推理请求到 ${apiUrl}，使用模型: ${configuredModel}`)
-      console.log(`[Privacy Inference] Prompt 长度: ${prompt.length} 字符`)
-      console.log(`[Privacy Inference] Prompt 预览 (前500字):`, prompt)
+
+      console.log(`[Privacy Inference] Prompt 预览:`, prompt)
       
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',

@@ -66,3 +66,5 @@ tmp/
 temp/
 *.tmp
 
+data/outputs/
+data/uploads/

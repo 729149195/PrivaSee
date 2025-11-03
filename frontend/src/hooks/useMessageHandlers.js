@@ -28,9 +28,13 @@ export function useMessageHandlers(
   const [editingContent, setEditingContent] = useState('')
   const [editingImages, setEditingImages] = useState([])
   const [editingAudios, setEditingAudios] = useState([])
+  const [editingFiles, setEditingFiles] = useState([]) // OCR文件
+  const [editingCommands, setEditingCommands] = useState([]) // OCR命令
   const [originalEditingContent, setOriginalEditingContent] = useState('') // 保存原始内容
   const [originalEditingImages, setOriginalEditingImages] = useState([]) // 保存原始图片
   const [originalEditingAudios, setOriginalEditingAudios] = useState([]) // 保存原始音频
+  const [originalEditingFiles, setOriginalEditingFiles] = useState([]) // 保存原始文件
+  const [originalEditingCommands, setOriginalEditingCommands] = useState([]) // 保存原始命令
   const isAdoptingPendingRef = useRef(false)
 
   /**
@@ -57,7 +61,7 @@ export function useMessageHandlers(
   /**
    * 开始编辑消息：进入编辑模式（不立即标记expiring）
    */
-  const handleEditMessage = (messageId, content, images, audios, imageAnalysisMap = {}) => {
+  const handleEditMessage = (messageId, content, images, audios, imageAnalysisMap = {}, files = [], commands = []) => {
     // 从content中移除音频标签，编辑时只编辑纯文本
     const contentWithoutAudio = removeAudioTags(content)
     
@@ -82,12 +86,16 @@ export function useMessageHandlers(
     setEditingContent(contentWithoutAudio)
     setEditingImages(imageObjects)
     setEditingAudios(audios || [])
-    // 保存原始内容、图片和音频，用于判断是否发生变化
+    setEditingFiles(files || [])
+    setEditingCommands(commands || [])
+    // 保存原始内容、图片、音频、文件和命令，用于判断是否发生变化
     setOriginalEditingContent(contentWithoutAudio)
     setOriginalEditingImages(imageObjects)
     setOriginalEditingAudios(audios || [])
+    setOriginalEditingFiles(files || [])
+    setOriginalEditingCommands(commands || [])
     
-    console.log('[EditMessage] 进入编辑模式', { messageId, hasAudios: audios?.length, hasImageAnalysis: Object.keys(imageAnalysisMap || {}).length })
+    console.log('[EditMessage] 进入编辑模式', { messageId, hasAudios: audios?.length, hasImageAnalysis: Object.keys(imageAnalysisMap || {}).length, hasFiles: files?.length, hasCommands: commands?.length })
   }
   
   /**
@@ -171,9 +179,13 @@ export function useMessageHandlers(
     setEditingContent('')
     setEditingImages([])
     setEditingAudios([])
+    setEditingFiles([])
+    setEditingCommands([])
     setOriginalEditingContent('')
     setOriginalEditingImages([])
     setOriginalEditingAudios([])
+    setOriginalEditingFiles([])
+    setOriginalEditingCommands([])
     
     // 标志会在 AgentPage useEffect 中检测并重置
     
@@ -205,6 +217,21 @@ export function useMessageHandlers(
     const newMessages = session.messages.slice(0, messageIndex)
     const deletedMessages = session.messages.slice(messageIndex)
     const deletedMessageIds = new Set(deletedMessages.map(m => m.id))
+    
+    // 异步清理 IndexedDB 中被删除消息的文件
+    ;(async () => {
+      try {
+        const { deleteMessageFiles } = await import('../utils/fileStorage')
+        for (const msg of deletedMessages) {
+          if (msg.files && msg.files.length > 0) {
+            await deleteMessageFiles(session.id, msg.id)
+          }
+        }
+        console.log('[SaveEdit] 清理了 ' + deletedMessages.length + ' 条消息的文件')
+      } catch (error) {
+        console.error('[SaveEdit] 清理 IndexedDB 文件失败:', error)
+      }
+    })()
     
     // 更新 session 的消息列表
     const sessions = useStore.getState().sessions
@@ -293,8 +320,70 @@ export function useMessageHandlers(
     // 设置标志，防止useEffect清空pending
     isAdoptingPendingRef.current = true
     
+    // 判断是否是 OCR 模式（包括 API 和本地版本）
+    const currentModel = useStore.getState().model
+    const isOcrMode = currentModel === 'deepseek-ocr' || currentModel === 'deepseek-ocr-local'
+    
     // 发送新消息（包含音频）
-    if (editingImages.length > 0 || editingAudios.length > 0) {
+    if (isOcrMode && editingFiles.length > 0) {
+      // OCR 模式：使用 sendMessageWithDeepSeekOCR
+      const commandsToSend = editingCommands.length > 0 ? editingCommands : []
+      // 从原始消息中提取分辨率配置，如果没有则使用默认值
+      const originalMessage = session.messages.find(m => m.id === editingMessageId)
+      const resolutionToSend = originalMessage?.resolution || 'gundam'
+      
+      // 恢复 File 对象：优先从内存获取，如果不存在则从 IndexedDB 恢复
+      let messageFileObjects = useStore.getState().ocrFileObjects?.[session.id]?.[editingMessageId] || {}
+      
+      // 如果内存中没有，尝试从 IndexedDB 恢复
+      if (Object.keys(messageFileObjects).length === 0) {
+        try {
+          console.log('[SaveEdit] 从 IndexedDB 恢复文件...')
+          const { loadFiles } = await import('../utils/fileStorage')
+          const fileIds = editingFiles.map(f => f.id)
+          messageFileObjects = await loadFiles(session.id, editingMessageId, fileIds)
+          console.log('[SaveEdit] 从 IndexedDB 恢复了 ' + Object.keys(messageFileObjects).length + ' 个文件')
+        } catch (error) {
+          console.error('[SaveEdit] 从 IndexedDB 恢复文件失败:', error)
+        }
+      }
+      
+      // 构建包含 File 对象的 files 数组
+      const filesToSend = editingFiles.map(fileMetadata => {
+        const fileObj = messageFileObjects[fileMetadata.id]
+        if (!fileObj) {
+          console.warn('[SaveEdit] 无法找到 File 对象:', fileMetadata.id)
+          // 如果找不到 File 对象，返回元数据（sendMessageWithDeepSeekOCR 会报错）
+          return fileMetadata
+        }
+        return {
+          ...fileMetadata,
+          file: fileObj
+        }
+      })
+      
+      // 检查是否所有文件都有 File 对象
+      const missingFiles = filesToSend.filter(f => !f.file)
+      if (missingFiles.length > 0) {
+        antdMessage.error('无法重新编辑：文件对象已丢失')
+        console.error('[SaveEdit] 缺失 File 对象的文件:', missingFiles)
+        return
+      }
+      
+      console.log('[SaveEdit] OCR 模式：重新发送', { commands: commandsToSend.length, files: filesToSend.length, resolution: resolutionToSend })
+      
+      const userId = await useStore.getState().sendMessageWithDeepSeekOCR(text, commandsToSend, filesToSend, resolutionToSend)
+      
+      // OCR 模式下处理信息元逻辑
+      try {
+        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
+        if (result.adopted === 0 && inferenceMode === 'extract') {
+          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
+          startMessageInfons?.(userId)
+        }
+        console.log('[SaveEdit] OCR 模式信息元处理完成', { adopted: result.adopted, mode: inferenceMode })
+      } catch (_) {}
+    } else if (editingImages.length > 0 || editingAudios.length > 0) {
       // 提取图片 URL（兼容字符串和对象格式）
       const imageUrls = editingImages.map(img => typeof img === 'string' ? img : img.url)
       
@@ -350,9 +439,13 @@ export function useMessageHandlers(
     setEditingContent('')
     setEditingImages([])
     setEditingAudios([])
+    setEditingFiles([])
+    setEditingCommands([])
     setOriginalEditingContent('')
     setOriginalEditingImages([])
     setOriginalEditingAudios([])
+    setOriginalEditingFiles([])
+    setOriginalEditingCommands([])
     
     // 标志会在 AgentPage useEffect 中检测并重置
     
@@ -415,6 +508,21 @@ export function useMessageHandlers(
     const updatedMessages = messages.slice(0, userIndex)
     const deletedMessages = messages.slice(userIndex)
     const deletedMessageIds = deletedMessages.map(m => m.id)
+
+    // 异步清理 IndexedDB 中被删除消息的文件
+    ;(async () => {
+      try {
+        const { deleteMessageFiles } = await import('../utils/fileStorage')
+        for (const msg of deletedMessages) {
+          if (msg.files && msg.files.length > 0) {
+            await deleteMessageFiles(session.id, msg.id)
+          }
+        }
+        console.log('[Retry] 清理了 ' + deletedMessages.length + ' 条消息的文件')
+      } catch (error) {
+        console.error('[Retry] 清理 IndexedDB 文件失败:', error)
+      }
+    })()
 
     // 清理被删除消息的信息元
     if (currentInfonSession?.runs) {
@@ -592,9 +700,15 @@ export function useMessageHandlers(
     setEditingImages,
     editingAudios,
     setEditingAudios,
+    editingFiles,
+    setEditingFiles,
+    editingCommands,
+    setEditingCommands,
     originalEditingContent,
     originalEditingImages,
     originalEditingAudios,
+    originalEditingFiles,
+    originalEditingCommands,
     isAdoptingPendingRef,
     handleCopyMessage,
     handleEditMessage,

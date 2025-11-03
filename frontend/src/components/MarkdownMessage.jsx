@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import remarkBreaks from 'remark-breaks'
 import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeRaw from 'rehype-raw'
@@ -31,6 +30,26 @@ export default function MarkdownMessage({ content = '' }) {
   const components = useMemo(() => ({
     // 段落渲染：检查是否包含块级元素，避免嵌套错误
     p({ children, node, ...props }) {
+      // 检查是否为空段落或只包含换行符
+      const isEmptyParagraph = () => {
+        if (!children) return true
+        const childArray = React.Children.toArray(children)
+        if (childArray.length === 0) return true
+        
+        // 检查是否只包含空白字符
+        const textContent = childArray
+          .map(child => typeof child === 'string' ? child : '')
+          .join('')
+          .trim()
+        
+        return textContent === ''
+      }
+      
+      // 如果是空段落，不渲染
+      if (isEmptyParagraph()) {
+        return null
+      }
+      
       // 递归检查所有子元素，确保没有块级元素
       const hasBlockChild = (child) => {
         if (!React.isValidElement(child)) {
@@ -132,7 +151,7 @@ export default function MarkdownMessage({ content = '' }) {
     <div className={styles.root}>
       <div className={styles.markdown}>
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
+          remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeRaw, rehypeKatex, [rehypeHighlight, { detect: true }]]}
           components={components}
           skipHtml={false}
