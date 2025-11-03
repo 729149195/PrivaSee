@@ -5,6 +5,18 @@ import react from '@vitejs/plugin-react'
 // 允许通过 Tailscale Funnel 的 ts.net 域名访问开发服务器
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: {
+    include: ['mammoth', 'xlsx'],
+    esbuildOptions: {
+      target: 'es2020'
+    }
+  },
+  build: {
+    target: 'es2020',
+    commonjsOptions: {
+      include: [/mammoth/, /xlsx/, /node_modules/]
+    }
+  },
   server: {
     host: true,
     port: 5173,

@@ -208,26 +208,28 @@ export async function callDeepseekOcrStream({
     headers['Authorization'] = `Bearer ${provider.apiKey}`
   }
 
-  // 发起 SSE 请求
-  const response = await fetch(`${baseUrl}/process/stream`, {
-    method: 'POST',
-    headers,
-    body: formData,
-    signal
-  })
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`)
-  }
-
-  // 处理 SSE 流
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let fullText = ''
-  let metadata = null
-
+  let reader = null
+  
   try {
+    // 发起 SSE 请求
+    const response = await fetch(`${baseUrl}/process/stream`, {
+      method: 'POST',
+      headers,
+      body: formData,
+      signal
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    // 处理 SSE 流
+    reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let fullText = ''
+    let metadata = null
+
     while (true) {
       const { value, done } = await reader.read()
       if (done) break
@@ -270,14 +272,29 @@ export async function callDeepseekOcrStream({
         }
       }
     }
-  } finally {
-    reader.releaseLock()
-  }
 
-  return {
-    text: fullText,
-    command,
-    metadata
+    return {
+      text: fullText,
+      command,
+      metadata
+    }
+  } catch (error) {
+    // 检查是否是用户中断
+    if (error.name === 'AbortError' || signal?.aborted) {
+      const abortError = new Error('用户已停止处理')
+      abortError.name = 'AbortError'
+      throw abortError
+    }
+    throw error
+  } finally {
+    // 清理资源
+    if (reader) {
+      try {
+        reader.releaseLock()
+      } catch (e) {
+        // 忽略释放锁的错误
+      }
+    }
   }
 }
 

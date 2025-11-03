@@ -188,6 +188,12 @@ def load_model():
             MODEL_PATH,
             trust_remote_code=True
         )
+        
+        # 设置 pad_token 以消除警告
+        if ocr_tokenizer.pad_token is None:
+            ocr_tokenizer.pad_token = ocr_tokenizer.eos_token
+            logger.info("✓ 已设置 pad_token = eos_token")
+        
         logger.info("✓ Tokenizer 加载完成")
         
         # 加载模型
@@ -234,8 +240,73 @@ def load_model():
         raise
 
 # =============================================================================
-# PDF 处理工具
+# 文档转换工具
 # =============================================================================
+
+def convert_office_to_pdf(input_path: str, output_dir: str) -> str:
+    """
+    将 Office 文档（Word, Excel, PowerPoint）转换为 PDF
+    使用 LibreOffice 命令行工具
+    
+    Args:
+        input_path: 输入文件路径 (.docx, .xlsx, .pptx 等)
+        output_dir: 输出目录
+        
+    Returns:
+        转换后的 PDF 文件路径
+    """
+    import subprocess
+    
+    logger.info(f"转换 Office 文档为 PDF: {input_path}")
+    
+    try:
+        # 检查 LibreOffice 是否安装
+        try:
+            subprocess.run(['libreoffice', '--version'], 
+                         capture_output=True, check=True, timeout=5)
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+            raise RuntimeError(
+                "LibreOffice 未安装或不可用。\n"
+                "安装方法: sudo apt-get install libreoffice\n"
+                "或 macOS: brew install libreoffice"
+            )
+        
+        # 使用 LibreOffice 转换为 PDF
+        cmd = [
+            'libreoffice',
+            '--headless',  # 无界面模式
+            '--convert-to', 'pdf',
+            '--outdir', output_dir,
+            input_path
+        ]
+        
+        logger.info(f"执行命令: {' '.join(cmd)}")
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60  # 60秒超时
+        )
+        
+        if result.returncode != 0:
+            raise RuntimeError(f"LibreOffice 转换失败: {result.stderr}")
+        
+        # 查找生成的 PDF 文件
+        input_stem = Path(input_path).stem
+        pdf_path = os.path.join(output_dir, f"{input_stem}.pdf")
+        
+        if not os.path.exists(pdf_path):
+            raise RuntimeError(f"PDF 文件未生成: {pdf_path}")
+        
+        logger.info(f"✓ Office 文档转换完成: {pdf_path}")
+        return pdf_path
+        
+    except subprocess.TimeoutExpired:
+        logger.error("LibreOffice 转换超时")
+        raise RuntimeError("文档转换超时（60秒），文件可能太大或格式复杂")
+    except Exception as e:
+        logger.error(f"Office 文档转换失败: {e}")
+        raise
 
 def convert_pdf_to_images(pdf_path: str, output_dir: str, dpi: int = 300) -> List[str]:
     """
@@ -504,6 +575,13 @@ def process_file_stream():
                     yield f"data: {json.dumps({'error': '已上传的文件不存在'})}\n\n"
                     return
                 filename = uploaded_filename
+                # 从文件名中提取原始文件名（去掉时间戳前缀）
+                # 格式：YYYYMMDD_HHMMSS_原始文件名
+                parts = filename.split('_', 2)  # 最多分割成3部分
+                if len(parts) >= 3:
+                    original_filename = parts[2]  # 原始文件名
+                else:
+                    original_filename = filename
                 yield f"data: {json.dumps({'type': 'progress', 'stage': '使用已上传文件', 'progress': 10})}\n\n"
             else:
                 # 新上传文件
@@ -516,6 +594,7 @@ def process_file_stream():
                     yield f"data: {json.dumps({'error': '文件名为空'})}\n\n"
                     return
                 
+                original_filename = file.filename
                 # 保存文件
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 filename = f"{timestamp}_{file.filename}"
@@ -528,7 +607,13 @@ def process_file_stream():
             file_ext = Path(filename).suffix.lower()
             # 如果使用已上传文件，从文件名中提取 timestamp；否则使用新的 timestamp
             if uploaded_filename:
-                timestamp = filename.split('_')[0]  # 从文件名提取时间戳
+                # 尝试从文件名提取时间戳，格式：YYYYMMDD_HHMMSS_...
+                parts = filename.split('_')
+                if len(parts) >= 2 and parts[0].isdigit() and len(parts[0]) == 8:
+                    timestamp = parts[0]
+                else:
+                    # 如果格式不匹配，使用当前时间戳
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             else:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             output_dir = os.path.join(OUTPUT_FOLDER, timestamp)
@@ -536,8 +621,28 @@ def process_file_stream():
             
             files_to_process = []
             
+            # Office 文档格式列表
+            office_extensions = ['.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.odt', '.ods', '.odp']
+            
+            # 处理 Office 文档：先转换为 PDF
+            if file_ext in office_extensions:
+                yield f"data: {json.dumps({'type': 'progress', 'stage': f'转换 {file_ext.upper()} 为 PDF...', 'progress': 15})}\n\n"
+                try:
+                    pdf_path = convert_office_to_pdf(upload_path, output_dir)
+                    yield f"data: {json.dumps({'type': 'progress', 'stage': 'Office 文档已转换为 PDF', 'progress': 20})}\n\n"
+                    
+                    # 转换 PDF 为图片
+                    if not PDF_SUPPORT:
+                        yield f"data: {json.dumps({'error': 'PDF支持未启用，无法继续处理'})}\n\n"
+                        return
+                    files_to_process = convert_pdf_to_images(pdf_path, output_dir)
+                    yield f"data: {json.dumps({'type': 'progress', 'stage': f'PDF已转换({len(files_to_process)}页)', 'progress': 30})}\n\n"
+                except Exception as e:
+                    yield f"data: {json.dumps({'type': 'error', 'error': f'Office文档转换失败: {str(e)}'})}\n\n"
+                    return
+            
             # PDF转换
-            if file_ext == '.pdf':
+            elif file_ext == '.pdf':
                 yield f"data: {json.dumps({'type': 'progress', 'stage': '转换PDF...', 'progress': 20})}\n\n"
                 if not PDF_SUPPORT:
                     yield f"data: {json.dumps({'error': 'PDF支持未启用'})}\n\n"
@@ -545,6 +650,7 @@ def process_file_stream():
                 files_to_process = convert_pdf_to_images(upload_path, output_dir)
                 yield f"data: {json.dumps({'type': 'progress', 'stage': f'PDF已转换({len(files_to_process)}页)', 'progress': 30})}\n\n"
             else:
+                # 图片文件直接处理
                 files_to_process = [upload_path]
             
             # 加载模型
@@ -553,9 +659,21 @@ def process_file_stream():
             
             # 处理文件
             all_results = []
+            stop_flag = {'stop': False}  # 共享停止标志
+            
             for idx, image_path in enumerate(files_to_process, 1):
+                # 检查是否需要停止
+                if stop_flag['stop']:
+                    logger.info("检测到客户端断开，停止处理")
+                    break
+                    
                 progress = 40 + int((idx / len(files_to_process)) * 50)
-                yield f"data: {json.dumps({'type': 'progress', 'stage': f'处理第{idx}/{len(files_to_process)}页...', 'progress': progress})}\n\n"
+                try:
+                    yield f"data: {json.dumps({'type': 'progress', 'stage': f'处理第{idx}/{len(files_to_process)}页...', 'progress': progress})}\n\n"
+                except (GeneratorExit, StopIteration, BrokenPipeError, ConnectionError):
+                    logger.info("客户端连接已断开，停止处理")
+                    stop_flag['stop'] = True
+                    break
                 
                 # 使用队列实现真正的实时流式传输
                 text_queue = queue.Queue()
@@ -563,7 +681,8 @@ def process_file_stream():
                 
                 def stream_callback(text_chunk):
                     """实时发送文本块到队列"""
-                    text_queue.put(('content', text_chunk))
+                    if not stop_flag['stop']:
+                        text_queue.put(('content', text_chunk))
                 
                 def run_inference():
                     """在独立线程中运行推理"""
@@ -580,21 +699,30 @@ def process_file_stream():
                         result_container['result'] = result
                         text_queue.put(('done', None))
                     except Exception as e:
-                        result_container['error'] = str(e)
-                        text_queue.put(('error', str(e)))
+                        if not stop_flag['stop']:
+                            result_container['error'] = str(e)
+                            text_queue.put(('error', str(e)))
                 
                 # 启动推理线程
-                inference_thread = threading.Thread(target=run_inference)
+                inference_thread = threading.Thread(target=run_inference, daemon=True)
                 inference_thread.start()
                 
                 # 主线程持续从队列读取并发送数据
+                client_disconnected = False
                 while True:
                     try:
                         msg_type, data = text_queue.get(timeout=0.1)
                         
                         if msg_type == 'content':
                             # 实时发送文本块
-                            yield f"data: {json.dumps({'type': 'content', 'text': data})}\n\n"
+                            try:
+                                yield f"data: {json.dumps({'type': 'content', 'text': data})}\n\n"
+                            except (GeneratorExit, StopIteration, BrokenPipeError, ConnectionError) as e:
+                                # 客户端断开连接
+                                logger.info(f"检测到客户端断开连接: {type(e).__name__}")
+                                stop_flag['stop'] = True
+                                client_disconnected = True
+                                break
                         elif msg_type == 'done':
                             # 推理完成
                             break
@@ -602,12 +730,18 @@ def process_file_stream():
                             # 发生错误
                             yield f"data: {json.dumps({'type': 'error', 'error': data})}\n\n"
                             break
-                    except:
+                    except queue.Empty:
                         # 队列为空，继续等待
-                        pass
+                        # 检查线程是否还活着
+                        if not inference_thread.is_alive() and text_queue.empty():
+                            break
                 
-                # 等待线程结束
-                inference_thread.join()
+                if client_disconnected:
+                    logger.info("客户端已断开，停止所有处理")
+                    break
+                
+                # 等待线程结束（设置超时避免无限等待）
+                inference_thread.join(timeout=1.0)
                 
                 # 记录完整结果
                 if result_container['result']:
@@ -618,19 +752,23 @@ def process_file_stream():
                     separator = '\n\n'
                     yield f"data: {json.dumps({'type': 'content', 'text': separator})}\n\n"
             
-            # 发送完成事件
-            final_text = "\n\n".join(all_results)
-            metadata = {
-                'filename': file.filename,
-                'function': function_type,
-                'function_name': OCR_FUNCTIONS[function_type]['name'],
-                'resolution': resolution_mode,
-                'is_pdf': file_ext == '.pdf',
-                'pages': len(files_to_process),
-                'timestamp': timestamp
-            }
-            
-            yield f"data: {json.dumps({'type': 'done', 'metadata': metadata})}\n\n"
+            # 发送完成事件（仅当没有被中断时）
+            if not stop_flag['stop']:
+                final_text = "\n\n".join(all_results)
+                metadata = {
+                    'filename': original_filename,
+                    'function': function_type,
+                    'function_name': OCR_FUNCTIONS[function_type]['name'],
+                    'resolution': resolution_mode,
+                    'is_pdf': file_ext == '.pdf',
+                    'is_office': file_ext in office_extensions,
+                    'pages': len(files_to_process),
+                    'timestamp': timestamp
+                }
+                
+                yield f"data: {json.dumps({'type': 'done', 'metadata': metadata})}\n\n"
+            else:
+                logger.info("处理被中断，不发送完成事件")
             
         except Exception as e:
             logger.error(f"流式处理失败: {e}", exc_info=True)
@@ -678,6 +816,13 @@ def process_file():
                     'error': '已上传的文件不存在'
                 }), 400
             filename = uploaded_filename
+            # 从文件名中提取原始文件名（去掉时间戳前缀）
+            # 格式：YYYYMMDD_HHMMSS_原始文件名
+            parts = filename.split('_', 2)  # 最多分割成3部分
+            if len(parts) >= 3:
+                original_filename = parts[2]  # 原始文件名
+            else:
+                original_filename = filename
             logger.info(f"使用已上传文件: {filename}")
         else:
             # 新上传文件
@@ -688,6 +833,7 @@ def process_file():
             if file.filename == '':
                 return jsonify({'error': '文件名为空'}), 400
             
+            original_filename = file.filename
             # 保存上传的文件
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f"{timestamp}_{file.filename}"
@@ -713,7 +859,13 @@ def process_file():
             file_ext = Path(filename).suffix.lower()
             # 如果使用已上传文件，从文件名中提取 timestamp；否则使用新的 timestamp
             if uploaded_filename:
-                timestamp = filename.split('_')[0]  # 从文件名提取时间戳
+                # 尝试从文件名提取时间戳，格式：YYYYMMDD_HHMMSS_...
+                parts = filename.split('_')
+                if len(parts) >= 2 and parts[0].isdigit() and len(parts[0]) == 8:
+                    timestamp = parts[0]
+                else:
+                    # 如果格式不匹配，使用当前时间戳
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             else:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             output_dir = os.path.join(OUTPUT_FOLDER, timestamp)
@@ -721,8 +873,35 @@ def process_file():
             
             files_to_process = []
             
+            # Office 文档格式列表
+            office_extensions = ['.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.odt', '.ods', '.odp']
+            
+            # 处理 Office 文档：先转换为 PDF
+            if file_ext in office_extensions:
+                logger.info(f"检测到 {file_ext.upper()} 文件，开始转换为 PDF...")
+                try:
+                    pdf_path = convert_office_to_pdf(upload_path, output_dir)
+                    logger.info(f"✓ Office 文档已转换为 PDF: {pdf_path}")
+                    
+                    # 转换 PDF 为图片
+                    if not PDF_SUPPORT:
+                        return jsonify({
+                            'error': 'PDF 支持未启用',
+                            'message': '请安装: sudo apt-get install poppler-utils && pip install pdf2image'
+                        }), 400
+                    
+                    logger.info("转换 PDF 为图片...")
+                    files_to_process = convert_pdf_to_images(pdf_path, output_dir)
+                    logger.info(f"✓ 已转换为 {len(files_to_process)} 张图片")
+                except Exception as e:
+                    logger.error(f"Office 文档转换失败: {e}")
+                    return jsonify({
+                        'success': False,
+                        'error': f'Office 文档转换失败: {str(e)}'
+                    }), 500
+            
             # 处理 PDF
-            if file_ext == '.pdf':
+            elif file_ext == '.pdf':
                 if not PDF_SUPPORT:
                     return jsonify({
                         'error': 'PDF 支持未启用',
@@ -732,7 +911,7 @@ def process_file():
                 logger.info("检测到 PDF 文件，开始转换...")
                 files_to_process = convert_pdf_to_images(upload_path, output_dir)
             else:
-                # 图片文件
+                # 图片文件直接处理
                 files_to_process = [upload_path]
             
             # 处理所有文件
@@ -763,11 +942,12 @@ def process_file():
                 'success': True,
                 'text': final_text,
                 'metadata': {
-                    'filename': file.filename,
+                    'filename': original_filename,
                     'function': function_type,
                     'function_name': OCR_FUNCTIONS[function_type]['name'],
                     'resolution': resolution_mode,
                     'is_pdf': file_ext == '.pdf',
+                    'is_office': file_ext in office_extensions,
                     'pages': len(files_to_process),
                     'timestamp': timestamp,
                     'output_dir': output_dir if save_results else None

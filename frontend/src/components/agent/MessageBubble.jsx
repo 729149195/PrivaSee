@@ -182,14 +182,18 @@ const MessageBubble = ({
                     gap: '8px',
                     marginBottom: displayContent ? '12px' : '0' 
                   }}>
-                    {message.files.map((file, idx) => (
-                      <DocumentTag 
-                        key={file.id || idx} 
-                        file={file} 
-                        onClick={() => setPreviewFile(file)}
-                        command={message.commands?.[idx]}
-                      />
-                    ))}
+                    {message.files.map((file, idx) => {
+                      // 如果 commands 数组长度小于 files，所有文件使用第一个命令
+                      const command = message.commands?.[idx] || message.commands?.[0]
+                      return (
+                        <DocumentTag 
+                          key={file.id || idx} 
+                          file={file} 
+                          onClick={() => setPreviewFile(file)}
+                          command={command}
+                        />
+                      )
+                    })}
                   </div>
                 )}
                 {displayContent && (

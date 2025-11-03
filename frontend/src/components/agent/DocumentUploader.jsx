@@ -20,6 +20,17 @@ const DocumentUploader = ({ onFileSelect, onClose, visible = true }) => {
     'image/bmp': ['.bmp'],
     'image/tiff': ['.tiff', '.tif'],
     'application/pdf': ['.pdf'],
+    // Office 文档格式
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+    'application/msword': ['.doc'],
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+    'application/vnd.ms-excel': ['.xls'],
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+    'application/vnd.ms-powerpoint': ['.ppt'],
+    // LibreOffice 格式
+    'application/vnd.oasis.opendocument.text': ['.odt'],
+    'application/vnd.oasis.opendocument.spreadsheet': ['.ods'],
+    'application/vnd.oasis.opendocument.presentation': ['.odp'],
   }
 
   const acceptString = Object.values(ACCEPTED_TYPES).flat().join(',')
@@ -97,7 +108,8 @@ const DocumentUploader = ({ onFileSelect, onClose, visible = true }) => {
         </p>
         <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
         <p className="ant-upload-hint">
-          支持: PNG, JPG, GIF, WebP, BMP, TIFF, PDF (最大 20MB)
+          支持: 图片 (PNG, JPG, GIF, WebP, BMP, TIFF)<br/>
+          文档 (PDF, Word, Excel, PowerPoint) (最大 20MB)
         </p>
       </Dragger>
     </Modal>

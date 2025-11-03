@@ -859,6 +859,16 @@ Output format:
   // 初始化当前会话：第一次使用时指向首个会话
   _ensureCurrentSession() {
     const { sessions, currentSessionId } = get()
+    // 如果没有任何会话，自动创建一个新的空白会话
+    if (sessions.length === 0) {
+      const newSession = createEmptySession()
+      set({
+        sessions: [newSession],
+        currentSessionId: newSession.id
+      })
+      return
+    }
+    // 如果有会话但没有设置当前会话ID，设置第一个会话为当前会话
     if (!currentSessionId && sessions.length > 0) {
       set({ currentSessionId: sessions[0].id })
     }
@@ -1031,6 +1041,17 @@ Output format:
     set((state) => {
       const nextSessions = state.sessions.filter(s => s.id !== id)
       let nextCurrent = state.currentSessionId
+      
+      // 如果删除后没有会话了，自动创建一个新的空白会话
+      if (nextSessions.length === 0) {
+        const newSession = createEmptySession()
+        return {
+          sessions: [newSession],
+          currentSessionId: newSession.id,
+          sessionKeywords: {}
+        }
+      }
+      
       if (state.currentSessionId === id) {
         nextCurrent = nextSessions[0]?.id || null
       }
@@ -1086,8 +1107,43 @@ Output format:
       contentType: typeof firstUserMessage.content,
       hasImages: !!(firstUserMessage.images && firstUserMessage.images.length > 0),
       hasImageAnalysis: !!(firstUserMessage.imageAnalysis && Object.keys(firstUserMessage.imageAnalysis).length > 0),
-      hasAudios: !!(firstUserMessage.audios && firstUserMessage.audios.length > 0)
+      hasAudios: !!(firstUserMessage.audios && firstUserMessage.audios.length > 0),
+      hasFiles: !!(firstUserMessage.files && firstUserMessage.files.length > 0),
+      hasCommands: !!(firstUserMessage.commands && firstUserMessage.commands.length > 0)
     })
+    
+    // 检查是否是 DeepSeek OCR 模式的消息
+    if (firstUserMessage.files && firstUserMessage.files.length > 0 && 
+        firstUserMessage.commands && firstUserMessage.commands.length > 0) {
+      console.log('[Session Title] 检测到 DeepSeek OCR 消息，使用特殊命名规则')
+      
+      // 获取第一个命令的标签名
+      const firstCommand = firstUserMessage.commands[0]
+      const commandLabel = firstCommand.label || 'OCR'
+      
+      // 获取文档名称
+      let docName = ''
+      if (firstUserMessage.files.length === 1) {
+        // 单个文档：直接使用文档名
+        docName = firstUserMessage.files[0].name
+        // 移除文件扩展名
+        docName = docName.replace(/\.[^/.]+$/, '')
+      } else {
+        // 多个文档：使用第一个文档名 + "等"
+        const firstName = firstUserMessage.files[0].name
+        docName = firstName.replace(/\.[^/.]+$/, '') + '等'
+      }
+      
+      // 构造标题：功能标签 + 文档名
+      const title = `${commandLabel}-${docName}`
+      
+      // 限制标题长度
+      const finalTitle = title.slice(0, 50)
+      
+      console.log('[Session Title] DeepSeek OCR 标题:', finalTitle)
+      get().renameSession(sessionId, finalTitle)
+      return
+    }
     
     // 提取消息内容：包含纯文本 + 音频转录 + 图片分析
     const contentParts = []
@@ -2369,6 +2425,10 @@ Output format:
       ocrProgress: 0
     }))
 
+    // 创建 AbortController 用于停止功能
+    const controller = new AbortController()
+    set({ isGenerating: true, abortController: controller })
+
     try {
       // 使用流式 API 处理每个文件
       const results = []
@@ -2393,12 +2453,12 @@ Output format:
         }
 
         // 如果是多文件，添加文件分隔符
-        if (selectedFiles.length > 1 && i > 0) {
-          currentContent += '\n\n---\n\n'
-        }
-        
         if (selectedFiles.length > 1) {
-          const fileHeader = `文件 ${i + 1} (${fileData.name}) - ${command.label}:\n`
+          if (i > 0) {
+            currentContent += '\n\n'
+          }
+          // 使用文件名作为分隔标题（不显示功能标签，因为同一批次只有一个功能）
+          const fileHeader = `## 📄 ${fileData.name}\n\n`
           currentContent += fileHeader
           // 立即显示文件头
           get()._updateMessage(session.id, assistantMsgId, (m) => ({
@@ -2416,6 +2476,7 @@ Output format:
             provider: provider,
             resolution: resolution,
             question: text || undefined,
+            signal: controller.signal,  // 传递 AbortController 的 signal
             onProgress: ({ value, stage }) => {
               const progress = Math.round(((i + (value / 100)) / selectedFiles.length) * 100)
               get()._updateMessage(session.id, userMsgId, (m) => ({
@@ -2444,21 +2505,33 @@ Output format:
 
           console.log(`[sendMessageWithDeepSeekOCR] 文件 ${file.name} 流式处理完成`)
         } catch (error) {
-          console.error(`[sendMessageWithDeepSeekOCR] 文件 ${file.name} 处理失败:`, error)
-          const errorMsg = `处理出错：${error.message}`
-          currentContent += errorMsg
+          // 检查是否是用户中断
+          const isFileAborted = error.name === 'AbortError' || 
+                               error.message?.includes('停止') || 
+                               error.message?.includes('aborted')
           
-          // 更新显示错误
-          get()._updateMessage(session.id, assistantMsgId, (m) => ({
-            ...m,
-            content: currentContent
-          }))
-          
-          results.push({
-            fileName: file.name,
-            command: command.label,
-            error: error.message
-          })
+          if (isFileAborted) {
+            // 用户中断，不添加错误信息到内容，直接抛出以中断整个流程
+            console.log(`[sendMessageWithDeepSeekOCR] 文件 ${file.name} 被用户停止`)
+            throw error
+          } else {
+            // 真实错误，记录并添加到内容
+            console.error(`[sendMessageWithDeepSeekOCR] 文件 ${file.name} 处理失败:`, error)
+            const errorMsg = `处理出错：${error.message}`
+            currentContent += errorMsg
+            
+            // 更新显示错误
+            get()._updateMessage(session.id, assistantMsgId, (m) => ({
+              ...m,
+              content: currentContent
+            }))
+            
+            results.push({
+              fileName: file.name,
+              command: command.label,
+              error: error.message
+            })
+          }
         }
       }
 
@@ -2477,28 +2550,45 @@ Output format:
       }))
 
       console.log('[sendMessageWithDeepSeekOCR] OCR 处理完成')
+      
+      // 重置生成状态
+      set({ isGenerating: false, abortController: null })
+      
       return userMsgId
 
     } catch (error) {
-      console.error('[sendMessageWithDeepSeekOCR] OCR 处理失败:', error)
-
+      // 检查是否是用户中断
+      const isAborted = error.name === 'AbortError' || 
+                       error.message?.includes('停止') || 
+                       error.message?.includes('aborted') ||
+                       controller.signal.aborted
+      
+      if (isAborted) {
+        console.log('[sendMessageWithDeepSeekOCR] 用户已停止处理')
+      } else {
+        console.error('[sendMessageWithDeepSeekOCR] OCR 处理失败:', error)
+      }
+      
       // 更新助手消息显示错误
       get()._updateMessage(session.id, assistantMsgId, (m) => ({
         ...m,
-        content: `OCR 处理失败：${error.message}`,
+        content: isAborted ? (currentContent || '处理已停止') : `OCR 处理失败：${error.message}`,
         streaming: false,
         phase: 'done',
-        error: error.message,
+        error: isAborted ? undefined : error.message,
       }))
 
       // 更新用户消息状态为失败
       get()._updateMessage(session.id, userMsgId, (m) => ({
         ...m,
-        ocrStatus: 'error',
-        ocrError: error.message
+        ocrStatus: isAborted ? 'aborted' : 'error',
+        ocrError: isAborted ? undefined : error.message
       }))
 
-      throw error
+      // 重置生成状态
+      set({ isGenerating: false, abortController: null })
+
+      // 如果不是用户中断，则不抛出错误（避免额外的错误提示）
     }
   },
 

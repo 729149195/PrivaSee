@@ -229,26 +229,8 @@ const MessageComposer = ({
 
   // 处理文件选择变化（OCR模式：立即上传）
   const handleFileChange = async (e) => {
-    const files = e.target.files
-    if (!files || files.length === 0) return
-
-    const file = files[0]
-    
-    // 检查文件类型
-    const acceptedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff', 'application/pdf']
-    if (!acceptedTypes.includes(file.type)) {
-      message.error('不支持的文件格式')
-      e.target.value = ''
-      return
-    }
-
-    // 检查文件大小（最大 20MB）
-    const isLt20M = file.size / 1024 / 1024 < 20
-    if (!isLt20M) {
-      message.error('文件大小不能超过 20MB')
-      e.target.value = ''
-      return
-    }
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
 
     if (!deepseekProvider) {
       message.error('未配置 DeepSeek OCR API，请先在设置中添加')
@@ -256,75 +238,138 @@ const MessageComposer = ({
       return
     }
 
-    // 创建文件数据对象
-    const fileId = Date.now() + '_' + Math.random()
-    const fileData = {
-      id: fileId,
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      file: file,
-      uploadStatus: 'uploading', // uploading | completed | error
-      uploadProgress: 0,
-      uploadError: null,
-      serverFilename: null
+    // 定义支持的格式
+    const acceptedTypes = [
+      'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff', 
+      'application/pdf',
+      // Office 文档
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+      'application/msword', // .doc
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+      'application/vnd.ms-excel', // .xls
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+      'application/vnd.ms-powerpoint', // .ppt
+      // LibreOffice
+      'application/vnd.oasis.opendocument.text', // .odt
+      'application/vnd.oasis.opendocument.spreadsheet', // .ods
+      'application/vnd.oasis.opendocument.presentation' // .odp
+    ]
+    
+    const acceptedExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff', 'tif', 
+                                'pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 
+                                'odt', 'ods', 'odp']
+
+    // 验证所有文件
+    const invalidFiles = []
+    const oversizedFiles = []
+    
+    for (const file of files) {
+      const fileExt = file.name.toLowerCase().split('.').pop()
+      if (!acceptedTypes.includes(file.type) && !acceptedExtensions.includes(fileExt)) {
+        invalidFiles.push(file.name)
+      }
+      
+      const isLt20M = file.size / 1024 / 1024 < 20
+      if (!isLt20M) {
+        oversizedFiles.push(file.name)
+      }
     }
 
-    // 添加到文件列表
-    setSelectedFiles?.((prev) => [...prev, fileData])
-
-    // 立即存储到 IndexedDB
-    try {
-      await saveFile(currentSessionId, 'temp_' + fileId, fileId, file)
-      console.log('[MessageComposer] 文件已保存到 IndexedDB:', file.name)
-    } catch (error) {
-      console.error('[MessageComposer] 保存文件到 IndexedDB 失败:', error)
+    if (invalidFiles.length > 0) {
+      message.error(`不支持的文件格式: ${invalidFiles.join(', ')}`)
+    }
+    
+    if (oversizedFiles.length > 0) {
+      message.error(`文件过大（超过20MB）: ${oversizedFiles.join(', ')}`)
     }
 
-    // 立即开始上传到服务器
-    try {
-      const result = await uploadFile(file, deepseekProvider, (progress) => {
-        // 更新上传进度
+    // 过滤出有效的文件
+    const validFiles = files.filter(file => {
+      const fileExt = file.name.toLowerCase().split('.').pop()
+      const isValidType = acceptedTypes.includes(file.type) || acceptedExtensions.includes(fileExt)
+      const isValidSize = file.size / 1024 / 1024 < 20
+      return isValidType && isValidSize
+    })
+
+    if (validFiles.length === 0) {
+      e.target.value = ''
+      return
+    }
+
+    // 处理每个有效文件
+    for (const file of validFiles) {
+      const fileId = Date.now() + '_' + Math.random()
+      const fileData = {
+        id: fileId,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        file: file,
+        uploadStatus: 'uploading',
+        uploadProgress: 0,
+        uploadError: null,
+        serverFilename: null
+      }
+
+      // 添加到文件列表
+      setSelectedFiles?.((prev) => [...prev, fileData])
+
+      // 立即存储到 IndexedDB
+      try {
+        await saveFile(currentSessionId, 'temp_' + fileId, fileId, file)
+        console.log('[MessageComposer] 文件已保存到 IndexedDB:', file.name)
+      } catch (error) {
+        console.error('[MessageComposer] 保存文件到 IndexedDB 失败:', error)
+      }
+
+      // 立即开始上传到服务器
+      try {
+        const result = await uploadFile(file, deepseekProvider, (progress) => {
+          setSelectedFiles?.((prev) => 
+            prev.map(f => 
+              f.id === fileId 
+                ? { ...f, uploadProgress: progress }
+                : f
+            )
+          )
+        })
+
+        // 上传成功
         setSelectedFiles?.((prev) => 
           prev.map(f => 
             f.id === fileId 
-              ? { ...f, uploadProgress: progress }
+              ? { 
+                  ...f, 
+                  uploadStatus: 'completed', 
+                  uploadProgress: 100,
+                  serverFilename: result.filename
+                }
               : f
           )
         )
-      })
+        
+        console.log('[MessageComposer] 文件上传成功:', file.name)
+      } catch (error) {
+        // 上传失败
+        setSelectedFiles?.((prev) => 
+          prev.map(f => 
+            f.id === fileId 
+              ? { 
+                  ...f, 
+                  uploadStatus: 'error', 
+                  uploadError: error.message 
+                }
+              : f
+          )
+        )
+        
+        message.error(`${file.name} 上传失败: ${error.message}`)
+        console.error('[MessageComposer] 文件上传失败:', error)
+      }
+    }
 
-      // 上传成功
-      setSelectedFiles?.((prev) => 
-        prev.map(f => 
-          f.id === fileId 
-            ? { 
-                ...f, 
-                uploadStatus: 'completed', 
-                uploadProgress: 100,
-                serverFilename: result.filename
-              }
-            : f
-        )
-      )
-      
-      message.success('文件上传成功')
-    } catch (error) {
-      // 上传失败
-      setSelectedFiles?.((prev) => 
-        prev.map(f => 
-          f.id === fileId 
-            ? { 
-                ...f, 
-                uploadStatus: 'error', 
-                uploadError: error.message 
-              }
-            : f
-        )
-      )
-      
-      message.error(`文件上传失败: ${error.message}`)
-      console.error('[MessageComposer] 文件上传失败:', error)
+    if (validFiles.length > 0) {
+      message.success(`成功添加 ${validFiles.length} 个文件`)
     }
 
     // 清空input，允许重复选择同一文件
@@ -587,7 +632,8 @@ const MessageComposer = ({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.tiff,.tif,.pdf"
+                  accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.tiff,.tif,.pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.odt,.ods,.odp"
+                  multiple
                   style={{ display: 'none' }}
                   onChange={handleFileChange}
                 />
@@ -595,7 +641,7 @@ const MessageComposer = ({
                   icon={<PlusOutlined />}
                   disabled={isEditingMessage}
                   onClick={handleFileSelectClick}
-                  title="上传文档进行 OCR 处理"
+                  title="上传文档进行 OCR 处理（可多选）"
                 />
                 {selectedCommand && (
                   <CommandTag

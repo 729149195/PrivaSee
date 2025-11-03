@@ -656,6 +656,21 @@ export default function AgentPage() {
     if (leftEl) leftEl.scrollTop = leftEl.scrollHeight
   }, [currentSession?.messages?.length, isGenerating])
   
+  // 监听最后一条消息内容变化，自动滚动（用于流式响应）
+  useEffect(() => {
+    const mainEl = mainScrollRef.current
+    const leftEl = leftPaneScrollRef.current
+    const messages = currentSession?.messages || []
+    if (messages.length > 0) {
+      const lastMessage = messages[messages.length - 1]
+      // 当最后一条消息是流式状态或正在处理时，持续滚动
+      if (lastMessage?.streaming || isGenerating) {
+        if (mainEl) mainEl.scrollTop = mainEl.scrollHeight
+        if (leftEl) leftEl.scrollTop = leftEl.scrollHeight
+      }
+    }
+  }, [currentSession?.messages, isGenerating])
+  
   // 刷新重进或切换 chat 时自动滚动到底部（中文注释）
   useEffect(() => {
     const mainEl = mainScrollRef.current
@@ -1576,6 +1591,8 @@ export default function AgentPage() {
                     setSelectedAudios={setSelectedAudios}
                     onRemoveAudio={removeSelectedAudio}
                     onTranscriptChange={handleTranscriptChange}
+                    isGenerating={isGenerating}
+                    onStop={stopGenerating}
                     sendLockState={sendLockState}
                     pendingHighlights={pendingHighlights}
                     pendingRelations={pendingRelations}
