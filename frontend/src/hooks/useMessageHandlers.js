@@ -579,9 +579,70 @@ export function useMessageHandlers(
     useStore.setState({ sessions: updatedSessions })
 
     // 重新发送用户消息
-    const hasImages = Array.isArray(userMessage.images) && userMessage.images.length > 0
+    const currentModel = useStore.getState().model
+    const isOcrMode = currentModel === 'deepseek-ocr' || currentModel === 'deepseek-ocr-local'
+    
     let newUserMessageId
-    if (hasImages) {
+    
+    if (isOcrMode && userMessage.files && userMessage.files.length > 0) {
+      // OCR 模式：重新发送 OCR 消息
+      const commandsToSend = userMessage.commands || []
+      const resolutionToSend = userMessage.resolution || 'gundam'
+      
+      // 恢复 File 对象：优先从内存获取，如果不存在则从 IndexedDB 恢复
+      let messageFileObjects = useStore.getState().ocrFileObjects?.[session.id]?.[oldUserMessageId] || {}
+      
+      // 如果内存中没有，尝试从 IndexedDB 恢复
+      if (Object.keys(messageFileObjects).length === 0) {
+        try {
+          console.log('[Retry] 从 IndexedDB 恢复文件...')
+          const { loadFiles } = await import('../utils/fileStorage')
+          const fileIds = userMessage.files.map(f => f.id)
+          messageFileObjects = await loadFiles(session.id, oldUserMessageId, fileIds)
+          console.log('[Retry] 从 IndexedDB 恢复了 ' + Object.keys(messageFileObjects).length + ' 个文件')
+        } catch (error) {
+          console.error('[Retry] 从 IndexedDB 恢复文件失败:', error)
+        }
+      }
+      
+      // 构建包含 File 对象的 files 数组
+      const filesToSend = userMessage.files.map(fileMetadata => {
+        const fileObj = messageFileObjects[fileMetadata.id]
+        if (!fileObj) {
+          console.warn('[Retry] 无法找到 File 对象:', fileMetadata.id)
+          return fileMetadata
+        }
+        return {
+          ...fileMetadata,
+          file: fileObj
+        }
+      })
+      
+      // 检查是否所有文件都有 File 对象
+      const missingFiles = filesToSend.filter(f => !f.file)
+      if (missingFiles.length > 0) {
+        console.error('[Retry] 缺失 File 对象的文件:', missingFiles)
+        antdMessage.error('无法重新生成：文件对象已丢失')
+        return
+      }
+      
+      console.log('[Retry] OCR 模式：重新发送', { commands: commandsToSend.length, files: filesToSend.length, resolution: resolutionToSend })
+      
+      newUserMessageId = await useStore.getState().sendMessageWithDeepSeekOCR(userMessage.content, commandsToSend, filesToSend, resolutionToSend)
+      
+      // OCR 模式下处理信息元逻辑（仅在提取信息元模式下）
+      if (inferenceMode === 'extract') {
+        try {
+          const result = useStore.getState().adoptPendingInfonsToMessage?.(newUserMessageId) || { adopted: 0, runIds: [] }
+          if (result.adopted === 0) {
+            // 没有 pending infons，需要重新提取
+            startMessageInfons?.(newUserMessageId)
+          }
+          console.log('[Retry] OCR 模式信息元处理完成', { adopted: result.adopted, mode: inferenceMode })
+        } catch (_) {}
+      }
+    } else if (Array.isArray(userMessage.images) && userMessage.images.length > 0) {
+      // 多模态模式：重新发送带图片的消息
       // 提取图片 URL（兼容字符串和对象格式）
       const imageUrls = userMessage.images.map(img => typeof img === 'string' ? img : img.url)
       
@@ -590,7 +651,8 @@ export function useMessageHandlers(
       
       newUserMessageId = await useStore.getState().sendMessageWithImages(userMessage.content, imageUrls, userMessage.audios || [], imageAnalysisMap)
     } else {
-      newUserMessageId = await sendMessage(userMessage.content)
+      // 纯文本模式：重新发送普通消息
+      newUserMessageId = await sendMessage(userMessage.content, userMessage.audios || [])
     }
 
     // 迁移信息元到新的用户消息（如果有保存的信息元）

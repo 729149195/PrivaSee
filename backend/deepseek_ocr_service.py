@@ -380,7 +380,8 @@ def process_image(
     custom_question: str = '',
     save_results: bool = False,
     output_dir: Optional[str] = None,
-    stream_callback=None  # 新增：流式生成回调函数
+    stream_callback=None,  # 新增：流式生成回调函数
+    history_messages: Optional[list] = None  # 新增：历史消息列表
 ) -> str:
     """
     处理单张图片
@@ -392,6 +393,8 @@ def process_image(
         custom_question: 自定义问题（用于视觉问答）
         save_results: 是否保存结果
         output_dir: 输出目录
+        stream_callback: 流式生成回调函数
+        history_messages: 历史消息列表 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
         
     Returns:
         OCR 结果文本
@@ -407,10 +410,45 @@ def process_image(
     
     # 构建 prompt
     prompt_template = function_config['prompt_template']
-    if function_config['supports_custom_question'] and custom_question:
-        prompt = prompt_template.format(question=custom_question)
+    
+    # 如果有历史消息，将其作为上下文添加到 prompt 中
+    if history_messages and len(history_messages) > 0:
+        logger.info(f"  包含历史上下文，共 {len(history_messages)} 条消息")
+        
+        # 构建对话历史
+        context_parts = ["以下是之前的对话记录："]
+        for msg in history_messages:
+            role = msg.get('role', 'user')
+            content = msg.get('content', '').strip()
+            if content:
+                if role == 'user':
+                    context_parts.append(f"Q: {content}")
+                elif role == 'assistant':
+                    # 限制助手回复长度，避免上下文过长
+                    if len(content) > 500:
+                        content = content[:500] + "..."
+                    context_parts.append(f"A: {content}")
+        
+        context_text = '\n'.join(context_parts)
+        
+        # 构建当前问题
+        if custom_question:
+            current_question = custom_question
+        else:
+            current_question = "请继续回答"
+        
+        # 对于视觉问答，使用对话格式
+        if function_config['supports_custom_question']:
+            prompt = f"{context_text}\n\n当前问题：\nQ: {current_question}\nA: "
+        else:
+            # 对于其他 OCR 功能，保持原有格式
+            prompt = prompt_template
     else:
-        prompt = prompt_template
+        # 没有历史消息，使用原始 prompt
+        if function_config['supports_custom_question'] and custom_question:
+            prompt = prompt_template.format(question=custom_question)
+        else:
+            prompt = prompt_template
     
     # 获取分辨率配置
     if resolution_mode not in RESOLUTION_MODES:
@@ -476,6 +514,11 @@ def process_image(
             result = "视觉问答需要提供问题。请在发送时输入您的问题。"
     
     logger.info(f"  ✓ 处理完成，结果长度: {len(result)} 字符")
+    
+    # 清理 GPU 缓存，释放显存
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        logger.debug("  已清理 GPU 缓存")
     
     return result
 
@@ -563,6 +606,17 @@ def process_file_stream():
             resolution_mode = request.form.get('resolution', 'gundam')
             custom_question = request.form.get('question', '')
             uploaded_filename = request.form.get('uploaded_filename', '')
+            
+            # 获取历史消息（JSON格式）
+            history_messages = []
+            messages_json = request.form.get('messages', '')
+            if messages_json:
+                try:
+                    history_messages = json.loads(messages_json)
+                    logger.info(f"  接收到历史消息: {len(history_messages)} 条")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"  历史消息JSON解析失败: {e}")
+                    history_messages = []
             
             # 发送开始事件
             yield f"data: {json.dumps({'type': 'start', 'message': '开始处理...'})}\n\n"
@@ -694,7 +748,8 @@ def process_file_stream():
                             custom_question=custom_question,
                             save_results=False,
                             output_dir=output_dir,
-                            stream_callback=stream_callback
+                            stream_callback=stream_callback,
+                            history_messages=history_messages
                         )
                         result_container['result'] = result
                         text_queue.put(('done', None))
@@ -805,6 +860,18 @@ def process_file():
         custom_question = request.form.get('question', '')
         save_results = request.form.get('save_results', 'false').lower() == 'true'
         uploaded_filename = request.form.get('uploaded_filename', '')
+        
+        # 获取历史消息（JSON格式）
+        history_messages = []
+        messages_json = request.form.get('messages', '')
+        if messages_json:
+            try:
+                import json
+                history_messages = json.loads(messages_json)
+                logger.info(f"  接收到历史消息: {len(history_messages)} 条")
+            except json.JSONDecodeError as e:
+                logger.warning(f"  历史消息JSON解析失败: {e}")
+                history_messages = []
         
         # 判断是使用已上传的文件还是新上传的文件
         if uploaded_filename:
@@ -925,7 +992,8 @@ def process_file():
                     resolution_mode=resolution_mode,
                     custom_question=custom_question,
                     save_results=save_results,
-                    output_dir=output_dir
+                    output_dir=output_dir,
+                    history_messages=history_messages
                 )
                 
                 # 直接添加结果，不添加页面标题

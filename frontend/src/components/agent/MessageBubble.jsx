@@ -27,6 +27,10 @@ const ViteIcon = '/vite.svg'
  * @param {function} setEditingImages - 设置编辑图片
  * @param {Array} editingAudios - 编辑中的音频
  * @param {function} setEditingAudios - 设置编辑音频
+ * @param {Array} editingFiles - 编辑中的文件（deepseek-ocr模式）
+ * @param {function} setEditingFiles - 设置编辑文件
+ * @param {Array} editingCommands - 编辑中的命令（deepseek-ocr模式）
+ * @param {function} setEditingCommands - 设置编辑命令
  * @param {function} onCopy - 复制的回调
  * @param {function} onEdit - 编辑的回调
  * @param {function} onSaveEdit - 保存编辑的回调
@@ -43,6 +47,9 @@ const ViteIcon = '/vite.svg'
  * @param {boolean} currentModelIsMultimodal - 当前模型是否支持多模态
  * @param {string} inferenceMode - 推断模式 ('extract' | 'direct')
  * @param {function} processImageUpload - 处理图片上传的函数（用于直接推断模式）
+ * @param {string} model - 当前选中的模型ID
+ * @param {string} selectedResolution - 已选择的分辨率模式（deepseek-ocr模式）
+ * @param {function} setSelectedResolution - 设置已选择的分辨率模式
  */
 const MessageBubble = ({
   message,
@@ -80,7 +87,10 @@ const MessageBubble = ({
   sendLockState,
   currentModelIsMultimodal,
   inferenceMode,
-  processImageUpload
+  processImageUpload,
+  model,
+  selectedResolution,
+  setSelectedResolution
 }) => {
   const isEditing = editingMessageId === message.id
   const [previewFile, setPreviewFile] = useState(null)
@@ -153,9 +163,15 @@ const MessageBubble = ({
               setEditingImages={setEditingImages}
               editingAudios={editingAudios}
               setEditingAudios={setEditingAudios}
+              editingFiles={editingFiles}
+              setEditingFiles={setEditingFiles}
+              editingCommands={editingCommands}
+              setEditingCommands={setEditingCommands}
               originalContent={originalEditingContent}
               originalImages={originalEditingImages}
               originalAudios={originalEditingAudios}
+              originalFiles={originalEditingFiles}
+              originalCommands={originalEditingCommands}
               onEditingTranscriptChange={onEditingTranscriptChange}
               onSave={onSaveEdit}
               onCancel={onCancelEdit}
@@ -167,6 +183,9 @@ const MessageBubble = ({
               sendLockState={sendLockState}
               currentModelIsMultimodal={currentModelIsMultimodal}
               renderHighlightedText={renderHighlightedText}
+              model={model}
+              selectedResolution={selectedResolution}
+              setSelectedResolution={setSelectedResolution}
             />
           ) : (
             <>

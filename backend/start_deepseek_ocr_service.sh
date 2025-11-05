@@ -89,6 +89,9 @@ if [ ! -f "${SERVICE_FILE}" ]; then
     exit 1
 fi
 
+# 设置 PyTorch 显存管理优化
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 # 启动服务
 echo ""
 echo "========================================"
@@ -96,6 +99,7 @@ echo "启动服务..."
 echo "========================================"
 echo -e "${GREEN}监听地址: http://0.0.0.0:${SERVICE_PORT}${NC}"
 echo -e "${GREEN}本地访问: http://localhost:${SERVICE_PORT}/api/health${NC}"
+echo -e "${YELLOW}显存优化: PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True${NC}"
 echo ""
 echo "按 Ctrl+C 停止服务"
 echo "========================================"

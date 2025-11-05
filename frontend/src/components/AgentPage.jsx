@@ -1574,6 +1574,9 @@ export default function AgentPage() {
                           pendingInfonIndex={pendingInfonIndex}
                           sendLockState={sendLockState}
                           currentModelIsMultimodal={currentModelIsMultimodal}
+                          model={model}
+                          selectedResolution={selectedResolution}
+                          setSelectedResolution={setSelectedResolution}
                         />
                       )
                     })}

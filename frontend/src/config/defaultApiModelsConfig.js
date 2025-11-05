@@ -26,8 +26,9 @@ export const DEFAULT_API_MODELS = {
   // DeepSeek OCR 模型（本地部署）
   // 注意：需要先启动本地 DeepSeek-OCR 服务器（端口5001）
   // 运行: bash backend/start_deepseek_ocr_new.sh
+  // 使用相对路径 /ocr-api，通过 Vite 代理访问服务器上的 OCR 服务
   'deepseek-ocr': {
-    url: 'http://localhost:5001/api',
+    url: import.meta.env.VITE_DEEPSEEK_OCR_URL || '/ocr-api',
     model: 'deepseek-ai/DeepSeek-OCR',
     apikey: '',
     description: 'DeepSeek OCR 本地部署 （支持多种文档处理功能）',

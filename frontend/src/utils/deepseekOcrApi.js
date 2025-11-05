@@ -166,7 +166,8 @@ export async function callDeepseekOcrStream({
   onContent,
   question,
   resolution = 'gundam',
-  uploadedFilename = null  // 已上传的文件名
+  uploadedFilename = null,  // 已上传的文件名
+  messages = null  // 历史消息列表
 }) {
   if (!file && !uploadedFilename) {
     throw new Error('未提供需要识别的文件')
@@ -201,6 +202,11 @@ export async function callDeepseekOcrStream({
   
   if (command.id === 'visual_qa' && question) {
     formData.append('question', question)
+  }
+  
+  // 如果提供了历史消息，将其序列化为 JSON 并添加到 FormData
+  if (messages && Array.isArray(messages) && messages.length > 0) {
+    formData.append('messages', JSON.stringify(messages))
   }
 
   const headers = {}

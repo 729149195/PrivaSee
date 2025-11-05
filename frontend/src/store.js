@@ -2430,17 +2430,160 @@ Output format:
     set({ isGenerating: true, abortController: controller })
 
     try {
+      // 构建历史消息上下文（用于多轮对话）
+      // 只取最近的几轮对话（避免上下文过长）
+      const maxHistoryMessages = 6  // 减少到最多3轮对话（6条消息）
+      const historyMessages = []
+      
+      if (session.messages && session.messages.length > 0) {
+        // 获取除了当前用户消息之外的历史消息
+        const previousMessages = session.messages.slice(0, -1)
+        
+        // 只取最近的 N 条消息
+        const recentMessages = previousMessages.slice(-maxHistoryMessages)
+        
+        for (const msg of recentMessages) {
+          // 过滤掉 OCR 文件消息，只保留文本内容
+          if (msg.role === 'user' || msg.role === 'assistant') {
+            let content = msg.content || ''
+            
+            // 限制每条消息的长度，避免上下文过长
+            if (content.length > 1000) {
+              content = content.substring(0, 1000) + '...'
+            }
+            
+            if (content.trim()) {
+              historyMessages.push({
+                role: msg.role,
+                content: content.trim()
+              })
+            }
+          }
+        }
+      }
+      
+      if (historyMessages.length > 0) {
+        console.log(`[sendMessageWithDeepSeekOCR] 包含 ${historyMessages.length} 条历史消息作为上下文`)
+      }
+      
+      // 如果没有文件，尝试使用历史消息中最近的文件（用于纯文本追问）
+      let filesToProcess = selectedFiles
+      let commandsToUse = selectedCommands
+      
+      if (selectedFiles.length === 0 && text.trim()) {
+        // 从历史消息中查找最近的有文件的用户消息
+        const previousMessages = session.messages.slice(0, -1) // 排除当前消息
+        let recentFileMessage = null
+        
+        for (let i = previousMessages.length - 1; i >= 0; i--) {
+          const msg = previousMessages[i]
+          if (msg.role === 'user' && msg.files && msg.files.length > 0) {
+            recentFileMessage = msg
+            break
+          }
+        }
+        
+        if (recentFileMessage) {
+          console.log('[sendMessageWithDeepSeekOCR] 没有新文件，使用历史消息中的文件:', recentFileMessage.files[0].name)
+          
+          // 尝试恢复文件对象
+          const messageFileObjects = get().ocrFileObjects?.[session.id]?.[recentFileMessage.id] || {}
+          
+          // 如果内存中没有，尝试从 IndexedDB 恢复
+          if (Object.keys(messageFileObjects).length === 0) {
+            try {
+              const { loadFiles } = await import('./utils/fileStorage')
+              const fileIds = recentFileMessage.files.map(f => f.id)
+              const restoredFiles = await loadFiles(session.id, recentFileMessage.id, fileIds)
+              console.log('[sendMessageWithDeepSeekOCR] 从 IndexedDB 恢复了文件:', Object.keys(restoredFiles).length)
+              
+              // 构建文件数据结构
+              filesToProcess = recentFileMessage.files.map(fileMetadata => {
+                const fileObj = restoredFiles[fileMetadata.id]
+                return {
+                  id: fileMetadata.id,
+                  name: fileMetadata.name,
+                  size: fileMetadata.size,
+                  type: fileMetadata.type,
+                  file: fileObj,
+                  serverFilename: null, // 需要重新上传或使用已上传的
+                  uploadStatus: 'completed'
+                }
+              })
+            } catch (error) {
+              console.error('[sendMessageWithDeepSeekOCR] 从 IndexedDB 恢复文件失败:', error)
+            }
+          } else {
+            // 使用内存中的文件对象
+            filesToProcess = recentFileMessage.files.map(fileMetadata => {
+              const fileObj = messageFileObjects[fileMetadata.id]
+              return {
+                id: fileMetadata.id,
+                name: fileMetadata.name,
+                size: fileMetadata.size,
+                type: fileMetadata.type,
+                file: fileObj,
+                serverFilename: null,
+                uploadStatus: 'completed'
+              }
+            })
+          }
+          
+          // 使用历史消息中的命令（如果有）
+          if (recentFileMessage.commands && recentFileMessage.commands.length > 0) {
+            commandsToUse = recentFileMessage.commands
+          } else {
+            // 默认使用视觉问答命令
+            commandsToUse = [{ id: 'visual_qa', label: '视觉问答', icon: '💬' }]
+          }
+          
+          console.log('[sendMessageWithDeepSeekOCR] 将使用历史文件进行处理，命令:', commandsToUse[0]?.label)
+        } else {
+          console.log('[sendMessageWithDeepSeekOCR] 没有找到历史文件')
+          
+          // 检查是否有其他可用的对话模型
+          const models = get().models
+          const hasOtherModels = models.some(m => {
+            if (!m || !m.id) return false
+            return m.id !== 'deepseek-ocr' && 
+                   m.id !== 'deepseek-ocr-local' &&
+                   !m.id.startsWith('local-')  // 排除本地模型
+          })
+          
+          if (hasOtherModels) {
+            // 有其他模型，提示用户切换
+            get()._updateMessage(session.id, assistantMsgId, (m) => ({
+              ...m,
+              content: '💡 DeepSeek-OCR 模式专门用于文档/图片处理。\n\n如需进行纯文本对话，请：\n 1.切换到其他对话模型\n 2.或者，您可以先上传文档/图片，然后再提问。\n\n（发送文档推理完成后也可以切换其它模型进行对话）',
+              streaming: false,
+              phase: 'done',
+            }))
+          } else {
+            // 没有其他模型，提示配置
+            get()._updateMessage(session.id, assistantMsgId, (m) => ({
+              ...m,
+              content: '💡 DeepSeek-OCR 模式专门用于文档/图片处理。\n\n如需进行纯文本对话，请：\n 1.添加其他对话模型\n 2.或者，您可以上传文档/图片后再提问。\n\n（发送文档推理完成后也可以切换其它模型进行对话）',
+              streaming: false,
+              phase: 'done',
+            }))
+          }
+          
+          set({ isGenerating: false, abortController: null })
+          return userMsgId
+        }
+      }
+      
       // 使用流式 API 处理每个文件
       const results = []
       let currentContent = '' // 累积的内容
       
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const fileData = selectedFiles[i]
+      for (let i = 0; i < filesToProcess.length; i++) {
+        const fileData = filesToProcess[i]
         const file = fileData.file // 获取原始 File 对象
         const uploadedFilename = fileData.serverFilename // 已上传的文件名
-        const command = selectedCommands[i] || selectedCommands[0] // 如果命令数量少于文件，使用第一个命令
+        const command = commandsToUse[i] || commandsToUse[0] // 如果命令数量少于文件，使用第一个命令
 
-        console.log(`[sendMessageWithDeepSeekOCR] 流式处理文件 ${i + 1}/${selectedFiles.length}: ${fileData.name}`)
+        console.log(`[sendMessageWithDeepSeekOCR] 流式处理文件 ${i + 1}/${filesToProcess.length}: ${fileData.name}`)
         
         // 如果文件还没有上传完成，等待上传
         if (fileData.uploadStatus === 'uploading') {
@@ -2453,7 +2596,7 @@ Output format:
         }
 
         // 如果是多文件，添加文件分隔符
-        if (selectedFiles.length > 1) {
+        if (filesToProcess.length > 1) {
           if (i > 0) {
             currentContent += '\n\n'
           }
@@ -2476,9 +2619,10 @@ Output format:
             provider: provider,
             resolution: resolution,
             question: text || undefined,
+            messages: historyMessages.length > 0 ? historyMessages : null,  // 传递历史消息
             signal: controller.signal,  // 传递 AbortController 的 signal
             onProgress: ({ value, stage }) => {
-              const progress = Math.round(((i + (value / 100)) / selectedFiles.length) * 100)
+              const progress = Math.round(((i + (value / 100)) / filesToProcess.length) * 100)
               get()._updateMessage(session.id, userMsgId, (m) => ({
                 ...m,
                 ocrStatus: 'processing',
