@@ -43,6 +43,8 @@ except ImportError:
 
 # Flask 应用
 app = Flask(__name__)
+# 设置最大文件上传大小为 50MB（40MB + 一些余量）
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
 CORS(app, resources={
     r"/api/*": {
         "origins": "*",

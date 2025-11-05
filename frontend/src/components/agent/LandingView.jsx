@@ -272,8 +272,8 @@ const LandingView = ({
         invalidFiles.push(file.name)
       }
       
-      const isLt20M = file.size / 1024 / 1024 < 20
-      if (!isLt20M) {
+      const isLt40M = file.size / 1024 / 1024 < 40
+      if (!isLt40M) {
         oversizedFiles.push(file.name)
       }
     }
@@ -283,14 +283,14 @@ const LandingView = ({
     }
     
     if (oversizedFiles.length > 0) {
-      message.error(`文件过大（超过20MB）: ${oversizedFiles.join(', ')}`)
+      message.error(`文件过大（超过40MB）: ${oversizedFiles.join(', ')}`)
     }
 
     // 过滤出有效的文件
     const validFiles = files.filter(file => {
       const fileExt = file.name.toLowerCase().split('.').pop()
       const isValidType = acceptedTypes.includes(file.type) || acceptedExtensions.includes(fileExt)
-      const isValidSize = file.size / 1024 / 1024 < 20
+      const isValidSize = file.size / 1024 / 1024 < 40
       return isValidType && isValidSize
     })
 
@@ -678,8 +678,8 @@ const LandingView = ({
                   showUploadList={false}
                   beforeUpload={async (file) => {
                     // 检查文件大小
-                    if (!checkFileSize(file, 20)) {
-                      message.error(`图片 "${file.name}" 过大 (${getFileSizeText(file)})，最大支持20MB`)
+                    if (!checkFileSize(file, 40)) {
+                      message.error(`图片 "${file.name}" 过大 (${getFileSizeText(file)})，最大支持40MB`)
                       return Upload.LIST_IGNORE
                     }
 

@@ -279,9 +279,9 @@ const AudioRecorder = ({ onAudioAdded, disabled = false }) => {
 
   // 处理文件上传
   const handleFileUpload = async (file) => {
-    // 检查文件大小（最大20MB）
-    if (file.size > 20 * 1024 * 1024) {
-      message.error(`音频文件过大 (${(file.size / 1024 / 1024).toFixed(2)}MB)，最大支持20MB`)
+    // 检查文件大小（最大40MB）
+    if (file.size > 40 * 1024 * 1024) {
+      message.error(`音频文件过大 (${(file.size / 1024 / 1024).toFixed(2)}MB)，最大支持40MB`)
       return Upload.LIST_IGNORE
     }
     

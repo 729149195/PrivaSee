@@ -47,10 +47,10 @@ const DocumentUploader = ({ onFileSelect, onClose, visible = true }) => {
         return Upload.LIST_IGNORE
       }
       
-      // 检查文件大小（最大 20MB）
-      const isLt20M = file.size / 1024 / 1024 < 20
-      if (!isLt20M) {
-        antdMessage.error('文件大小不能超过 20MB')
+      // 检查文件大小（最大 40MB）
+      const isLt40M = file.size / 1024 / 1024 < 40
+      if (!isLt40M) {
+        antdMessage.error('文件大小不能超过 40MB')
         return Upload.LIST_IGNORE
       }
 
@@ -109,7 +109,7 @@ const DocumentUploader = ({ onFileSelect, onClose, visible = true }) => {
         <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
         <p className="ant-upload-hint">
           支持: 图片 (PNG, JPG, GIF, WebP, BMP, TIFF)<br/>
-          文档 (PDF, Word, Excel, PowerPoint) (最大 20MB)
+          文档 (PDF, Word, Excel, PowerPoint) (最大 40MB)
         </p>
       </Dragger>
     </Modal>
