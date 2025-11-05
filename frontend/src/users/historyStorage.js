@@ -2,7 +2,7 @@
 // 为每个登录用户单独保存会话历史和信息元数据
 
 // 保存用户的所有会话数据
-export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, conversationModel, directInferenceModel, infonExtractionModel, infonPrivacyInferenceModel, imageParsingModel, protectionSuggestionModel, inferenceMode, sessionKeywords) {
+export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, conversationModel, directInferenceModel, infonExtractionModel, infonPrivacyInferenceModel, imageParsingModel, protectionSuggestionModel, inferenceMode, sessionKeywords, autoPrivacyInference) {
   if (!userId) return
   
   try {
@@ -35,6 +35,7 @@ export function saveUserSessions(userId, sessions, infonSessions, privacyInferen
       imageParsingModel: imageParsingModel || 'gemma3:12b',
       protectionSuggestionModel: protectionSuggestionModel || 'deepseek-chat',
       inferenceMode: inferenceMode || 'extract', // 保存推断模式
+      autoPrivacyInference: autoPrivacyInference ?? true, // 保存自动隐私保护开关
       sessionKeywords: serializedKeywords, // 保存关键词（数组格式）
       savedAt: Date.now()
     }
@@ -85,6 +86,7 @@ export function loadUserSessions(userId, defaultModelsConfig = {}) {
       imageParsingModel: parsed.imageParsingModel || defaultModelsConfig.imageParsingModel || 'gemma3:12b',
       protectionSuggestionModel: parsed.protectionSuggestionModel || defaultModelsConfig.protectionSuggestionModel || 'deepseek-chat',
       inferenceMode: parsed.inferenceMode || defaultModelsConfig.inferenceMode || 'extract', // 加载推断模式
+      autoPrivacyInference: parsed.autoPrivacyInference ?? true, // 加载自动隐私保护开关
       sessionKeywords: deserializedKeywords, // 加载关键词（Set格式）
       savedAt: parsed.savedAt
     }
@@ -163,13 +165,15 @@ export function importUserData(userId, file) {
           data.customPrivacyItems,
           data.selectedLawIdx,
           data.selectedPrivacyItems,
+          data.conversationModel,
           data.directInferenceModel,
           data.infonExtractionModel,
           data.infonPrivacyInferenceModel,
           data.imageParsingModel,
           data.protectionSuggestionModel,
           data.inferenceMode,
-          data.sessionKeywords || {}
+          data.sessionKeywords || {},
+          data.autoPrivacyInference
         )
         resolve(data)
       } catch (error) {

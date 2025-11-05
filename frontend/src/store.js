@@ -545,6 +545,9 @@ export const useStore = create((set, get) => ({
   // 推断模式（中文注释）：extract（提取信息元）或 direct（直接推断）
   inferenceMode: getDefaultModelsConfig().inferenceMode, // 默认为提取信息元模式
   
+  // 自动隐私保护开关（中文注释）：控制是否自动提取信息元和进行隐私推理，默认开启
+  autoPrivacyInference: true,
+  
   // Pending用户输入（中文注释）：用于直接推断模式下获取未发送的输入
   pendingUserInput: '',
   
@@ -615,6 +618,11 @@ export const useStore = create((set, get) => ({
     }
     
     set({ inferenceMode: mode })
+  },
+  
+  // 设置自动隐私保护开关
+  setAutoPrivacyInference: (enabled) => {
+    set({ autoPrivacyInference: enabled })
   },
   
   // 设置pending用户输入
@@ -4307,7 +4315,8 @@ Output format:
           infonPrivacyInferenceModel: data.infonPrivacyInferenceModel || getDefaultModelsConfig().infonPrivacyInferenceModel,
           imageParsingModel: data.imageParsingModel || getDefaultModelsConfig().imageParsingModel,
           protectionSuggestionModel: data.protectionSuggestionModel || getDefaultModelsConfig().protectionSuggestionModel,
-          inferenceMode: data.inferenceMode || getDefaultModelsConfig().inferenceMode // 加载推断模式
+          inferenceMode: data.inferenceMode || getDefaultModelsConfig().inferenceMode, // 加载推断模式
+          autoPrivacyInference: data.autoPrivacyInference ?? true // 加载自动隐私保护开关
         })
         console.log('[PrivaSee] 用户历史数据已加载（包含关键词）')
       } else {
@@ -4360,7 +4369,7 @@ Output format:
         }
       })
       
-      saveUserSessions(userId, sessions, infonSessions, serializableInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, model, directInferenceModel, infonExtractionModel, infonPrivacyInferenceModel, imageParsingModel, protectionSuggestionModel, inferenceMode, sessionKeywords)
+      saveUserSessions(userId, sessions, infonSessions, serializableInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, model, directInferenceModel, infonExtractionModel, infonPrivacyInferenceModel, imageParsingModel, protectionSuggestionModel, inferenceMode, sessionKeywords, get().autoPrivacyInference)
     } catch (error) {
       console.error('[PrivaSee] 保存用户历史失败:', error)
     }

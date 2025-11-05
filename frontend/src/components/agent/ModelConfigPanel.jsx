@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Modal, Select, Divider, Button, message, Popconfirm, Input, Space, Upload } from 'antd'
+import { Modal, Select, Divider, Button, message, Popconfirm, Input, Space, Upload, Switch } from 'antd'
 import { DeleteOutlined, FileTextOutlined, PictureOutlined, SoundOutlined, ThunderboltOutlined, PlusOutlined, DownloadOutlined, UploadOutlined, KeyOutlined, UndoOutlined } from '@ant-design/icons'
 import { useStore } from '../../store'
 import { useUserStore } from '../../users/userStore'
@@ -33,6 +33,8 @@ const ModelConfigPanel = ({ visible, onClose }) => {
     customPrivacyItems,
     selectedLawIdx,
     selectedPrivacyItems,
+    autoPrivacyInference,
+    setAutoPrivacyInference,
   } = useStore()
   
   const { currentUser } = useUserStore()
@@ -391,6 +393,33 @@ const ModelConfigPanel = ({ visible, onClose }) => {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        <Divider style={{ margin: 0 }} />
+
+        {/* 隐私推断设置 */}
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: 'var(--color-text-primary)' }}>
+            隐私推断设置
+          </div>
+          
+          {/* 自动隐私保护开关 */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-primary)' }}>
+                自动隐私保护
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 2 }}>
+                {autoPrivacyInference 
+                  ? '开启后，系统会自动提取信息元并进行隐私风险分析（推荐）'
+                  : '关闭后，不会自动处理，需要手动触发（长按法律按钮）'}
+              </div>
+            </div>
+            <Switch 
+              checked={autoPrivacyInference}
+              onChange={setAutoPrivacyInference}
+            />
           </div>
         </div>
 

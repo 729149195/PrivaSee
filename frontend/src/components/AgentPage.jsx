@@ -79,6 +79,9 @@ export default function AgentPage() {
     setPendingUserInput,
     setPendingAudios,
     setPendingImages,
+    // 自动推理开关
+    autoPrivacyInference,
+    setSelectedLaw,
   } = useStore()
 
   // 用户状态：从用户 store 获取
@@ -87,6 +90,26 @@ export default function AgentPage() {
 
   // 当前会话对象
   const currentSession = getCurrentSession()
+  
+  // 初始化默认法律（确保即使右边栏未展开也能正常推理）
+  useEffect(() => {
+    const initDefaultLaw = async () => {
+      // 如果已经有选中的法律，跳过初始化
+      if (selectedLaw) return
+      
+      // 加载默认法律 (PIPL)
+      try {
+        const res = await fetch('./law/PIPL.json')
+        const lawData = await res.json()
+        setSelectedLaw('PIPL', lawData)
+        console.log('[AgentPage] 初始化默认法律: PIPL')
+      } catch (error) {
+        console.error('[AgentPage] 加载默认法律失败:', error)
+      }
+    }
+    
+    initDefaultLaw()
+  }, [selectedLaw, setSelectedLaw]) // eslint-disable-line react-hooks/exhaustive-deps
   
   // 使用提取的 Hook
   const {
@@ -232,6 +255,9 @@ export default function AgentPage() {
   // - 提取信息元模式：pending 或 message 信息元提取完成就触发推理
   // - 直接推断模式：ONLY当pending输入框或编辑框内容变化时触发推理（发送消息不触发重新推理）
   useEffect(() => {
+    // 如果未启用自动推理，跳过所有自动触发逻辑
+    if (!autoPrivacyInference) return
+    
     if (!currentSession?.id || !selectedLaw) return
     
     const currentInference = privacyInferences?.[currentSession.id]
@@ -520,6 +546,7 @@ export default function AgentPage() {
     currentSessionId,
     selectedLaw?.key,
     inferenceMode,
+    autoPrivacyInference, // 自动推理开关
     input, // 直接推断模式需要监听pending输入
     landingInput,
     selectedAudios, // 直接推断模式：监听音频数据
@@ -1299,6 +1326,11 @@ export default function AgentPage() {
   // 1.5秒 防抖：在用户停止输入后启动 pending 提取（中文注释）
   // 支持主输入框和编辑框两种模式
   useEffect(() => {
+    // 如果未启用自动隐私保护，跳过整个防抖逻辑
+    if (!autoPrivacyInference) {
+      return
+    }
+    
     // 直接推断模式：跳过整个防抖逻辑，推理由专门的 useEffect 处理
     if (inferenceMode === 'direct') {
       return
@@ -1408,7 +1440,7 @@ export default function AgentPage() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, landingInput, selectedImages, selectedAudios, hasMessages, editingMessageId, editingContent, editingImages, editingAudios, originalEditingContent, originalEditingImages, originalEditingAudios])
+  }, [input, landingInput, selectedImages, selectedAudios, hasMessages, editingMessageId, editingContent, editingImages, editingAudios, originalEditingContent, originalEditingImages, originalEditingAudios, autoPrivacyInference])
 
   // 会话拖拽排序事件处理（包装 Hook 函数以提交状态）
   const onDropSession = (id) => (e) => {
@@ -1491,7 +1523,7 @@ export default function AgentPage() {
             contextHasImages={contextHasImages}
             selectedImagesCount={selectedImages.length}
           />
-          <Splitter className={styles.splitterRoot}>
+          <Splitter className={styles.splitterRoot} key={rightPanelVisible ? 'with-panel' : 'no-panel'}>
             <Splitter.Panel style={{ overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
               {/* 信息元类型图例 - 仅在提取模式下显示 */}
               {inferenceMode !== 'direct' && <InfonLegend />}
@@ -1653,7 +1685,7 @@ export default function AgentPage() {
               )}
             </Splitter.Panel>
             {rightPanelVisible && (
-              <Splitter.Panel defaultSize="35%" min="25%" max="50%">
+              <Splitter.Panel defaultSize="28%" min="20%" max="45%">
                 <div className={styles.rightPaneScroll}>
                   <div className={styles.rightPaneHeader}>
                     <div className={styles.rightPaneTitle} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

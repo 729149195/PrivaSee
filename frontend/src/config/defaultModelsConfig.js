@@ -28,7 +28,7 @@ export const DEFAULT_MODELS_CONFIG = {
   },
 
   // 推断模式的默认值
-  inferenceMode: 'direct', // 默认为提取信息元模式：extract（提取信息元）或 direct（直接推断）
+  inferenceMode: 'extract', // 默认为提取信息元模式：extract（提取信息元）或 direct（直接推断）
 }
 
 /**
