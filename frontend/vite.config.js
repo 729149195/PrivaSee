@@ -6,7 +6,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   optimizeDeps: {
-    include: ['mammoth', 'xlsx'],
+    include: ['mammoth', 'xlsx', 'jszip'],
     esbuildOptions: {
       target: 'es2020'
     }

@@ -1,8 +1,122 @@
 import React, { useState, useEffect } from 'react'
-import { Modal, Table, Spin } from 'antd'
-import { FileTextOutlined, DownloadOutlined } from '@ant-design/icons'
+import { Modal, Table, Spin, Carousel } from 'antd'
+import { FileTextOutlined, DownloadOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import mammoth from 'mammoth'
 import * as XLSX from 'xlsx'
+import JSZip from 'jszip'
+
+/**
+ * 解析 PPTX 文件
+ * @param {ArrayBuffer} arrayBuffer - PPTX 文件的 ArrayBuffer
+ * @returns {Promise<Array>} - 幻灯片数组
+ */
+async function parsePPTX(arrayBuffer) {
+  const zip = await JSZip.loadAsync(arrayBuffer)
+  const slides = []
+  
+  // 读取所有幻灯片文件
+  const slideFiles = []
+  zip.folder('ppt/slides').forEach((relativePath, file) => {
+    if (relativePath.match(/^slide\d+\.xml$/)) {
+      slideFiles.push({ name: relativePath, file })
+    }
+  })
+  
+  // 按数字排序
+  slideFiles.sort((a, b) => {
+    const numA = parseInt(a.name.match(/\d+/)[0])
+    const numB = parseInt(b.name.match(/\d+/)[0])
+    return numA - numB
+  })
+  
+  // 读取媒体文件（图片）
+  const mediaFiles = {}
+  const mediaFolder = zip.folder('ppt/media')
+  if (mediaFolder) {
+    for (const [relativePath, file] of Object.entries(mediaFolder.files)) {
+      if (!file.dir && relativePath.match(/\.(png|jpg|jpeg|gif|bmp|svg)$/i)) {
+        const blob = await file.async('blob')
+        const url = URL.createObjectURL(blob)
+        const fileName = relativePath.split('/').pop()
+        mediaFiles[fileName] = url
+      }
+    }
+  }
+  
+  // 解析每个幻灯片
+  for (let i = 0; i < slideFiles.length; i++) {
+    const slideFile = slideFiles[i].file
+    const xmlText = await slideFile.async('text')
+    
+    // 提取文本内容
+    const texts = extractTextsFromSlideXML(xmlText)
+    
+    // 提取图片引用
+    const imageRefs = extractImageRefsFromSlideXML(xmlText)
+    const images = []
+    
+    // 读取对应的关系文件以获取图片文件名
+    const slideNum = slideFiles[i].name.match(/\d+/)[0]
+    const relsPath = `ppt/slides/_rels/slide${slideNum}.xml.rels`
+    const relsFile = zip.file(relsPath)
+    
+    if (relsFile && imageRefs.length > 0) {
+      const relsXml = await relsFile.async('text')
+      
+      for (const ref of imageRefs) {
+        const match = relsXml.match(new RegExp(`Id="${ref}"[^>]*Target="[^"]*\/media\/([^"]+)"`))
+        if (match && match[1]) {
+          const mediaFileName = match[1]
+          if (mediaFiles[mediaFileName]) {
+            images.push(mediaFiles[mediaFileName])
+          }
+        }
+      }
+    }
+    
+    slides.push({
+      number: i + 1,
+      texts,
+      images
+    })
+  }
+  
+  return slides
+}
+
+/**
+ * 从幻灯片 XML 中提取文本内容
+ */
+function extractTextsFromSlideXML(xmlText) {
+  const texts = []
+  const parser = new DOMParser()
+  const xmlDoc = parser.parseFromString(xmlText, 'text/xml')
+  
+  // 查找所有文本元素 <a:t>
+  const textElements = xmlDoc.getElementsByTagName('a:t')
+  for (let i = 0; i < textElements.length; i++) {
+    const text = textElements[i].textContent.trim()
+    if (text) {
+      texts.push(text)
+    }
+  }
+  
+  return texts
+}
+
+/**
+ * 从幻灯片 XML 中提取图片引用 ID
+ */
+function extractImageRefsFromSlideXML(xmlText) {
+  const refs = []
+  const blipMatches = xmlText.matchAll(/<a:blip[^>]*r:embed="([^"]+)"/g)
+  
+  for (const match of blipMatches) {
+    refs.push(match[1])
+  }
+  
+  return refs
+}
 
 /**
  * 文档预览 Modal
@@ -73,14 +187,21 @@ const DocumentPreviewModal = ({ file, fileObject, onClose }) => {
           
           setPreviewContent({ type: 'excel', sheets })
         }
-        // PowerPoint 文档：暂不支持预览
+        // PowerPoint 文档：使用 jszip 解析
         else if (
           fileType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || // .pptx
+          file?.name?.toLowerCase().endsWith('.pptx')
+        ) {
+          const arrayBuffer = await fileObject.arrayBuffer()
+          const slides = await parsePPTX(arrayBuffer)
+          setPreviewContent({ type: 'pptx', slides })
+        }
+        // 旧版 PPT 不支持
+        else if (
           fileType === 'application/vnd.ms-powerpoint' || // .ppt
-          file?.name?.toLowerCase().endsWith('.pptx') ||
           file?.name?.toLowerCase().endsWith('.ppt')
         ) {
-          setPreviewContent({ type: 'unsupported', message: 'PowerPoint 文件暂不支持在线预览，请下载后查看' })
+          setPreviewContent({ type: 'unsupported', message: '旧版 .ppt 格式不支持预览，请转换为 .pptx 格式或下载后查看' })
         }
         // 其他类型
         else {
@@ -250,6 +371,100 @@ const DocumentPreviewModal = ({ file, fileObject, onClose }) => {
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                ))}
+              </div>
+            ) : previewContent.type === 'pptx' ? (
+              <div style={{ padding: '20px', backgroundColor: '#f5f5f5' }}>
+                <div style={{ 
+                  marginBottom: '16px', 
+                  textAlign: 'center',
+                  color: '#8c8c8c',
+                  fontSize: '13px'
+                }}>
+                  共 {previewContent.slides.length} 页幻灯片
+                </div>
+                {previewContent.slides.map((slide, slideIdx) => (
+                  <div 
+                    key={slideIdx} 
+                    style={{ 
+                      marginBottom: '24px',
+                      backgroundColor: '#fff',
+                      borderRadius: '8px',
+                      padding: '20px',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
+                    }}
+                  >
+                    {/* 幻灯片页码 */}
+                    <div style={{
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: '#1890ff',
+                      marginBottom: '16px',
+                      paddingBottom: '8px',
+                      borderBottom: '2px solid #e8e8e8'
+                    }}>
+                      第 {slide.number} 页
+                    </div>
+                    
+                    {/* 幻灯片图片 */}
+                    {slide.images && slide.images.length > 0 && (
+                      <div style={{ marginBottom: '16px' }}>
+                        {slide.images.map((imageUrl, imgIdx) => (
+                          <img 
+                            key={imgIdx}
+                            src={imageUrl}
+                            alt={`Slide ${slide.number} - Image ${imgIdx + 1}`}
+                            style={{
+                              maxWidth: '100%',
+                              height: 'auto',
+                              display: 'block',
+                              margin: '8px 0',
+                              borderRadius: '4px',
+                              border: '1px solid #e8e8e8'
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* 幻灯片文本内容 */}
+                    {slide.texts && slide.texts.length > 0 && (
+                      <div style={{
+                        backgroundColor: '#fafafa',
+                        padding: '16px',
+                        borderRadius: '4px',
+                        border: '1px solid #e8e8e8'
+                      }}>
+                        {slide.texts.map((text, textIdx) => (
+                          <div 
+                            key={textIdx}
+                            style={{
+                              marginBottom: textIdx < slide.texts.length - 1 ? '8px' : '0',
+                              fontSize: '13px',
+                              lineHeight: '1.6',
+                              color: '#262626',
+                              wordBreak: 'break-word'
+                            }}
+                          >
+                            {text}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* 如果没有内容 */}
+                    {(!slide.texts || slide.texts.length === 0) && 
+                     (!slide.images || slide.images.length === 0) && (
+                      <div style={{
+                        textAlign: 'center',
+                        padding: '40px',
+                        color: '#bfbfbf',
+                        fontSize: '13px'
+                      }}>
+                        此页无可显示的内容
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

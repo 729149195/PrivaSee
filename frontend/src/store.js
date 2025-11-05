@@ -2340,7 +2340,8 @@ Output format:
       id: fileData.id,
       name: fileData.name,
       size: fileData.size,
-      type: fileData.type
+      type: fileData.type,
+      serverFilename: fileData.serverFilename || null  // 保存服务器文件名（如果已上传）
       // 不再保存 dataUrl，避免存储空间超限
     }))
 
@@ -2429,6 +2430,9 @@ Output format:
     const controller = new AbortController()
     set({ isGenerating: true, abortController: controller })
 
+    // 定义在函数作用域，以便在 catch 块中也能访问
+    let currentContent = '' // 累积的内容
+
     try {
       // 构建历史消息上下文（用于多轮对话）
       // 只取最近的几轮对话（避免上下文过长）
@@ -2506,7 +2510,7 @@ Output format:
                   size: fileMetadata.size,
                   type: fileMetadata.type,
                   file: fileObj,
-                  serverFilename: null, // 需要重新上传或使用已上传的
+                  serverFilename: fileMetadata.serverFilename || null, // 使用已保存的 serverFilename
                   uploadStatus: 'completed'
                 }
               })
@@ -2523,7 +2527,7 @@ Output format:
                 size: fileMetadata.size,
                 type: fileMetadata.type,
                 file: fileObj,
-                serverFilename: null,
+                serverFilename: fileMetadata.serverFilename || null, // 使用已保存的 serverFilename
                 uploadStatus: 'completed'
               }
             })
@@ -2573,9 +2577,62 @@ Output format:
         }
       }
       
+      // 先上传所有文件（如果还没有上传）
+      console.log('[sendMessageWithDeepSeekOCR] 检查文件上传状态...')
+      for (let i = 0; i < filesToProcess.length; i++) {
+        const fileData = filesToProcess[i]
+        
+        // 如果文件已经有 serverFilename，跳过上传
+        if (fileData.serverFilename) {
+          console.log(`[sendMessageWithDeepSeekOCR] 文件 ${fileData.name} 已上传: ${fileData.serverFilename}`)
+          continue
+        }
+        
+        // 需要上传文件
+        if (fileData.file) {
+          console.log(`[sendMessageWithDeepSeekOCR] 上传文件: ${fileData.name}`)
+          
+          try {
+            const { uploadFile } = await import('./utils/fileUpload')
+            const uploadResult = await uploadFile(fileData.file, provider, (progress) => {
+              // 更新上传进度
+              get()._updateMessage(session.id, userMsgId, (m) => ({
+                ...m,
+                ocrStatus: 'uploading',
+                ocrProgress: Math.round(progress * 0.2), // 上传占20%进度
+                ocrStage: `上传文件 ${i + 1}/${filesToProcess.length}: ${progress}%`
+              }))
+            })
+            
+            if (uploadResult.success) {
+              fileData.serverFilename = uploadResult.filename
+              fileData.uploadStatus = 'success'
+              console.log(`[sendMessageWithDeepSeekOCR] 文件上传成功: ${uploadResult.filename}`)
+              
+              // 更新消息中的文件元数据，保存 serverFilename
+              get()._updateMessage(session.id, userMsgId, (m) => ({
+                ...m,
+                files: m.files.map(f => 
+                  f.id === fileData.id 
+                    ? { ...f, serverFilename: uploadResult.filename }
+                    : f
+                )
+              }))
+            } else {
+              throw new Error('文件上传失败')
+            }
+          } catch (error) {
+            console.error(`[sendMessageWithDeepSeekOCR] 上传文件失败:`, error)
+            fileData.uploadStatus = 'error'
+            fileData.uploadError = error.message
+            throw new Error(`文件上传失败: ${fileData.name} - ${error.message}`)
+          }
+        }
+      }
+      console.log('[sendMessageWithDeepSeekOCR] 所有文件已准备完成')
+      
       // 使用流式 API 处理每个文件
       const results = []
-      let currentContent = '' // 累积的内容
       
       for (let i = 0; i < filesToProcess.length; i++) {
         const fileData = filesToProcess[i]
@@ -3143,7 +3200,111 @@ Output format:
       })
     }))
 
-    await get().sendMessage(lastUser.content)
+    // 检查是否是 OCR 消息（包含文件和命令）
+    if (lastUser.files && lastUser.files.length > 0 && lastUser.commands && lastUser.commands.length > 0) {
+      console.log('[regenerateLast] 重新生成 OCR 消息')
+      
+      // 恢复文件对象
+      const messageFileObjects = get().ocrFileObjects?.[session.id]?.[lastUser.id] || {}
+      
+      // 如果内存中没有，尝试从 IndexedDB 恢复
+      let restoredFiles = {}
+      if (Object.keys(messageFileObjects).length === 0) {
+        try {
+          const { loadFiles } = await import('./utils/fileStorage')
+          const fileIds = lastUser.files.map(f => f.id)
+          restoredFiles = await loadFiles(session.id, lastUser.id, fileIds)
+          console.log('[regenerateLast] 从 IndexedDB 恢复了文件:', Object.keys(restoredFiles).length)
+        } catch (error) {
+          console.error('[regenerateLast] 从 IndexedDB 恢复文件失败:', error)
+        }
+      } else {
+        restoredFiles = messageFileObjects
+      }
+      
+      // 检查是否需要上传文件
+      const currentModel = get().model
+      const customProviders = get().customProviders
+      const provider = customProviders?.[currentModel]
+      
+      if (!provider) {
+        throw new Error(`模型 ${currentModel} 的配置不存在`)
+      }
+      
+      // 构建文件数据结构
+      const filesToProcess = await Promise.all(lastUser.files.map(async (fileMetadata) => {
+        const fileObj = restoredFiles[fileMetadata.id]
+        
+        // 如果已经有 serverFilename，直接使用
+        if (fileMetadata.serverFilename) {
+          console.log(`[regenerateLast] 文件 ${fileMetadata.name} 已上传，使用服务器文件名:`, fileMetadata.serverFilename)
+          return {
+            ...fileMetadata,
+            file: fileObj || null,
+            uploadStatus: 'success',
+            serverFilename: fileMetadata.serverFilename
+          }
+        }
+        
+        // 否则需要重新上传
+        if (fileObj) {
+          console.log(`[regenerateLast] 文件 ${fileMetadata.name} 需要重新上传`)
+          try {
+            const { uploadFile } = await import('./utils/fileUpload')
+            const uploadResult = await uploadFile(fileObj, provider, (progress) => {
+              console.log(`[regenerateLast] 上传进度: ${progress}%`)
+            })
+            
+            if (uploadResult.success) {
+              console.log(`[regenerateLast] 文件上传成功:`, uploadResult.filename)
+              return {
+                ...fileMetadata,
+                file: fileObj,
+                uploadStatus: 'success',
+                serverFilename: uploadResult.filename
+              }
+            } else {
+              throw new Error('文件上传失败')
+            }
+          } catch (error) {
+            console.error(`[regenerateLast] 上传文件失败:`, error)
+            return {
+              ...fileMetadata,
+              file: fileObj,
+              uploadStatus: 'error',
+              uploadError: error.message
+            }
+          }
+        } else {
+          console.warn(`[regenerateLast] 文件对象丢失: ${fileMetadata.name}`)
+          return {
+            ...fileMetadata,
+            file: null,
+            uploadStatus: 'error',
+            uploadError: '文件对象丢失，请重新选择文件'
+          }
+        }
+      }))
+      
+      // 检查是否所有文件都上传成功
+      const failedFiles = filesToProcess.filter(f => f.uploadStatus === 'error')
+      if (failedFiles.length > 0) {
+        const errorMsg = failedFiles.map(f => `${f.name}: ${f.uploadError}`).join('\n')
+        throw new Error(`部分文件上传失败:\n${errorMsg}`)
+      }
+      
+      // 调用 OCR 处理函数
+      const resolution = get().currentResolution || 'gundam'
+      await get().sendMessageWithDeepSeekOCR(
+        lastUser.content,
+        lastUser.commands,
+        filesToProcess,
+        resolution
+      )
+    } else {
+      // 普通消息，直接调用 sendMessage
+      await get().sendMessage(lastUser.content)
+    }
   },
 
   // ========== 隐私推理相关方法 ==========

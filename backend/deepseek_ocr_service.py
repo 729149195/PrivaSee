@@ -370,6 +370,39 @@ class CallbackTextStreamer(TextStreamer):
             self.callback(text)
 
 # =============================================================================
+# 文件清理工具
+# =============================================================================
+
+def cleanup_files(files_to_delete: List[str], dirs_to_delete: List[str] = None):
+    """
+    清理文件和目录
+    
+    Args:
+        files_to_delete: 要删除的文件列表
+        dirs_to_delete: 要删除的目录列表
+    """
+    import shutil
+    
+    # 清理文件
+    for file_path in files_to_delete:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"  ✓ 已删除文件: {Path(file_path).name}")
+        except Exception as e:
+            logger.warning(f"  ✗ 删除文件失败 {file_path}: {e}")
+    
+    # 清理目录
+    if dirs_to_delete:
+        for dir_path in dirs_to_delete:
+            try:
+                if os.path.exists(dir_path):
+                    shutil.rmtree(dir_path)
+                    logger.info(f"  ✓ 已删除目录: {Path(dir_path).name}")
+            except Exception as e:
+                logger.warning(f"  ✗ 删除目录失败 {dir_path}: {e}")
+
+# =============================================================================
 # OCR 处理函数
 # =============================================================================
 
@@ -381,7 +414,8 @@ def process_image(
     save_results: bool = False,
     output_dir: Optional[str] = None,
     stream_callback=None,  # 新增：流式生成回调函数
-    history_messages: Optional[list] = None  # 新增：历史消息列表
+    history_messages: Optional[list] = None,  # 新增：历史消息列表
+    stop_flag: Optional[dict] = None  # 新增：停止标志
 ) -> str:
     """
     处理单张图片
@@ -513,7 +547,11 @@ def process_image(
             logger.warning("  ⚠ 视觉问答可能缺少问题参数")
             result = "视觉问答需要提供问题。请在发送时输入您的问题。"
     
-    logger.info(f"  ✓ 处理完成，结果长度: {len(result)} 字符")
+    # 检查是否已被中断
+    if stop_flag and stop_flag.get('stop'):
+        logger.info("  处理被中断，不发送完成事件")
+    else:
+        logger.info(f"  ✓ 处理完成，结果长度: {len(result)} 字符")
     
     # 清理 GPU 缓存，释放显存
     if torch.cuda.is_available():
@@ -600,6 +638,9 @@ def process_file_stream():
     import json
     
     def generate():
+        # 用于追踪需要清理的输出目录（只清理outputs，不清理uploads）
+        dirs_to_cleanup = []
+        
         try:
             # 获取参数
             function_type = request.form.get('function', 'free_ocr')
@@ -672,6 +713,8 @@ def process_file_stream():
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             output_dir = os.path.join(OUTPUT_FOLDER, timestamp)
             os.makedirs(output_dir, exist_ok=True)
+            # 标记输出目录需要清理
+            dirs_to_cleanup.append(output_dir)
             
             files_to_process = []
             
@@ -749,10 +792,13 @@ def process_file_stream():
                             save_results=False,
                             output_dir=output_dir,
                             stream_callback=stream_callback,
-                            history_messages=history_messages
+                            history_messages=history_messages,
+                            stop_flag=stop_flag  # 传递停止标志
                         )
-                        result_container['result'] = result
-                        text_queue.put(('done', None))
+                        # 只有在未被中断时才发送完成信号
+                        if not stop_flag['stop']:
+                            result_container['result'] = result
+                            text_queue.put(('done', None))
                     except Exception as e:
                         if not stop_flag['stop']:
                             result_container['error'] = str(e)
@@ -828,6 +874,12 @@ def process_file_stream():
         except Exception as e:
             logger.error(f"流式处理失败: {e}", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+        finally:
+            # 清理输出目录（保留上传的文件）
+            if dirs_to_cleanup:
+                logger.info("开始清理输出文件...")
+                cleanup_files([], dirs_to_cleanup)
+                logger.info("✓ 输出文件清理完成")
     
     response = Response(stream_with_context(generate()), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
@@ -853,6 +905,9 @@ def process_file():
             "metadata": {...}
         }
     """
+    # 用于追踪需要清理的输出目录（只清理outputs，不清理uploads）
+    dirs_to_cleanup = []
+    
     try:
         # 获取参数
         function_type = request.form.get('function', 'free_ocr')
@@ -937,6 +992,8 @@ def process_file():
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             output_dir = os.path.join(OUTPUT_FOLDER, timestamp)
             os.makedirs(output_dir, exist_ok=True)
+            # 标记输出目录需要清理
+            dirs_to_cleanup.append(output_dir)
             
             files_to_process = []
             
@@ -1025,13 +1082,11 @@ def process_file():
             return jsonify(response)
             
         finally:
-            # 清理临时文件
-            if not save_results:
-                try:
-                    if os.path.exists(upload_path):
-                        os.remove(upload_path)
-                except Exception as e:
-                    logger.warning(f"清理文件失败: {e}")
+            # 清理输出目录（保留上传的文件）
+            if dirs_to_cleanup:
+                logger.info("开始清理输出文件...")
+                cleanup_files([], dirs_to_cleanup)
+                logger.info("✓ 输出文件清理完成")
     
     except Exception as e:
         logger.error(f"处理失败: {e}", exc_info=True)
@@ -1090,6 +1145,9 @@ def batch_process():
     """
     批量处理多个文件
     """
+    # 用于追踪需要清理的输出目录（只清理outputs，不清理uploads）
+    dirs_to_cleanup = []
+    
     try:
         if 'files' not in request.files:
             return jsonify({'error': '未上传文件'}), 400
@@ -1118,6 +1176,9 @@ def batch_process():
                 
                 # 处理
                 output_dir = os.path.join(OUTPUT_FOLDER, timestamp)
+                # 标记输出目录需要清理
+                dirs_to_cleanup.append(output_dir)
+                
                 result_text = process_image(
                     image_path=upload_path,
                     function_type=function_type,
@@ -1159,6 +1220,12 @@ def batch_process():
             'success': False,
             'error': str(e)
         }), 500
+    finally:
+        # 清理输出目录（保留上传的文件）
+        if dirs_to_cleanup:
+            logger.info("开始清理输出文件...")
+            cleanup_files([], dirs_to_cleanup)
+            logger.info("✓ 输出文件清理完成")
 
 # =============================================================================
 # 主程序
