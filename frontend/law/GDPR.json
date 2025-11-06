@@ -1,168 +1,168 @@
 {
-    "name": "欧盟《通用数据保护条例》",
+    "name": "EU GDPR",
     "value": 1,
     "children": [
       {
-        "name": "一般个人数据（Art.4(1)）",
+        "name": "General Personal Data",
         "value": 1,
         "children": [
           {
-            "name": "标识符与联系信息",
+            "name": "Identifiers & Contact Info",
             "value": 1,
             "children": [
-              { "name": "姓名/别名", "value": 1 },
-              { "name": "住址/邮编", "value": 1 },
-              { "name": "电话/电子邮箱", "value": 1 },
-              { "name": "在线标识符（账户名/用户ID）", "value": 1 }
+              { "name": "Name/alias", "value": 1 },
+              { "name": "Address/postal code", "value": 1 },
+              { "name": "Phone/email", "value": 1 },
+              { "name": "Online identifier (account/user ID)", "value": 1 }
             ]
           },
           {
-            "name": "在线与设备标识符",
+            "name": "Online & Device Identifiers",
             "value": 1,
             "children": [
-              { "name": "IP地址", "value": 1 },
-              { "name": "Cookie/广告ID/指纹ID", "value": 1 },
-              { "name": "设备ID/序列号/浏览器UA", "value": 1 },
-              { "name": "RFID/近场标签ID", "value": 1 }
+              { "name": "IP address", "value": 1 },
+              { "name": "Cookie/ad ID/fingerprint ID", "value": 1 },
+              { "name": "Device ID/serial/browser UA", "value": 1 },
+              { "name": "RFID/NFC tag ID", "value": 1 }
             ]
           },
           {
-            "name": "位置与行为数据",
+            "name": "Location & Behavior Data",
             "value": 1,
             "children": [
-              { "name": "位置数据（粗略/精确）", "value": 1 },
-              { "name": "浏览/搜索/点击流", "value": 1 },
-              { "name": "App使用/日志/诊断", "value": 1 },
-              { "name": "广告交互（曝光/点击/转化）", "value": 1 }
+              { "name": "Location data (coarse/precise)", "value": 1 },
+              { "name": "Browsing/search/clickstream", "value": 1 },
+              { "name": "App usage/logs/diagnostics", "value": 1 },
+              { "name": "Ad interaction (impressions/clicks/conversions)", "value": 1 }
             ]
           },
           {
-            "name": "经济与交易信息",
+            "name": "Economic & Transaction Info",
             "value": 1,
             "children": [
-              { "name": "订单与支付记录（不含凭证）", "value": 1 },
-              { "name": "收入/账单/发票信息", "value": 1 },
-              { "name": "纳税信息（一般性）", "value": 1 }
+              { "name": "Orders & payment records (no credentials)", "value": 1 },
+              { "name": "Income/billing/invoice info", "value": 1 },
+              { "name": "Tax information (general)", "value": 1 }
             ]
           },
           {
-            "name": "职业与教育",
+            "name": "Professional & Education",
             "value": 1,
             "children": [
-              { "name": "雇主/职位/职级/工作地点", "value": 1 },
-              { "name": "就业历史/绩效评估", "value": 1 },
-              { "name": "学历/学位/学校/成绩", "value": 1 },
-              { "name": "资格证书", "value": 1 }
+              { "name": "Employer/position/rank/work location", "value": 1 },
+              { "name": "Employment history/performance evaluations", "value": 1 },
+              { "name": "Education/degree/school/grades", "value": 1 },
+              { "name": "Qualifications/certifications", "value": 1 }
             ]
           },
           {
-            "name": "媒体/感官与通信",
+            "name": "Media/Sensory & Communication",
             "value": 1,
             "children": [
-              { "name": "图片/视频/音频（内容本身）", "value": 1 },
-              { "name": "通信内容（邮件/消息/通话）", "value": 1 },
-              { "name": "日志/元数据（时间/对象/频率）", "value": 1 }
+              { "name": "Images/videos/audio (content)", "value": 1 },
+              { "name": "Communication content (email/messages/calls)", "value": 1 },
+              { "name": "Logs/metadata (time/parties/frequency)", "value": 1 }
             ]
           },
           {
-            "name": "画像与推断（Profiling相关）",
+            "name": "Profiling & Inference",
             "value": 1,
             "children": [
-              { "name": "偏好与兴趣标签", "value": 1 },
-              { "name": "信用/风险/评分", "value": 1 },
-              { "name": "行为/能力/倾向预测", "value": 1 }
+              { "name": "Preferences & interest tags", "value": 1 },
+              { "name": "Credit/risk/scores", "value": 1 },
+              { "name": "Behavioral/ability/tendency predictions", "value": 1 }
             ]
           }
         ]
       },
       {
-        "name": "特殊类别个人数据（Art.9）",
+        "name": "Special Category Personal Data",
         "value": 1,
         "children": [
           {
-            "name": "种族或民族出身",
+            "name": "Racial or Ethnic Origin",
             "value": 1,
             "children": [
-              { "name": "族裔/血统/出身记录", "value": 1 }
+              { "name": "Ethnicity/ancestry/origin records", "value": 1 }
             ]
           },
           {
-            "name": "政治见解",
+            "name": "Political Opinions",
             "value": 1,
             "children": [
-              { "name": "政党成员/政治捐赠/参与记录", "value": 1 }
+              { "name": "Party membership/donations/participation", "value": 1 }
             ]
           },
           {
-            "name": "宗教或哲学信仰",
+            "name": "Religious or Philosophical Beliefs",
             "value": 1,
             "children": [
-              { "name": "宗教信仰类别/活动记录", "value": 1 }
+              { "name": "Religious belief category/activity records", "value": 1 }
             ]
           },
           {
-            "name": "工会会员资格",
+            "name": "Trade Union Membership",
             "value": 1,
             "children": [
-              { "name": "工会会籍/缴费/活动记录", "value": 1 }
+              { "name": "Union membership/dues/activity records", "value": 1 }
             ]
           },
           {
-            "name": "遗传数据",
+            "name": "Genetic Data",
             "value": 1,
             "children": [
-              { "name": "DNA/遗传标记/家系", "value": 1 }
+              { "name": "DNA/genetic markers/lineage", "value": 1 }
             ]
           },
           {
-            "name": "生物特征数据（用于唯一识别）",
+            "name": "Biometric Data (for Unique ID)",
             "value": 1,
             "children": [
-              { "name": "人脸/指纹/虹膜/声纹/掌静脉/步态", "value": 1 }
+              { "name": "Face/fingerprint/iris/voiceprint/palm vein/gait", "value": 1 }
             ]
           },
           {
-            "name": "健康数据",
+            "name": "Health Data",
             "value": 1,
             "children": [
-              { "name": "病历/诊断/处方/治疗", "value": 1 },
-              { "name": "体检/检验/影像/残疾信息", "value": 1 },
-              { "name": "生命体征/可穿戴健康数据", "value": 1 }
+              { "name": "Medical records/diagnosis/prescription/treatment", "value": 1 },
+              { "name": "Physical exam/tests/imaging/disability info", "value": 1 },
+              { "name": "Vital signs/wearable health data", "value": 1 }
             ]
           },
           {
-            "name": "性生活或性取向",
+            "name": "Sex Life or Sexual Orientation",
             "value": 1,
             "children": [
-              { "name": "性历史/性健康/取向", "value": 1 }
+              { "name": "Sexual history/health/orientation", "value": 1 }
             ]
           }
         ]
       },
       {
-        "name": "刑事定罪与违法行为数据（Art.10）",
+        "name": "Criminal Convictions & Offences Data",
         "value": 1,
         "children": [
-          { "name": "刑事指控/逮捕/调查记录", "value": 1 },
-          { "name": "定罪/判决/刑罚/假释", "value": 1 },
-          { "name": "违法与行政处罚记录", "value": 1 }
+          { "name": "Criminal charges/arrest/investigation records", "value": 1 },
+          { "name": "Convictions/sentences/penalties/parole", "value": 1 },
+          { "name": "Offences & administrative penalty records", "value": 1 }
         ]
       },
       {
-        "name": "国家身份识别号（成员国法，Art.87）",
+        "name": "National ID Numbers",
         "value": 2,
         "children": [
-          { "name": "国家身份证号/社会保障号", "value": 1 },
-          { "name": "税号/医保号/驾驶证号", "value": 1 }
+          { "name": "National ID/social security number", "value": 1 },
+          { "name": "Tax ID/health insurance/driver's license number", "value": 1 }
         ]
       },
       {
-        "name": "儿童个人数据（需特殊保护）",
+        "name": "Children's Personal Data",
         "value": 1,
         "children": [
-          { "name": "儿童身份与监护信息", "value": 1 },
-          { "name": "教育在校记录/在线服务使用", "value": 1 },
-          { "name": "在线同意与年龄验证记录", "value": 1 }
+          { "name": "Child identity & guardian info", "value": 1 },
+          { "name": "Educational records/online service use", "value": 1 },
+          { "name": "Online consent & age verification records", "value": 1 }
         ]
       }
     ]

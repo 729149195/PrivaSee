@@ -540,7 +540,7 @@ export const useStore = create((set, get) => ({
   
   // 共用的模型配置
   imageParsingModel: getDefaultModelsConfig().imageParsingModel, // 图片解析模型（共用）
-  protectionSuggestionModel: getDefaultModelsConfig().protectionSuggestionModel, // Privacy Protection Suggestions模型（共用，仅限API key模型）
+  protectionSuggestionModel: getDefaultModelsConfig().protectionSuggestionModel, // Privacy Protection Suggestions模型（共用）
   
   // 推断模式（中文注释）：extract（提取信息元）或 direct（直接推断）
   inferenceMode: getDefaultModelsConfig().inferenceMode, // 默认为提取信息元模式
@@ -4056,36 +4056,18 @@ Output format:
     }))
     
     try {
-      // 使用配置的Privacy Protection Suggestions模型（必须是API key模型）
-      const configuredModel = get().protectionSuggestionModel || 'deepseek-chat'
+      // 使用配置的Privacy Protection Suggestions模型（支持所有模型）
+      const configuredModel = get().protectionSuggestionModel || 'qwen2.5:7b-instruct'
       const provider = get().customProviders?.[configuredModel]
       
-      // 验证是否是API key模型
-      if (!provider) {
-        console.warn('[Protection] Privacy Protection Suggestions只能使用API key模型')
-        set(state => ({
-          protectionSuggestions: {
-            ...state.protectionSuggestions,
-            [session.id]: {
-              status: 'error',
-              error: 'Privacy Protection Suggestions requires an API key model. Please configure one in Settings.',
-              suggestions: []
-            }
-          }
-        }))
-        return
-      }
-      
-      const apiUrl = provider.baseUrl
+      // 如果有provider（自定义API模型），使用provider配置；否则使用本地baseUrl（Ollama）
+      const apiUrl = provider ? provider.baseUrl : get().baseUrl
       const apiKey = provider?.apiKey || ''
       
       // 确保 apiUrl 格式正确
       if (!apiUrl) {
         throw new Error('未配置API地址')
       }
-      
-      const normalizedUrl = new URL(apiUrl.replace(/\/$/, '') + '/chat/completions')
-      const fullUrl = normalizedUrl.toString()
       
       // 构建提示词
       const { fillProtectionPrompt } = await import('./templates/protection.js')
@@ -4095,12 +4077,11 @@ Output format:
       const isOmniModel = configuredModel.toLowerCase().includes('omni')
       const maxTokens = isOmniModel ? 2000 : 4096
       
-      console.log(`[Protection] 发起建议生成请求到 ${fullUrl}`)
-      console.log(`[Protection] 使用模型: ${configuredModel}`)
+      console.log(`[Protection] 发起建议生成请求到 ${apiUrl}，使用模型: ${configuredModel}`)
       console.log(`[Protection] Prompt 长度: ${prompt.length} 字符`)
       
       try {
-        const response = await fetch(fullUrl, {
+        const response = await fetch(`${apiUrl}/chat/completions`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
