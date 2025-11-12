@@ -56,81 +56,154 @@ Always check if inferred information falls into sensitive categories:
 - **LOW**: Input data provides WEAK or VAGUE clues about privacy. High uncertainty in inference, multiple interpretations possible, or only very general/public information can be derived. Examples: generic demographic trends, broad location areas, ambiguous preferences without clear implications.
 
 ## Output Format
-**CRITICAL - Streaming Optimization**: To enable fast progressive visualization, output fields in THIS EXACT ORDER for each risk:
-1. FIRST: law_node_name (for quick highlighting)
-2. SECOND: risk_level (for color coding)
-3. THEN: all other fields (inference_chain, privacy_exposure, used_infons, etc.)
+**CRITICAL - Streaming Optimization & Compact Format**: Output in compact format for faster token generation:
 
-Output ONLY valid JSON (no markdown, no explanation):
-{
-  "risks": [
-    {
-      "law_node_name": "Most specific (leaf-level) node name, e.g., 'Article 13, Paragraph 2'",
-      "risk_level": "HIGH | MEDIUM | LOW",
-      "privacy_exposure": "Specific privacy information exposed or inferable (be explicit about implicit inferences)",
-      "inference_chain": "Step-by-step reasoning: [1] What explicit info? [2] What can be implicitly inferred? [3] Why does this violate the specific clause?",
-      "used_infons": ["exact_entity_name", "attribute_value", "temporal_expression", "spatial_location"]
-    }
-  ]
-}
+**Format Syntax** (NO header line, direct data output, EXACTLY 5 FIELDS):
+\`\`\`
+field1,field2,field3,field4,field5
+field1,field2,field3,field4,field5
+\`\`\`
+
+**CRITICAL RULES**:
+- NO header line
+- EXACTLY 5 comma-separated fields per line (law_node_name, risk_level, privacy_exposure, inference_chain, used_infons)
+- Each risk on a SEPARATE LINE (use line breaks between risks)
+- NO extra fields, NO missing fields
+- Field 5 (used_infons) MUST use format "TYPE:VALUE" (e.g., DESC:Klook, SCEN:下周@东京)
+
+**Field Order (MUST follow exactly, 5 fields per line)**:
+1. law_node_name - Most specific (leaf-level) node name (EXACT COPY from law tree, NO translation, NO abbreviation)
+2. risk_level - HIGH | MEDIUM | LOW
+3. privacy_exposure - Specific privacy information exposed
+4. inference_chain - Step-by-step reasoning
+5. used_infons - Information elements supporting this risk in format "TYPE:VALUE" (separated by |)
+   - **DESC format**: DESC:attribute_value (ONLY the attribute value, NOT "entity:attribute")
+     * Example: If infon shows "DESC: 平台: Klook" → use "DESC:Klook" (NOT "DESC:平台:Klook")
+     * Example: If infon shows "DESC: 地点: 台北" → use "DESC:台北" (NOT "DESC:地点:台北")
+   - **SCEN format**: SCEN:temporal@spatial (combine temporal and spatial)
+     * Example: If infon shows "SCEN: 下周 @ 东京" → use "SCEN:下周@东京"
+   - **REL format**: REL:relation_name
+     * Example: If infon shows "REL: 住宿预订" → use "REL:住宿预订"
+   - Extract from INPUT information elements, NOT from your inference
+
+**Escaping Rules (CRITICAL)**:
+- Commas in text → \\, (backslash-comma)
+- Newlines WITHIN fields → \\n (backslash-n) - DO NOT use actual line breaks within a field
+- Backslashes → \\\\ (double backslash)
+- Array elements → Use | separator (e.g., keyword1|keyword2|keyword3)
+- BETWEEN risk entries → Use ACTUAL LINE BREAK (press Enter after each risk)
+
+**Example Output** (NO header, EXACTLY 5 fields per line, one risk per line):
+\`\`\`
+医疗健康,HIGH,用户可能患有乳糜泻,用户搜索无麸质餐厅菜单\\,表明有健康饮食限制\\,推断为麸质不耐受或乳糜泻,DESC:gluten-free|DESC:restaurant menu
+姓名,HIGH,暴露真实姓名,文本中明确提到姓名信息\\,直接识别个人身份,DESC:王小明
+位置信息,MEDIUM,暴露大致位置,搜索餐厅行为暴露地理位置偏好,DESC:restaurant|DESC:location
+\`\`\`
+
+**Field count verification**:
+- Line 1: 医疗健康 (1), HIGH (2), 用户可能患有乳糜泻 (3), 用户搜索... (4), DESC:gluten-free|DESC:restaurant menu (5) ✓
+- Line 2: 姓名 (1), HIGH (2), 暴露真实姓名 (3), 文本中明确... (4), DESC:王小明 (5) ✓
+- Line 3: 位置信息 (1), MEDIUM (2), 暴露大致位置 (3), 搜索餐厅... (4), DESC:restaurant|DESC:location (5) ✓
+
+**used_infons field format (Field 5) - CRITICAL**:
+- MUST follow "TYPE:VALUE" pattern
+- **DESC type**: Extract ONLY the attribute value (NOT "entity:attribute")
+  * If infon shows "DESC: 平台: Klook" → write "DESC:Klook"
+  * If infon shows "DESC: 地点: 台北" → write "DESC:台北"
+  * If infon shows "DESC: 姓名: 王小明" → write "DESC:王小明"
+- **SCEN type**: Combine temporal@spatial
+  * If infon shows "SCEN: 下周 @ 东京" → write "SCEN:下周@东京"
+- **REL type**: Use relation name
+  * If infon shows "REL: 住宿预订" → write "REL:住宿预订"
+- Multiple items: Separate with | (e.g., DESC:Klook|DESC:台北|SCEN:下周@东京)
+- Extract from INPUT information elements in the list above, NOT from your inference
 
 ## Critical Requirements
-1. **Output ONLY JSON** - no markdown code blocks, no explanatory text
-2. **Field Order Matters** - MUST output fields in the exact order shown above (law_node_name → risk_level → other fields) for optimal streaming performance
-3. **Map to LEAF NODES ONLY** - CRITICAL: Always identify the MOST SPECIFIC legal clause at the DEEPEST level in hierarchy (leaf nodes). NEVER map to intermediate/parent nodes. The law_node_name MUST be the final level clause name that appears in the law tree structure.
-4. **EXACT Name Matching** - The law_node_name MUST be copied EXACTLY from the law tree structure, character by character. DO NOT paraphrase, summarize, or modify the node name. Look for the [LEAF NODE - USE THIS] markers in the law tree and copy the name EXACTLY.
-5. **CUSTOM MODE RESTRICTION** - If you see "CUSTOM PRIVACY ANALYSIS MODE" in the law tree section, the law_node_name MUST be one of the explicitly listed selected items (marked with ✓). You CANNOT use any other privacy category names, even if you can infer them. If a privacy risk doesn't match any selected item, skip it entirely.
-6. **Deep Inference** - Don't just report explicit data; infer health conditions, beliefs, status from behavior/preferences
-7. **Comprehensive Coverage** - Analyze ALL possible privacy angles: direct exposure + implicit inference + contextual correlation (BUT respect Custom Mode restrictions)
-8. **Clear Attribution** - Every risk must trace back to specific information elements with logical reasoning
-9. **used_infons Extraction** - CRITICAL: Extract EXACT KEYWORDS from input that support each risk. Like infons.js DESC/SCEN extraction: concrete entity names, attribute values, temporal expressions, spatial locations. Extract the ORIGINAL TEXT (highlightable keywords), NOT infon IDs, NOT paraphrases. Examples: entity names like "王小明", attribute values like "27", temporal like "今年", spatial like "北京市". DO NOT extract abstract relations or inferred concepts - only concrete observable keywords from the source.
-10. **Evaluate Inference Certainty** - Risk level depends on inference confidence: definitive/unambiguous data → HIGH risk; moderate confidence inference → MEDIUM risk; vague/uncertain inference → LOW risk. Consider both data specificity and contextual strength.
-11. **Sort Properly** - HIGH risks first
-12. **Verify Before Output** - Before outputting each risk, find the [LEAF NODE - USE THIS] entry in the provided law tree and copy its exact name. If you cannot find an exact leaf node match, choose the closest leaf node from the tree.
-13. **LANGUAGE CONSISTENCY** - Write privacy_exposure and inference_chain in the SAME language as the input information elements. If the input data is in Chinese, write your analysis in Chinese. If in English, write in English. Match the language of the user's data.
+1. **Output ONLY Compact Format** - NO header line, NO JSON, NO markdown code blocks, NO explanatory text, NO statements like "cannot infer" or "insufficient data". Start directly with data lines. DO NOT output any text other than the risk data lines.
+2. **SKIP Uncertain Risks** - CRITICAL: If you CANNOT confidently infer a privacy risk from the input data, DO NOT output anything for that risk. DO NOT output statements like "无法推断", "不确定", "insufficient information", etc. Simply skip that risk and move to the next one.
+3. **ONE RISK PER LINE** - CRITICAL: Each risk entry MUST be on its own separate line. Press Enter/newline after completing each risk. DO NOT output all risks in one continuous line.
+4. **Field Order Matters** - MUST output fields in the exact order: law_node_name, risk_level, privacy_exposure, inference_chain, used_infons
+5. **Map to LEAF NODES ONLY** - CRITICAL: Always identify the MOST SPECIFIC legal clause at the DEEPEST level in hierarchy (leaf nodes). NEVER map to intermediate/parent nodes. The law_node_name MUST be the final level clause name that appears in the law tree structure.
+6. **EXACT Name Matching** - The law_node_name MUST be copied EXACTLY from the law tree structure, character by character. DO NOT paraphrase, summarize, or modify the node name. Look for the [LEAF NODE - USE THIS] markers in the law tree and copy the name EXACTLY.
+7. **CUSTOM MODE RESTRICTION** - If you see "CUSTOM PRIVACY ANALYSIS MODE" in the law tree section, the law_node_name MUST be one of the explicitly listed selected items (marked with ✓). You CANNOT use any other privacy category names, even if you can infer them. If a privacy risk doesn't match any selected item, skip it entirely.
+8. **Deep Inference** - Don't just report explicit data; infer health conditions, beliefs, status from behavior/preferences
+9. **Comprehensive Coverage** - Analyze ALL possible privacy angles: direct exposure + implicit inference + contextual correlation (BUT respect Custom Mode restrictions)
+10. **Clear Attribution** - Every risk must trace back to specific information elements with logical reasoning
+11. **used_infons Extraction** - CRITICAL FORMAT: "TYPE:VALUE" separated by |
+   - **For DESC infons**: Extract ONLY the attribute value (NOT "entity:attribute")
+     * Infon shows "DESC: 平台: Klook" → Output "DESC:Klook" (NOT "DESC:平台:Klook")
+     * Infon shows "DESC: 地点: 台北" → Output "DESC:台北" (NOT "DESC:地点:台北")
+     * Infon shows "DESC: 姓名: 王小明" → Output "DESC:王小明"
+   - **For SCEN infons**: Combine temporal@spatial
+     * Infon shows "SCEN: 下周 @ 东京" → Output "SCEN:下周@东京"
+     * Infon shows "SCEN: 今年 @ 北京" → Output "SCEN:今年@北京"
+   - **For REL infons**: Use relation name directly
+     * Infon shows "REL: 住宿预订" → Output "REL:住宿预订"
+     * Infon shows "REL: 旅行计划" → Output "REL:旅行计划"
+   - Multiple items example: DESC:Klook|DESC:台北|DESC:订住宿|SCEN:下周@东京|REL:行程决策
+   - DO NOT extract abstract concepts or your own inferences - ONLY concrete information elements from the input
+12. **Evaluate Inference Certainty** - Risk level depends on inference confidence: definitive/unambiguous data → HIGH risk; moderate confidence inference → MEDIUM risk; vague/uncertain inference → LOW risk. Consider both data specificity and contextual strength.
+13. **Sort Properly** - HIGH risks first
+14. **Verify Before Output** - Before outputting each risk, find the [LEAF NODE - USE THIS] entry in the provided law tree and copy its exact name. If you cannot find an exact leaf node match, choose the closest leaf node from the tree.
+15. **LANGUAGE CONSISTENCY** - Write privacy_exposure and inference_chain in the SAME language as the input information elements. If the input data is in Chinese, write your analysis in Chinese. If in English, write in English. Match the language of the user's data.
+16. **Escape Special Characters** - Remember to escape commas (\\,), newlines (\\n), and backslashes (\\\\\\) in text fields.
+17. **NO UNCERTAIN OUTPUT** - CRITICAL: Do NOT output any risk if you are uncertain or cannot confidently infer it. Do NOT explain why you cannot infer something. Simply output nothing for uncertain cases.
 
 ## Example Output Format
 When you find a privacy risk, you MUST:
 1. Find the DEEPEST leaf node in the law tree that matches this privacy exposure
 2. Set law_node_name to ONLY the leaf node name (copied EXACTLY from the law tree)
 3. DO NOT use intermediate node names - always use the most specific (leaf) node
-4. Output fields in order: law_node_name, risk_level, then other fields
+4. Output in compact format with proper escaping (NO header line)
 
-Example:
-If input contains "looking for gluten-free restaurant menu", infer:
-- IMPLICIT: User likely has celiac disease or gluten intolerance (health condition)
-  → RISK LEVEL: MEDIUM-HIGH (dietary restriction provides moderate-to-strong evidence of health condition, but not definitive without medical context)
-  → Find the LEAF node for health data in the law tree (e.g., "医疗健康")
-  → law_node_name = "医疗健康" (copied exactly from law tree)
-  → used_infons: ["gluten-free", "restaurant menu"] (exact keywords from input)
-- DIRECT: User's dietary preference
-  → RISK LEVEL: LOW-MEDIUM (general preference, multiple possible interpretations)
-  → used_infons: ["gluten-free"] (exact text)
-- CONTEXTUAL: Location search reveals geographic pattern
-  → RISK LEVEL: LOW (single search, insufficient data for confident inference about regular patterns)
-  → used_infons: ["restaurant", "location search"] (observable keywords)
+Example 1:
+If input contains information elements:
+- [desc:r1_1] DESC: 饮食限制: gluten-free
+- [desc:r1_2] DESC: 搜索内容: restaurant menu
+Output (EXACTLY 5 fields per line):
+\`\`\`
+医疗健康,MEDIUM,User likely has celiac disease or gluten intolerance,Dietary restriction (gluten-free) provides moderate evidence of health condition\\, but not definitive without medical context,DESC:gluten-free|DESC:restaurant menu
+饮食偏好,LOW,User's dietary preference,General preference\\, multiple possible interpretations,DESC:gluten-free
+位置信息,LOW,Location search reveals geographic pattern,Single search\\, insufficient data for confident inference about regular patterns,DESC:restaurant|DESC:menu
+\`\`\`
+(3 lines, each with 5 fields: law_node_name, risk_level, privacy_exposure, inference_chain, used_infons)
 
-If input is "我叫王小明，今年27岁，住在北京市海淀区", extract keywords:
-- Name exposure: RISK LEVEL = HIGH (explicit, unambiguous personal identifier)
-  → used_infons: ["王小明"] (entity name from input)
-- Age exposure: RISK LEVEL = HIGH (explicit, precise demographic attribute)
-  → used_infons: ["27", "今年"] (attribute value + temporal expression)
-- Location exposure: RISK LEVEL = HIGH (precise, specific residential address that can uniquely identify the person when combined with name)
-  → used_infons: ["北京市", "海淀区"] (spatial location keywords)
+Example 2:
+If input contains information elements:
+- [desc:r2_1] DESC: 姓名: 王小明  ← Extract attribute "王小明"
+- [desc:r2_2] DESC: 年龄: 27      ← Extract attribute "27"
+- [scen:r2_3] SCEN: 今年 @ (empty) ← Extract "今年"
+- [desc:r2_4] DESC: 地点: 北京市   ← Extract attribute "北京市"
+- [desc:r2_5] DESC: 地点: 海淀区   ← Extract attribute "海淀区"
+Output (EXACTLY 5 fields per line):
+\`\`\`
+姓名,HIGH,暴露真实姓名,文本中明确提到姓名\\,可直接识别个人身份,DESC:王小明
+年龄,HIGH,暴露精确年龄,明确的年龄信息\\,属于人口统计学属性,DESC:27|SCEN:今年
+住址,HIGH,暴露居住地址,精确的住址信息\\,结合姓名可唯一识别个人,DESC:北京市|DESC:海淀区
+\`\`\`
+(3 lines, each with 5 fields: law_node_name, risk_level, privacy_exposure, inference_chain, used_infons)
+Note: DESC extracts ONLY the attribute value (王小明, 27, 北京市, 海淀区), NOT "姓名:王小明" or "地点:北京市"
 
 **Custom Mode Example**:
 If law tree shows "CUSTOM PRIVACY ANALYSIS MODE" with selected items: ["Home Address", "Location/GPS", "Health Data"]
-And input contains: "User attends Friday prayers at mosque and searches for halal restaurants"
-- ✅ REPORT: Dietary preference (halal) → inferred health/dietary need → law_node_name = "Health Data" (selected)
-  → RISK LEVEL: MEDIUM (dietary preference suggests but doesn't definitively prove health condition; moderate inference confidence)
-  → used_infons: ["halal", "restaurants"] (exact keywords)
-- ✅ REPORT: Location search pattern → law_node_name = "Location/GPS" (selected)
-  → RISK LEVEL: LOW-MEDIUM (temporal pattern with location but insufficient data for high-confidence inference about home/work)
-  → used_infons: ["Friday prayers", "mosque"] (location/time keywords)
+And input contains information elements:
+- [desc:r3_1] DESC: 活动: Friday prayers
+- [desc:r3_2] DESC: 地点: mosque
+- [desc:r3_3] DESC: 搜索: halal restaurants
+Output only selected categories (EXACTLY 5 fields per line):
+\`\`\`
+Health Data,MEDIUM,Dietary preference suggests health/dietary need,Halal food search suggests dietary restriction\\, moderate confidence in health-related inference,DESC:halal|DESC:restaurants
+Location/GPS,MEDIUM,Location search pattern,Temporal pattern with location\\, insufficient data for high-confidence inference about home/work,DESC:Friday prayers|DESC:mosque
+\`\`\`
+(2 lines, each with 5 fields: law_node_name, risk_level, privacy_exposure, inference_chain, used_infons)
+
+- ✅ REPORT: Categories in selected list (Health Data, Location/GPS)
 - ❌ DO NOT REPORT: Religious belief inference (Islam) → NOT in selected list, must skip even though it's inferable
 - ❌ DO NOT REPORT: Any privacy category not explicitly listed in the selected items
 
-NOW analyze the input and output the complete JSON.
+REMEMBER: Output ONLY valid risk data lines in the compact format. DO NOT output any statements like "无法推断", "不确定", "cannot determine", "insufficient information", etc. If you cannot confidently infer a privacy risk, simply don't output anything for that risk. Only output actual risk data lines following the 5-field format.
+
+NOW analyze the input and output the complete compact format.
 `
 
 // Extract information elements summary (for filling template)
@@ -248,33 +321,54 @@ CRITICAL TASK REQUIREMENTS:
 2. EXTRACT KEYWORDS FROM ALL MESSAGES: Don't just focus on the last message
 3. IDENTIFY CROSS-MESSAGE PATTERNS: Look for information that connects across messages
 4. MAP EACH RISK to the most specific legal clause name
-5. Output ONLY valid JSON (no markdown, no extra text)
+5. Output ONLY compact format (no JSON, no markdown, no extra text, NO header line)
+6. **ONE RISK PER LINE**: Each risk MUST be on a separate line (press Enter after each risk)
 
-OUTPUT FORMAT (EXACT JSON):
-{
-  "risks": [
-    {
-      "law_node_name": "exact leaf node name from legal framework",
-      "risk_level": "HIGH | MEDIUM | LOW (based on INFERENCE CERTAINTY: HIGH = definitive/very confident inference, MEDIUM = moderate confidence, LOW = weak/vague clues)",
-      "privacy_exposure": "what privacy info is exposed (consider information from ALL messages)",
-      "inference_chain": "reasoning: 1) what data appears in which message(s) 2) how they connect 3) what can be inferred 4) why it matters 5) confidence level of this inference",
-      "used_infons": ["exact keyword/entity from ANY message", "attribute value", "time expression", "location name"]
-    }
-  ]
-}
+OUTPUT FORMAT (COMPACT - NO HEADER, direct data output, ONE RISK PER LINE):
+value1,value2,value3,value4,value5
+value1,value2,value3,value4,value5
+
+FIELD DEFINITIONS:
+- law_node_name: exact leaf node name from legal framework (NO translation, NO abbreviation)
+- risk_level: HIGH | MEDIUM | LOW (based on INFERENCE CERTAINTY)
+- privacy_exposure: what privacy info is exposed (consider information from ALL messages)
+- inference_chain: reasoning - what data appears, how they connect, what can be inferred, confidence level
+- used_infons: information elements in format "TYPE:VALUE" separated by |
+  * **DESC format**: DESC:attribute_value (ONLY attribute, NOT "entity:attribute")
+  * **SCEN format**: SCEN:temporal@spatial
+  * **REL format**: REL:relation_name
+  * Example: DESC:Klook|DESC:台北|SCEN:下周@东京
+  * Extract concrete keywords from input, NOT inferences
 
 CRITICAL RULES:
-- Output ONLY the JSON object, no other text
-- law_node_name MUST be exact copy from legal framework above
-- used_infons should contain EXACT KEYWORDS from ANY/ALL messages (entities, attribute values, time expressions, locations) that support this risk. Extract concrete nouns, names, values, dates, places from the ENTIRE conversation. DO NOT use infon IDs.
+- Output ONLY the compact format, no other text
+- **NO UNCERTAIN OUTPUT**: DO NOT output "无法推断", "不确定", "insufficient data", etc. If you cannot confidently infer a privacy risk, skip it entirely. Do NOT output any explanatory text.
+- **ONE RISK PER LINE**: Each complete risk entry MUST be on its own line (use real line breaks between risks)
+- Escape commas in text with \\,, newlines with \\n, backslashes with \\\\
+- law_node_name MUST be exact copy from legal framework above (NO translation, NO abbreviation)
+- used_infons format: "TYPE:VALUE" separated by | (e.g., DESC:Klook|DESC:台北|SCEN:下周@东京)
 - If you see "CUSTOM PRIVACY ANALYSIS MODE", ONLY analyze the selected items marked with ✓
-- Deep inference: infer health conditions, beliefs from behaviors across messages (e.g., "gluten-free" in msg1 + "stomach pain" in msg2 → celiac disease)
-- RISK LEVEL ASSIGNMENT: Evaluate inference CERTAINTY based on data clarity and context. More specific/concrete input data + stronger contextual links = HIGH risk. Vague/ambiguous data with weak connections = LOW risk. Balance between = MEDIUM risk.
+- Deep inference: infer health conditions, beliefs from behaviors across messages
+- RISK LEVEL ASSIGNMENT: Evaluate inference CERTAINTY based on data clarity and context
 - CROSS-MESSAGE ANALYSIS: A single privacy risk may be supported by keywords from multiple messages
 - Sort by risk_level: HIGH first
-- LANGUAGE CONSISTENCY: Write privacy_exposure and inference_chain in the SAME language as the input (if input is in Chinese, respond in Chinese; if in English, respond in English)
+- LANGUAGE CONSISTENCY: Write privacy_exposure and inference_chain in the SAME language as the input
 
-NOW OUTPUT THE JSON:`
+**FINAL FORMAT CHECK BEFORE OUTPUT**:
+Each line MUST have EXACTLY 5 fields in this order:
+1. law_node_name (copy from legal framework)
+2. risk_level (HIGH or MEDIUM or LOW)
+3. privacy_exposure (what is exposed)
+4. inference_chain (reasoning)
+5. used_infons (format: TYPE:VALUE separated by |)
+
+Example format to follow:
+姓名,HIGH,暴露真实姓名,明确提到姓名信息,DESC:王小明
+年龄,HIGH,暴露精确年龄,明确的年龄数值,DESC:27岁
+
+REMEMBER: Output ONLY valid risk data lines. DO NOT output any statements like "无法推断", "不确定", "cannot determine", etc. If uncertain about a risk, simply don't output it.
+
+NOW OUTPUT THE COMPACT FORMAT:`
     
     return simplePrompt
   }
@@ -294,38 +388,110 @@ ${lawTreeSummary}
 TASK:
 1. Identify what privacy information can be inferred from the input data
 2. Map each privacy risk to the most specific legal clause name
-3. Output ONLY valid JSON (no markdown, no extra text)
+3. Output ONLY compact format (no JSON, no markdown, no extra text, NO header line)
+4. **ONE RISK PER LINE**: Each risk MUST be on a separate line (press Enter after each risk)
 
-OUTPUT FORMAT (EXACT JSON):
-{
-  "risks": [
-    {
-      "law_node_name": "exact leaf node name from legal framework",
-      "risk_level": "HIGH | MEDIUM | LOW (based on INFERENCE CERTAINTY: HIGH = definitive/very confident inference, MEDIUM = moderate confidence, LOW = weak/vague clues)",
-      "privacy_exposure": "what privacy info is exposed",
-      "inference_chain": "reasoning: 1) what data shows 2) what it implies 3) why it matters 4) confidence level of this inference",
-      "used_infons": ["exact entity/attribute keyword", "time expression", "location name", "value from input"]
-    }
-  ]
-}
+OUTPUT FORMAT (COMPACT - NO HEADER, direct data output, ONE RISK PER LINE):
+value1,value2,value3,value4,value5
+value1,value2,value3,value4,value5
+
+FIELD DEFINITIONS:
+- law_node_name: exact leaf node name from legal framework (NO translation, NO abbreviation)
+- risk_level: HIGH | MEDIUM | LOW (based on INFERENCE CERTAINTY)
+- privacy_exposure: what privacy info is exposed
+- inference_chain: reasoning - what data shows, what it implies, why it matters, confidence level
+- used_infons: information elements in format "TYPE:VALUE" separated by |
+  * **DESC format**: DESC:attribute_value (ONLY attribute, NOT "entity:attribute")
+  * **SCEN format**: SCEN:temporal@spatial
+  * **REL format**: REL:relation_name
+  * Example: DESC:Klook|DESC:台北|SCEN:下周@东京
+  * Extract concrete keywords from input, NOT inferences
 
 CRITICAL RULES:
-- Output ONLY the JSON object, no other text
-- law_node_name MUST be exact copy from legal framework above
-- used_infons should contain EXACT KEYWORDS from the input data that support this risk. Extract concrete information elements: entity names, attribute values, temporal expressions, spatial locations (like DESC.attribute and SCEN.temporal/spatial from infons.js). DO NOT use infon IDs like "desc:r1_1".
+- Output ONLY the compact format, no other text
+- **NO UNCERTAIN OUTPUT**: DO NOT output "无法推断", "不确定", "insufficient data", etc. If you cannot confidently infer a privacy risk, skip it entirely. Do NOT output any explanatory text.
+- **ONE RISK PER LINE**: Each complete risk entry MUST be on its own line (use real line breaks between risks)
+- Escape commas in text with \\,, newlines with \\n, backslashes with \\\\
+- law_node_name MUST be exact copy from legal framework above (NO translation, NO abbreviation)
+- used_infons format: "TYPE:VALUE" separated by |
+  * DESC: Extract ONLY attribute value (e.g., "DESC: 平台: Klook" → "DESC:Klook")
+  * SCEN: Combine temporal@spatial (e.g., "SCEN: 下周 @ 东京" → "SCEN:下周@东京")
+  * REL: Use relation name (e.g., "REL: 住宿预订" → "REL:住宿预订")
 - If you see "CUSTOM PRIVACY ANALYSIS MODE", ONLY analyze the selected items marked with ✓
 - Deep inference: infer health conditions, beliefs from behaviors (e.g., gluten-free → celiac disease)
-- RISK LEVEL ASSIGNMENT: Evaluate inference CERTAINTY based on data clarity and context. More specific/concrete input data + stronger contextual links = HIGH risk. Vague/ambiguous data with weak connections = LOW risk. Balance between = MEDIUM risk.
+- RISK LEVEL ASSIGNMENT: Evaluate inference CERTAINTY based on data clarity and context
 - Sort by risk_level: HIGH first
-- LANGUAGE CONSISTENCY: Write privacy_exposure and inference_chain in the SAME language as the input data (if input is in Chinese, respond in Chinese; if in English, respond in English)
+- LANGUAGE CONSISTENCY: Write privacy_exposure and inference_chain in the SAME language as the input data
 
-NOW OUTPUT THE JSON:`
+**FINAL FORMAT CHECK BEFORE OUTPUT**:
+Each line MUST have EXACTLY 5 fields in this order:
+1. law_node_name (copy from legal framework, NO translation, NO abbreviation)
+2. risk_level (HIGH or MEDIUM or LOW)
+3. privacy_exposure (what is exposed)
+4. inference_chain (reasoning)
+5. used_infons (format: TYPE:VALUE separated by |)
+
+Example format to follow:
+姓名,HIGH,暴露真实姓名,明确提到姓名信息,DESC:王小明
+年龄,HIGH,暴露精确年龄,明确的年龄数值,DESC:27岁
+
+REMEMBER: Output ONLY valid risk data lines. DO NOT output any statements like "无法推断", "不确定", "cannot determine", etc. If uncertain about a risk, simply don't output it.
+
+NOW OUTPUT THE COMPACT FORMAT:`
   
   return simplePrompt
 }
 
 // Incremental parser for streaming risk items with partial object support
+// Auto-detects format (compact vs JSON) and uses appropriate parser
 export function incrementalExtractRisks(streamText, parser) {
+  const text = String(streamText || '')
+  
+  // Auto-detect format on first call
+  if (!parser || !parser.formatDetected) {
+    // Look for compact format header
+    const compactMatch = text.match(/risks\[(\d+)\]\{([^}]+)\}:/)
+    // Look for JSON format
+    const jsonMatch = text.match(/"risks"\s*:\s*\[/)
+    
+    // Determine format based on which appears first
+    let useCompact = false
+    if (compactMatch && jsonMatch) {
+      useCompact = compactMatch.index < jsonMatch.index
+    } else if (compactMatch) {
+      useCompact = true
+    } else if (jsonMatch) {
+      useCompact = false
+    } else {
+      // No format detected yet, keep old state if exists
+      if (parser) return { state: parser, yielded: [] }
+      
+      // Initialize with default (try compact first)
+      useCompact = true
+    }
+    
+    // Initialize parser state with format info
+    if (!parser) {
+      parser = {
+        formatDetected: true,
+        isCompact: useCompact
+      }
+    } else {
+      parser.formatDetected = true
+      parser.isCompact = useCompact
+    }
+  }
+  
+  // Route to appropriate parser
+  if (parser.isCompact) {
+    return incrementalExtractRisksCompact(text, parser)
+  } else {
+    return incrementalExtractRisksJSON(text, parser)
+  }
+}
+
+// Original JSON parser (renamed)
+function incrementalExtractRisksJSON(streamText, parser) {
   const state = parser || { 
     foundArray: false, 
     arrayStart: -1, 
@@ -336,7 +502,9 @@ export function incrementalExtractRisks(streamText, parser) {
     braceDepth: 0, 
     closed: false, 
     objectStates: new Map(), // Map<objIndex, {lastParsedHash, data}>
-    currentObjIndex: 0
+    currentObjIndex: 0,
+    formatDetected: true,
+    isCompact: false
   }
   const yielded = []
   const text = String(streamText || '')
@@ -548,5 +716,249 @@ export function parseStreamingResponse(text) {
     }
     return null
   }
+}
+
+// ============================================================================
+// COMPACT FORMAT PARSERS (New)
+// ============================================================================
+
+/**
+ * Unescape special characters in compact format field values
+ * @param {string} value - Escaped value
+ * @returns {string} Unescaped value
+ */
+function unescapeValue(value) {
+  if (typeof value !== 'string') return value
+  return value
+    .replace(/\\,/g, ',')
+    .replace(/\\n/g, '\n')
+    .replace(/\\\\/g, '\\')
+}
+
+/**
+ * Split array field by | separator (for used_infons and similar fields)
+ * @param {string} value - Value containing | separators
+ * @returns {Array<string>} Array of split values
+ */
+function splitArrayField(value) {
+  if (!value || typeof value !== 'string') return []
+  // Split by | but not by escaped \|
+  const parts = value.split(/(?<!\\)\|/)
+  return parts.map(p => p.trim()).filter(Boolean)
+}
+
+/**
+ * Parse a single compact format line into a risk object
+ * @param {string} line - Data line (e.g., "医疗健康,HIGH,User likely has...")
+ * @param {Array<string>} fields - Field names from header
+ * @returns {Object|null} Parsed risk object or null if parsing fails
+ */
+function parseCompactLine(line, fields) {
+  if (!line || !line.trim()) return null
+  
+  // Split by comma, but respect escaped commas
+  const values = []
+  let currentValue = ''
+  let escaped = false
+  
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    
+    if (escaped) {
+      currentValue += ch
+      escaped = false
+      continue
+    }
+    
+    if (ch === '\\') {
+      currentValue += ch
+      escaped = true
+      continue
+    }
+    
+    if (ch === ',') {
+      values.push(currentValue)
+      currentValue = ''
+      continue
+    }
+    
+    currentValue += ch
+  }
+  
+  // Push the last value
+  if (currentValue || values.length > 0) {
+    values.push(currentValue)
+  }
+  
+  // Build the risk object
+  const risk = {}
+  
+  // Handle field mapping with flexibility for missing fields
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i].trim()
+    let value = ''
+    
+    if (i < values.length) {
+      value = values[i].trim()
+    } else {
+      // Field is missing, use empty string
+      value = ''
+    }
+    
+    // Handle array fields (used_infons, etc.)
+    if (field === 'used_infons' || field === 'arg_refs' || field === 'arg_types') {
+      risk[field] = value ? splitArrayField(value) : []
+    } else {
+      risk[field] = unescapeValue(value)
+    }
+  }
+  
+  return Object.keys(risk).length > 0 ? risk : null
+}
+
+/**
+ * Parse complete compact format text into an array of risk objects
+ * Supports both headerless format (new) and header format (old, for compatibility)
+ * @param {string} text - Complete compact format text
+ * @returns {Object|null} Parsed object with risks array, or null if parsing fails
+ */
+export function parseCompactFormat(text) {
+  if (!text || typeof text !== 'string') return null
+  
+  // Fixed field order: law_node_name, risk_level, privacy_exposure, inference_chain, used_infons
+  const defaultFields = ['law_node_name', 'risk_level', 'privacy_exposure', 'inference_chain', 'used_infons']
+  
+  // Try to match optional header: risks[N]{field1,field2,...}:
+  const headerMatch = text.match(/risks\[(\d+)\]\{([^}]+)\}:/)
+  
+  let fields = defaultFields
+  let dataText = text
+  
+  if (headerMatch) {
+    // Header found (old format), extract fields from header
+    const fieldsStr = headerMatch[2]
+    fields = fieldsStr.split(',').map(f => f.trim())
+    const headerEnd = headerMatch.index + headerMatch[0].length
+    dataText = text.slice(headerEnd)
+  }
+  // If no header, treat entire text as data (new format)
+  
+  const lines = dataText.split('\n')
+  const risks = []
+  
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    
+    // Parse data line
+    const risk = parseCompactLine(trimmed, fields)
+    if (risk) {
+      risks.push(risk)
+    }
+  }
+  
+  return { risks }
+}
+
+/**
+ * Incremental compact format parser for streaming
+ * Parses compact format line by line as data arrives
+ * Supports both headerless format (new) and header format (old)
+ * @param {string} streamText - Accumulated stream text
+ * @param {Object} parser - Parser state object
+ * @returns {Object} { state, yielded } - Updated state and newly parsed risks
+ */
+export function incrementalExtractRisksCompact(streamText, parser) {
+  // Fixed field order: law_node_name, risk_level, privacy_exposure, inference_chain, used_infons
+  const defaultFields = ['law_node_name', 'risk_level', 'privacy_exposure', 'inference_chain', 'used_infons']
+  
+  // Initialize state with defaults, then merge with parser (ensuring all fields have values)
+  const state = {
+    foundHeader: false,
+    fields: defaultFields,
+    count: 0,
+    scanPos: 0,
+    parsedLines: 0,
+    ...(parser || {})
+  }
+  
+  // Ensure critical fields are never undefined
+  if (state.parsedLines === undefined) state.parsedLines = 0
+  if (state.scanPos === undefined) state.scanPos = 0
+  if (!state.fields || state.fields.length === 0) state.fields = defaultFields
+  
+  const yielded = []
+  const text = String(streamText || '')
+  
+  // Step 1: Check for optional header
+  if (!state.foundHeader) {
+    const headerMatch = text.match(/risks\[(\d+)\]\{([^}]+)\}:/)
+    if (headerMatch) {
+      // Header found (old format)
+      state.foundHeader = true
+      state.count = parseInt(headerMatch[1], 10)
+      state.fields = headerMatch[2].split(',').map(f => f.trim())
+      state.scanPos = headerMatch.index + headerMatch[0].length
+    } else {
+      // No header (new format), treat as headerless
+      state.foundHeader = true
+      state.fields = defaultFields
+      state.scanPos = 0
+    }
+  }
+  
+  // Step 2: Parse data lines incrementally
+  const dataText = text.slice(state.scanPos)
+  const lines = dataText.split('\n')
+  
+  // Process each line after the already parsed ones
+  for (let i = state.parsedLines; i < lines.length; i++) {
+    const line = lines[i]
+    
+    const trimmed = line.trim()
+    
+    // Check if this is the last line and it doesn't end with newline (still streaming)
+    const isLastLine = (i === lines.length - 1)
+    const hasNewlineEnding = dataText.endsWith('\n')
+    const isStreamingLine = isLastLine && !hasNewlineEnding
+    
+    // Skip empty lines
+    if (!trimmed) {
+      // Only increment parsedLines for completed lines (with newline)
+      if (!isStreamingLine) {
+        state.parsedLines++
+      }
+      continue
+    }
+    
+    // For streaming lines (no newline yet), check if it looks complete enough to parse
+    if (isStreamingLine) {
+      // Count unescaped commas to estimate field count
+      const commaCount = (trimmed.match(/(?<!\\),/g) || []).length
+      
+      // Need at least 4 commas for 5 fields
+      // BUT: Allow 3 commas (4 fields) in case inference_chain is omitted by LLM
+      if (commaCount < 3) {
+        // Not enough fields yet, skip this line (don't increment parsedLines)
+        break
+      }
+    }
+    
+    // Try to parse the line
+    const risk = parseCompactLine(trimmed, state.fields)
+    if (risk) {
+      risk._objIndex = i  // Use line index as object index for tracking
+      risk._isComplete = !isStreamingLine  // Mark as incomplete if still streaming
+      yielded.push(risk)
+    }
+    
+    // Only increment parsedLines for completed lines (with newline)
+    // For streaming lines, keep parsedLines unchanged so we re-parse next time
+    if (!isStreamingLine) {
+      state.parsedLines++
+    }
+  }
+  
+  return { state, yielded }
 }
 

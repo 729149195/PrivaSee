@@ -3,6 +3,14 @@
 """
 PrivaSee 测试用例自动生成脚本
 使用 DeepSeek API 生成多样化的隐私推理测试用例
+
+【数据集描述】
+- 类型：合成对话数据集（用户与AI助手的自然语言交互）
+- 维度：11个隐私类别 × 3个难度级别 × 10种场景 × 3种语言 × 46种职业 × 10种表达风格
+- 特点：追求自然性、真实性（真实实体名称）、多样性（8种提示词模板）
+- 采样：温度0.7-1.3，top-p 0.85-0.95，频率/存在惩罚0-0.3
+- 输出：cases.csv（包含id, text, category, difficulty, scenario, language, inference_style, occupation）
+- 详细说明：见 DATASET_DESCRIPTION.md 和 数据集说明.txt
 """
 
 import asyncio

@@ -43,58 +43,60 @@ export const PROTECTION_SUGGESTIONS_PROMPT = `
 
 ## 输出格式
 
-**流式渲染优化**: 为了实现流畅的流式显示效果，请按以下顺序输出每个建议的字段：
-1. 先输出 level 和 label（用于快速识别）
-2. 再输出 modified_text（主要内容，将会逐字显示）
-3. 最后输出 changes_summary 和 removed_risks
+**流式渲染优化 & 紧凑格式**: 使用紧凑格式输出，加快token生成速度：
 
-输出**仅包含有效JSON**（无markdown代码块，无额外说明）：
+**格式语法**（无表头，直接输出数据）:
+\`\`\`
+value1,value2,value3,value4,value5
+value1,value2,value3,value4,value5
+\`\`\`
 
-{
-  "suggestions": [
-    {
-      "level": "high_privacy",
-      "label": "高隐私保护",
-      "modified_text": "修改后的文本内容",
-      "changes_summary": "简要说明做了哪些修改，为什么这样修改",
-      "removed_risks": ["列出移除了哪些隐私风险"]
-    },
-    {
-      "level": "balanced",
-      "label": "平衡方案",
-      "modified_text": "修改后的文本内容",
-      "changes_summary": "简要说明做了哪些修改",
-      "removed_risks": ["列出移除了哪些隐私风险"]
-    },
-    {
-      "level": "low_privacy",
-      "label": "低隐私保护",
-      "modified_text": "修改后的文本内容",
-      "changes_summary": "简要说明做了哪些修改",
-      "removed_risks": ["列出移除了哪些隐私风险"]
-    }
-  ]
-}
+**关键换行规则**: 每个建议**必须**单独成行。完成一个建议后按回车键换行。
+
+**字段顺序**（必须严格按此顺序，每行5个字段）:
+1. level - high_privacy | balanced | low_privacy
+2. label - 中文标签
+3. modified_text - 修改后的完整文本
+4. changes_summary - 修改说明
+5. removed_risks - 移除的风险（用|分隔）
+
+**转义规则**:
+- 文本中的逗号 → \\,
+- 字段内的换行 → \\n （不要使用实际换行）
+- 反斜杠 → \\\\
+- 数组元素 → 使用 | 分隔（如 风险1|风险2|风险3）
+- 建议之间 → 使用实际换行（每个建议后按回车）
+
+**示例输出**（无表头，直接输出数据）:
+\`\`\`
+high_privacy,高隐私保护,我想咨询健康饮食建议,移除了所有个人身份信息和具体健康状况\\,使用通用表达,姓名|身份证号|详细地址|糖尿病
+balanced,平衡方案,我住在北京\\,想咨询糖尿病饮食建议,保留健康状况但移除身份信息\\,在隐私和效用间平衡,姓名|身份证号|详细地址
+low_privacy,低隐私保护,我叫张某\\,住在北京市\\,想咨询糖尿病饮食建议,仅移除身份证号和详细地址\\,最小化修改,身份证号|详细地址
+\`\`\`
 
 ## 关键要求
-1. **仅输出JSON** - 不要使用markdown代码块，不要添加任何解释文字
-2. **保持语言一致** - 如果输入是中文，修改后的文本也必须是中文；英文同理
-3. **修改要具体** - modified_text必须是完整的、可直接使用的文本
-4. **说明要清晰** - changes_summary要简洁说明修改了什么，为什么
-5. **按顺序输出** - 必须按high_privacy → balanced → low_privacy顺序，且字段顺序为level → label → modified_text → changes_summary → removed_risks
-6. **保持完整性** - 即使高隐私保护方案也要确保文本可读、有意义
+1. **仅输出紧凑格式** - 无表头，不要输出JSON，不要使用markdown代码块，不要添加任何解释文字
+2. **每个建议单独成行** - 关键：每个建议必须在单独的行上，完成一个建议后按回车换行。不要把所有建议连成一行。
+3. **保持语言一致** - 如果输入是中文，修改后的文本也必须是中文；英文同理
+4. **修改要具体** - modified_text必须是完整的、可直接使用的文本
+5. **说明要清晰** - changes_summary要简洁说明修改了什么，为什么
+6. **按顺序输出** - 必须按high_privacy → balanced → low_privacy顺序，且字段顺序为level, label, modified_text, changes_summary, removed_risks
+7. **保持完整性** - 即使高隐私保护方案也要确保文本可读、有意义
+8. **正确转义** - 记得转义文本中的逗号(\\,)、换行(\\n)、反斜杠(\\\\)
 
 ## 示例
 
 输入：
 "我叫张三，身份证号123456789012345678，住在北京市朝阳区某小区，想咨询一下我的糖尿病饮食建议"
 
-输出应该包含三个级别的建议，例如：
-- 高隐私：移除所有个人信息，泛化健康状况
-- 平衡：保留健康状况但泛化位置和身份
-- 低隐私：仅移除身份证号和详细地址
+输出（无表头，直接输出数据）：
+\`\`\`
+high_privacy,高隐私保护,我想咨询健康饮食建议,移除所有个人识别信息和具体健康状况\\,最大程度保护隐私,姓名|身份证号|详细地址|糖尿病
+balanced,平衡方案,我住在北京\\,想咨询糖尿病饮食建议,保留健康问题但移除身份信息\\,在隐私和效用间平衡,姓名|身份证号|详细小区地址
+low_privacy,低隐私保护,我叫张某\\,住在北京市朝阳区\\,想咨询糖尿病饮食建议,仅移除最敏感的身份证号\\,保持最大效用,身份证号
+\`\`\`
 
-现在请分析输入并输出完整的JSON建议。
+现在请分析输入并输出完整的紧凑格式建议。
 `
 
 /**
@@ -151,14 +153,144 @@ export function fillProtectionPrompt(originalText, privacyRisks, infons) {
   return prompt
 }
 
+// ============================================================================
+// COMPACT FORMAT PARSERS FOR PROTECTION SUGGESTIONS
+// ============================================================================
+
 /**
- * 解析保护建议响应
+ * Unescape special characters in compact format field values
+ */
+function unescapeValue(value) {
+  if (typeof value !== 'string') return value
+  return value
+    .replace(/\\,/g, ',')
+    .replace(/\\n/g, '\n')
+    .replace(/\\\\/g, '\\')
+}
+
+/**
+ * Split array field by | separator
+ */
+function splitArrayField(value) {
+  if (!value || typeof value !== 'string') return []
+  const parts = value.split(/(?<!\\)\|/)
+  return parts.map(p => p.trim()).filter(Boolean)
+}
+
+/**
+ * Parse a single compact format line into a suggestion object
+ * Fields: level, label, modified_text, changes_summary, removed_risks
+ */
+function parseCompactSuggestionLine(line, fields) {
+  if (!line || !line.trim()) return null
+  
+  // Split by comma, but respect escaped commas
+  const values = []
+  let currentValue = ''
+  let escaped = false
+  
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    
+    if (escaped) {
+      currentValue += ch
+      escaped = false
+      continue
+    }
+    
+    if (ch === '\\') {
+      currentValue += ch
+      escaped = true
+      continue
+    }
+    
+    if (ch === ',') {
+      values.push(currentValue)
+      currentValue = ''
+      continue
+    }
+    
+    currentValue += ch
+  }
+  
+  // Push the last value
+  if (currentValue || values.length > 0) {
+    values.push(currentValue)
+  }
+  
+  // Field names in order (5 fields total)
+  const fieldNames = ['level', 'label', 'modified_text', 'changes_summary', 'removed_risks']
+  
+  // Build the suggestion object
+  const suggestion = {}
+  for (let i = 0; i < fieldNames.length && i < values.length; i++) {
+    const fieldName = fieldNames[i]
+    let value = values[i].trim()
+    
+    // Handle array field
+    if (fieldName === 'removed_risks') {
+      suggestion[fieldName] = splitArrayField(value)
+    } else {
+      suggestion[fieldName] = unescapeValue(value)
+    }
+  }
+  
+  return Object.keys(suggestion).length > 0 ? suggestion : null
+}
+
+/**
+ * Parse complete compact format text into an array of suggestion objects
+ * Supports both headerless format (new) and header format (old, for compatibility)
+ */
+export function parseCompactProtectionFormat(text) {
+  if (!text || typeof text !== 'string') return null
+  
+  // Fixed field order: level, label, modified_text, changes_summary, removed_risks
+  const defaultFields = ['level', 'label', 'modified_text', 'changes_summary', 'removed_risks']
+  
+  // Try to match optional header: suggestions[N]{field1,field2,...}:
+  const headerMatch = text.match(/suggestions\[(\d+)\]\{([^}]+)\}:/)
+  
+  let fields = defaultFields
+  let dataText = text
+  
+  if (headerMatch) {
+    // Header found (old format), extract fields from header
+    const fieldsStr = headerMatch[2]
+    fields = fieldsStr.split(',').map(f => f.trim())
+    const headerEnd = headerMatch.index + headerMatch[0].length
+    dataText = text.slice(headerEnd)
+  }
+  // If no header, treat entire text as data (new format)
+  
+  const lines = dataText.split('\n')
+  const suggestions = []
+  
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    
+    const suggestion = parseCompactSuggestionLine(trimmed, fields)
+    if (suggestion) {
+      suggestions.push(suggestion)
+    }
+  }
+  
+  return { suggestions }
+}
+
+/**
+ * 解析保护建议响应（支持紧凑格式和JSON格式）
  * @param {string} responseText - API响应文本
  * @returns {Object|null} 解析后的建议对象
  */
 export function parseProtectionResponse(responseText) {
+  // Try compact format first
+  const compactResult = parseCompactProtectionFormat(responseText)
+  if (compactResult) return compactResult
+  
+  // Fallback to JSON format
   try {
-    // 尝试直接解析
     const parsed = JSON.parse(responseText)
     if (parsed && parsed.suggestions && Array.isArray(parsed.suggestions)) {
       return parsed
@@ -173,7 +305,7 @@ export function parseProtectionResponse(responseText) {
           return parsed
         }
       } catch (e2) {
-        console.warn('[Protection] 无法解析JSON响应', e2)
+        console.warn('[Protection] 无法解析响应', e2)
       }
     }
   }
@@ -194,12 +326,77 @@ export function validateSuggestion(suggestion) {
 }
 
 /**
- * 流式增量解析保护建议
- * @param {string} streamText - 流式接收的文本
- * @param {object} parser - 解析器状态
- * @returns {object} { state, yielded }
+ * 流式增量解析保护建议（紧凑格式）
+ * 支持无表头格式（新）和带表头格式（旧，兼容）
  */
-export function incrementalExtractSuggestions(streamText, parser) {
+function incrementalExtractSuggestionsCompact(streamText, parser) {
+  // Fixed field order: level, label, modified_text, changes_summary, removed_risks
+  const defaultFields = ['level', 'label', 'modified_text', 'changes_summary', 'removed_risks']
+  
+  const state = parser || {
+    foundHeader: false,
+    fields: defaultFields,
+    count: 0,
+    scanPos: 0,
+    parsedLines: 0
+  }
+  
+  const yielded = []
+  const text = String(streamText || '')
+  
+  // Step 1: Check for optional header
+  if (!state.foundHeader) {
+    const headerMatch = text.match(/suggestions\[(\d+)\]\{([^}]+)\}:/)
+    if (headerMatch) {
+      // Header found (old format)
+      state.foundHeader = true
+      state.count = parseInt(headerMatch[1], 10)
+      state.fields = headerMatch[2].split(',').map(f => f.trim())
+      state.scanPos = headerMatch.index + headerMatch[0].length
+    } else {
+      // No header (new format), treat as headerless
+      state.foundHeader = true
+      state.fields = defaultFields
+      state.scanPos = 0
+    }
+  }
+  
+  // Step 2: Parse data lines incrementally
+  const dataText = text.slice(state.scanPos)
+  const lines = dataText.split('\n')
+  
+  // Process each line after the already parsed ones
+  for (let i = state.parsedLines; i < lines.length; i++) {
+    const line = lines[i]
+    
+    // Skip if we're at the last line and it might be incomplete
+    if (i === lines.length - 1 && !dataText.endsWith('\n')) {
+      break
+    }
+    
+    const trimmed = line.trim()
+    if (!trimmed) {
+      state.parsedLines++
+      continue
+    }
+    
+    const suggestion = parseCompactSuggestionLine(trimmed, state.fields)
+    if (suggestion) {
+      suggestion._objIndex = state.parsedLines
+      suggestion._isComplete = true
+      yielded.push(suggestion)
+    }
+    
+    state.parsedLines++
+  }
+  
+  return { state, yielded }
+}
+
+/**
+ * 流式增量解析保护建议（JSON格式）
+ */
+function incrementalExtractSuggestionsJSON(streamText, parser) {
   const state = parser || {
     foundArray: false,
     arrayStart: -1,
@@ -210,7 +407,9 @@ export function incrementalExtractSuggestions(streamText, parser) {
     braceDepth: 0,
     closed: false,
     objectStates: new Map(),
-    currentObjIndex: 0
+    currentObjIndex: 0,
+    formatDetected: true,
+    isCompact: false
   }
   const yielded = []
   const text = String(streamText || '')
@@ -383,5 +582,57 @@ function computeHashId(str) {
     hash = hash & hash
   }
   return hash.toString(36)
+}
+
+/**
+ * 流式增量解析保护建议（自动检测格式）
+ * @param {string} streamText - 流式接收的文本
+ * @param {object} parser - 解析器状态
+ * @returns {object} { state, yielded }
+ */
+export function incrementalExtractSuggestions(streamText, parser) {
+  const text = String(streamText || '')
+  
+  // Auto-detect format on first call
+  if (!parser || !parser.formatDetected) {
+    // Look for compact format header
+    const compactMatch = text.match(/suggestions\[(\d+)\]\{([^}]+)\}:/)
+    // Look for JSON format
+    const jsonMatch = text.match(/"suggestions"\s*:\s*\[/)
+    
+    // Determine format based on which appears first
+    let useCompact = false
+    if (compactMatch && jsonMatch) {
+      useCompact = compactMatch.index < jsonMatch.index
+    } else if (compactMatch) {
+      useCompact = true
+    } else if (jsonMatch) {
+      useCompact = false
+    } else {
+      // No format detected yet, keep old state if exists
+      if (parser) return { state: parser, yielded: [] }
+      
+      // Initialize with default (try compact first)
+      useCompact = true
+    }
+    
+    // Initialize parser state with format info
+    if (!parser) {
+      parser = {
+        formatDetected: true,
+        isCompact: useCompact
+      }
+    } else {
+      parser.formatDetected = true
+      parser.isCompact = useCompact
+    }
+  }
+  
+  // Route to appropriate parser
+  if (parser.isCompact) {
+    return incrementalExtractSuggestionsCompact(text, parser)
+  } else {
+    return incrementalExtractSuggestionsJSON(text, parser)
+  }
 }
 

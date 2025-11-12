@@ -7,7 +7,7 @@
 export const DEFAULT_MODELS_CONFIG = {
   // 对话模型的默认配置
   conversation: {
-    model: 'phi4-mini:latest', // 默认对话模型
+    model: 'qwen-flash', // 默认对话模型
   },
 
   // 直接推理模式的默认模型配置
@@ -17,8 +17,8 @@ export const DEFAULT_MODELS_CONFIG = {
 
   // 提取信息元模式的默认模型配置
   infonExtraction: {
-    extractionModel: 'qwen2.5:7b-instruct', // 提取信息元模式：信息元提取模型
-    privacyInferenceModel: 'qwen2.5:7b-instruct', // 提取信息元模式：隐私推理模型
+    extractionModel: 'niels32167/qwen3-4b-instruct:latest', // 提取信息元模式：信息元提取模型
+    privacyInferenceModel: 'niels32167/qwen3-4b-instruct:latest', // 提取信息元模式：隐私推理模型
   },
 
   // 共用模型的默认配置

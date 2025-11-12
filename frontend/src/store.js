@@ -241,7 +241,62 @@ function isSameSubject(iid1, iid2, allInfons) {
 }
 
 // 在流中增量解析 infons 数组，逐个对象产出
-function incrementalExtractInfons(streamText, parser) {
+// Auto-detects format (compact vs JSON) and uses appropriate parser
+async function incrementalExtractInfons(streamText, parser) {
+  const text = String(streamText || '')
+  
+  // Auto-detect format on first call
+  if (!parser || !parser.formatDetected) {
+    // Look for compact format patterns:
+    // 1. Old format with header: infons[N]:
+    // 2. New format without header: starts with desc:/scen:/rel:
+    const compactHeaderMatch = text.match(/infons\[\d+\]:/)
+    const compactDataMatch = text.match(/^\s*(desc|scen|rel):[^\n]+,/)
+    const compactMatch = compactHeaderMatch || compactDataMatch
+    
+    // Look for JSON format
+    const jsonMatch = text.match(/"infons"\s*:\s*\[/)
+    
+    // Determine format based on which appears first
+    let useCompact = false
+    if (compactMatch && jsonMatch) {
+      useCompact = compactMatch.index < jsonMatch.index
+    } else if (compactMatch) {
+      useCompact = true
+    } else if (jsonMatch) {
+      useCompact = false
+    } else {
+      // No format detected yet, keep old state if exists
+      if (parser) return { state: parser, yielded: [] }
+      
+      // Initialize with default (try compact first)
+      useCompact = true
+    }
+    
+    // Initialize parser state with format info
+    if (!parser) {
+      parser = {
+        formatDetected: true,
+        isCompact: useCompact
+      }
+    } else {
+      parser.formatDetected = true
+      parser.isCompact = useCompact
+    }
+  }
+  
+  // Route to appropriate parser
+  if (parser.isCompact) {
+    // Import and use compact parser
+    const { incrementalExtractInfonsCompact } = await import('./templates/infons.js')
+    return incrementalExtractInfonsCompact(text, parser)
+  } else {
+    return incrementalExtractInfonsJSON(text, parser)
+  }
+}
+
+// Original JSON parser (renamed)
+function incrementalExtractInfonsJSON(streamText, parser) {
   const state = parser || { 
     foundArray: false, 
     arrayStart: -1, 
@@ -252,7 +307,9 @@ function incrementalExtractInfons(streamText, parser) {
     braceDepth: 0, 
     closed: false, 
     objectStates: new Map(), // Map<objIndex, {lastParsedHash, data}>
-    currentObjIndex: 0
+    currentObjIndex: 0,
+    formatDetected: true,
+    isCompact: false
   }
   const yielded = []
   const text = String(streamText || '')
@@ -1538,7 +1595,7 @@ Output format:
     const systemPrompt = buildInfonSystemPrompt(['text'], nowISO, { currentRound, existingInfons })
     const messages = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: `Extract Situation Theory infons as a strict single JSON object. Input text:\n\n${text}` },
+      { role: 'user', content: `Extract Situation Theory infons in compact format. Input text:\n\n${text}` },
     ]
 
     const controller = new AbortController()
@@ -1578,7 +1635,7 @@ Output format:
       // Debounce配置：减少解析频率
       let parseTimer = null
       let lastParseTime = 0
-      const PARSE_DEBOUNCE_MS = 200
+      const PARSE_DEBOUNCE_MS = 50 // 降低到50ms以获得更即时的流式体验
 
       await streamOpenAIResponse(reader, async ({ content, finish }) => {
         if (typeof content === 'string' && content.length) {
@@ -1588,13 +1645,13 @@ Output format:
           get()._updateInfonRun(session.id, runId, (r) => ({ ...r, buffer }))
           
           // Debounce解析逻辑
-          const performParsing = () => {
+          const performParsing = async () => {
             const currentRun = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)
             if (!currentRun) return
             
             const buffer = currentRun.buffer || ''
             const parserState = get().infonParsers?.[runId] || null
-            const { state: newState, yielded } = incrementalExtractInfons(buffer, parserState)
+            const { state: newState, yielded } = await incrementalExtractInfons(buffer, parserState)
             
             set(state => ({
               infonParsers: {
@@ -1640,14 +1697,17 @@ Output format:
             lastParseTime = Date.now()
           }
           
-          // Debounce策略
+          // 流式解析策略：检测到换行符立即解析，否则debounce
           const now = Date.now()
           const timeSinceLastParse = now - lastParseTime
           
           if (parseTimer) clearTimeout(parseTimer)
           
-          if (timeSinceLastParse >= PARSE_DEBOUNCE_MS) {
-            performParsing()
+          // 如果buffer包含完整的行（有换行符），立即解析
+          const hasCompleteLine = buffer.includes('\n')
+          
+          if (hasCompleteLine || timeSinceLastParse >= PARSE_DEBOUNCE_MS) {
+            await performParsing()
           } else {
             parseTimer = setTimeout(performParsing, PARSE_DEBOUNCE_MS)
           }
@@ -1655,29 +1715,44 @@ Output format:
         if (finish) {
           if (parseTimer) clearTimeout(parseTimer)
           const raw = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)?.buffer || ''
-          const sliced = extractFirstJSONObject(raw) || raw
-          const { ok, value } = tryParseJSON(sliced)
-          if (ok) {
-            // 计算当前对话轮次和信息元次序
-            const sessionObj = get().getCurrentSession()
-            const messageCount = (sessionObj?.messages || []).length
-            const messageRound = Math.floor(messageCount / 2) + 1 // 每轮对话包含用户和助手消息
-            const currentRuns = get().getCurrentInfonRuns()
-            const completedRuns = currentRuns.filter(r => r.status === 'done')
-            const infonIndex = completedRuns.reduce((sum, r) => sum + (r.resultJson?.infons?.length || 0), 0)
-
-            const normalized = normalizeInfonOutput(value, {
-              recordTimeISO: nowISO,
-              defaultModality: 'text',
-              sessionId: session.id,
-              messageRound,
-              infonIndex,
-              infonType: 'desc'
-            })
-            
+          
+          // Get current parser state to check format
+          const parserState = get().infonParsers?.[runId]
+          const isCompact = parserState?.isCompact
+          
+          let finalInfons = []
+          let parseSuccess = false
+          
+          if (isCompact) {
+            // Compact format: use compact parser
+            const { parseCompactInfonsFormat } = await import('./templates/infons.js')
+            const result = parseCompactInfonsFormat(raw)
+            if (result && Array.isArray(result.infons)) {
+              finalInfons = result.infons
+              parseSuccess = true
+            }
+          } else {
+            // JSON format: use JSON parser
+            const sliced = extractFirstJSONObject(raw) || raw
+            const { ok, value } = tryParseJSON(sliced)
+            if (ok) {
+              const normalized = normalizeInfonOutput(value, {
+                recordTimeISO: nowISO,
+                defaultModality: 'text',
+                sessionId: session.id,
+                messageRound: Math.floor(((session?.messages || []).length) / 2) + 1,
+                infonIndex: 0,
+                infonType: 'desc'
+              })
+              finalInfons = normalized.infons || []
+              parseSuccess = true
+            }
+          }
+          
+          if (parseSuccess && finalInfons.length > 0) {
             // 应用增量更新逻辑：去重和冲突解决（中文注释）
-            const deduplicated = deduplicateAndMergeInfons(normalized.infons || [], existingInfons)
-            const finalResult = { ...normalized, infons: deduplicated }
+            const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
+            const finalResult = { infons: deduplicated }
             
             get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'done', progress: 100, resultJson: finalResult }))
           } else {
@@ -1757,7 +1832,7 @@ Output format:
             content: [
               {
                 type: 'text',
-                text: 'Extract Situation Theory infons as a strict single JSON object.'
+                text: 'Extract Situation Theory infons in compact format.'
               },
               {
                 type: 'image_url',
@@ -1808,7 +1883,7 @@ Output format:
         
         const messages = [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: 'Extract Situation Theory infons as a strict single JSON object.', images: [stripDataUrl(dataUrl)] },
+          { role: 'user', content: 'Extract Situation Theory infons in compact format.', images: [stripDataUrl(dataUrl)] },
         ]
         
         res = await fetch(`${apiBase}/chat`, {
@@ -1844,7 +1919,7 @@ Output format:
           
           // 使用增量解析器逐个提取infons
           const parserState = get().infonParsers?.[runId] || null
-          const { state: newState, yielded } = incrementalExtractInfons(buffer, parserState)
+          const { state: newState, yielded } = await incrementalExtractInfons(buffer, parserState)
           
           // 更新解析器状态
           set(state => ({
@@ -1897,29 +1972,47 @@ Output format:
         }
         if (finish) {
           const raw = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)?.buffer || ''
-          const sliced = extractFirstJSONObject(raw) || raw
-          const { ok, value } = tryParseJSON(sliced)
-          if (ok) {
-            // 计算当前对话轮次和信息元次序
-            const sessionObj = get().getCurrentSession()
-            const messageCount = (sessionObj?.messages || []).length
-            const messageRound = Math.floor(messageCount / 2) + 1 // 每轮对话包含用户和助手消息
-            const currentRuns = get().getCurrentInfonRuns()
-            const completedRuns = currentRuns.filter(r => r.status === 'done')
-            const infonIndex = completedRuns.reduce((sum, r) => sum + (r.resultJson?.infons?.length || 0), 0)
-
-            const normalized = normalizeInfonOutput(value, {
-              recordTimeISO: nowISO,
-              defaultModality: 'image',
-              sessionId: session.id,
-              messageRound,
-              infonIndex,
-              infonType: 'desc'
-            })
-            
+          
+          // Get current parser state to check format
+          const parserState = get().infonParsers?.[runId]
+          const isCompact = parserState?.isCompact
+          
+          let finalInfons = []
+          let parseSuccess = false
+          
+          if (isCompact) {
+            // Compact format: use compact parser
+            console.log('[Image Finish] Using compact format parser')
+            const { parseCompactInfonsFormat } = await import('./templates/infons.js')
+            const result = parseCompactInfonsFormat(raw)
+            if (result && Array.isArray(result.infons)) {
+              finalInfons = result.infons
+              parseSuccess = true
+              console.log('[Image Finish] Compact parser extracted', finalInfons.length, 'infons')
+            }
+          } else {
+            // JSON format: use JSON parser
+            console.log('[Image Finish] Using JSON format parser')
+            const sliced = extractFirstJSONObject(raw) || raw
+            const { ok, value } = tryParseJSON(sliced)
+            if (ok) {
+              const normalized = normalizeInfonOutput(value, {
+                recordTimeISO: nowISO,
+                defaultModality: 'image',
+                sessionId: session.id,
+                messageRound: Math.floor(((session?.messages || []).length) / 2) + 1,
+                infonIndex: 0,
+                infonType: 'desc'
+              })
+              finalInfons = normalized.infons || []
+              parseSuccess = true
+            }
+          }
+          
+          if (parseSuccess && finalInfons.length > 0) {
             // 应用增量更新逻辑：去重和冲突解决（中文注释）
-            const deduplicated = deduplicateAndMergeInfons(normalized.infons || [], existingInfons)
-            const finalResult = { ...normalized, infons: deduplicated }
+            const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
+            const finalResult = { infons: deduplicated }
             
             get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'done', progress: 100, resultJson: finalResult }))
           } else {
@@ -2009,7 +2102,7 @@ Output format:
     const systemPrompt = buildInfonSystemPrompt(['audio'], nowISO, { currentRound, existingInfons })
     const messages = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: `Extract Situation Theory infons as a strict single JSON object. Input audio transcript:\n\n${transcript}` },
+      { role: 'user', content: `Extract Situation Theory infons in compact format. Input audio transcript:\n\n${transcript}` },
     ]
 
     const controller = new AbortController()
@@ -2049,7 +2142,7 @@ Output format:
       // Debounce配置：减少解析频率
       let parseTimer = null
       let lastParseTime = 0
-      const PARSE_DEBOUNCE_MS = 200
+      const PARSE_DEBOUNCE_MS = 50 // 降低到50ms以获得更即时的流式体验
 
       await streamOpenAIResponse(reader, async ({ content, finish }) => {
         if (typeof content === 'string' && content.length) {
@@ -2059,13 +2152,13 @@ Output format:
           get()._updateInfonRun(session.id, runId, (r) => ({ ...r, buffer }))
           
           // Debounce解析逻辑
-          const performParsing = () => {
+          const performParsing = async () => {
             const currentRun = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)
             if (!currentRun) return
             
             const buffer = currentRun.buffer || ''
             const parserState = get().infonParsers?.[runId] || null
-            const { state: newState, yielded } = incrementalExtractInfons(buffer, parserState)
+            const { state: newState, yielded } = await incrementalExtractInfons(buffer, parserState)
             
             set(state => ({
               infonParsers: {
@@ -2111,14 +2204,17 @@ Output format:
             lastParseTime = Date.now()
           }
           
-          // Debounce策略
+          // 流式解析策略：检测到换行符立即解析，否则debounce
           const now = Date.now()
           const timeSinceLastParse = now - lastParseTime
           
           if (parseTimer) clearTimeout(parseTimer)
           
-          if (timeSinceLastParse >= PARSE_DEBOUNCE_MS) {
-            performParsing()
+          // 如果buffer包含完整的行（有换行符），立即解析
+          const hasCompleteLine = buffer.includes('\n')
+          
+          if (hasCompleteLine || timeSinceLastParse >= PARSE_DEBOUNCE_MS) {
+            await performParsing()
           } else {
             parseTimer = setTimeout(performParsing, PARSE_DEBOUNCE_MS)
           }
@@ -2126,33 +2222,53 @@ Output format:
         if (finish) {
           if (parseTimer) clearTimeout(parseTimer)
           const raw = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)?.buffer || ''
-          const sliced = extractFirstJSONObject(raw) || raw
-          const { ok, value } = tryParseJSON(sliced)
-          if (ok) {
-            // 计算当前对话轮次和信息元次序
-            const sessionObj = get().getCurrentSession()
-            const messageCount = (sessionObj?.messages || []).length
-            const messageRound = Math.floor(messageCount / 2) + 1 // 每轮对话包含用户和助手消息
-            const currentRuns = get().getCurrentInfonRuns()
-            const completedRuns = currentRuns.filter(r => r.status === 'done')
-            const infonIndex = completedRuns.reduce((sum, r) => sum + (r.resultJson?.infons?.length || 0), 0)
-
-            const normalized = normalizeInfonOutput(value, {
-              recordTimeISO: nowISO,
-              defaultModality: 'audio',
-              sessionId: session.id,
-              messageRound,
-              infonIndex,
-              infonType: 'desc'
-            })
-            
+          
+          // Get current parser state to check format
+          const parserState = get().infonParsers?.[runId]
+          const isCompact = parserState?.isCompact
+          
+          let finalInfons = []
+          let parseSuccess = false
+          
+          if (isCompact) {
+            // Compact format: use compact parser
+            console.log('[Audio Finish] Using compact format parser')
+            const { parseCompactInfonsFormat } = await import('./templates/infons.js')
+            const result = parseCompactInfonsFormat(raw)
+            if (result && Array.isArray(result.infons)) {
+              finalInfons = result.infons
+              parseSuccess = true
+              console.log('[Audio Finish] Compact parser extracted', finalInfons.length, 'infons')
+            }
+          } else {
+            // JSON format: use JSON parser
+            console.log('[Audio Finish] Using JSON format parser')
+            const sliced = extractFirstJSONObject(raw) || raw
+            const { ok, value } = tryParseJSON(sliced)
+            if (ok) {
+              const normalized = normalizeInfonOutput(value, {
+                recordTimeISO: nowISO,
+                defaultModality: 'audio',
+                sessionId: session.id,
+                messageRound: Math.floor(((session?.messages || []).length) / 2) + 1,
+                infonIndex: 0,
+                infonType: 'desc'
+              })
+              finalInfons = normalized.infons || []
+              parseSuccess = true
+            }
+          }
+          
+          if (parseSuccess && finalInfons.length > 0) {
             // 应用增量更新逻辑：去重和冲突解决（中文注释）
-            const deduplicated = deduplicateAndMergeInfons(normalized.infons || [], existingInfons)
-            const finalResult = { ...normalized, infons: deduplicated }
+            const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
+            const finalResult = { infons: deduplicated }
             
             get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'done', progress: 100, resultJson: finalResult }))
+            console.log('[Audio Finish] Set resultJson with', deduplicated.length, 'infons')
           } else {
             get()._updateInfonRun(session.id, runId, (r) => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
+            console.log('[Audio Finish] Parse failed, raw buffer:', raw.substring(0, 200))
           }
         }
       })
@@ -3567,7 +3683,7 @@ Output format:
       // Debounce配置：减少解析频率，提升性能
       let parseTimer = null
       let lastParseTime = 0
-      const PARSE_DEBOUNCE_MS = 200 // 100ms debounce间隔
+      const PARSE_DEBOUNCE_MS = 50 // 降低到50ms以获得更即时的流式体验 // 100ms debounce间隔
       
       // 定义解析函数（复用逻辑）
       const performParsing = async () => {
@@ -3716,34 +3832,44 @@ Output format:
       
       // 流结束后，清除定时器并执行最后一次解析
       if (parseTimer) clearTimeout(parseTimer)
+      
+      // 确保 buffer 以换行符结尾，以便解析器能处理最后一行
+      if (buffer.length > 0 && !buffer.endsWith('\n')) {
+        buffer += '\n'
+      }
+      
       await performParsing()
       
       console.log(`[Privacy Inference] 流式接收完成，buffer长度: ${buffer.length}`)
       console.log(`[Privacy Inference] Buffer内容预览:`, buffer)
       
-      // 尝试清理buffer：移除模型的思考过程和markdown标记
-      let cleanBuffer = buffer
+      // 检查是否为紧凑格式（没有 JSON 大括号）
+      const isCompactFormat = buffer.indexOf('{') === -1
       
-      // 1. 移除 <think>...</think> 标签及其内容（某些模型如 DeepSeek 会输出思考过程）
-      cleanBuffer = cleanBuffer.replace(/<think>[\s\S]*?<\/think>/gi, '')
-      
-      // 2. 移除 markdown 代码块标记
-      cleanBuffer = cleanBuffer.replace(/^```json\s*/i, '').replace(/```\s*$/i, '')
-      cleanBuffer = cleanBuffer.replace(/^```\s*/i, '').replace(/```\s*$/i, '')
-      
-      // 3. 查找第一个 { 和最后一个 }，提取JSON部分
-      const firstBrace = cleanBuffer.indexOf('{')
-      const lastBrace = cleanBuffer.lastIndexOf('}')
-      if (firstBrace >= 0 && lastBrace > firstBrace) {
-        cleanBuffer = cleanBuffer.slice(firstBrace, lastBrace + 1)
-        console.log(`[Privacy Inference] 清理后buffer长度: ${cleanBuffer.length}`)
+      if (!isCompactFormat) {
+        // JSON 格式：尝试清理buffer并解析
+        let cleanBuffer = buffer
         
-        // 尝试直接解析完整JSON（如果已经接收完成）
-        if (cleanBuffer.length > 0) {
-          try {
-            const parsed = JSON.parse(cleanBuffer)
-            if (parsed.risks && Array.isArray(parsed.risks)) {
-              console.log(`[Privacy Inference] 成功解析完整JSON，风险数: ${parsed.risks.length}`)
+        // 1. 移除 <think>...</think> 标签及其内容（某些模型如 DeepSeek 会输出思考过程）
+        cleanBuffer = cleanBuffer.replace(/<think>[\s\S]*?<\/think>/gi, '')
+        
+        // 2. 移除 markdown 代码块标记
+        cleanBuffer = cleanBuffer.replace(/^```json\s*/i, '').replace(/```\s*$/i, '')
+        cleanBuffer = cleanBuffer.replace(/^```\s*/i, '').replace(/```\s*$/i, '')
+        
+        // 3. 查找第一个 { 和最后一个 }，提取JSON部分
+        const firstBrace = cleanBuffer.indexOf('{')
+        const lastBrace = cleanBuffer.lastIndexOf('}')
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+          cleanBuffer = cleanBuffer.slice(firstBrace, lastBrace + 1)
+          console.log(`[Privacy Inference] 清理后buffer长度: ${cleanBuffer.length}`)
+          
+          // 尝试直接解析完整JSON（如果已经接收完成）
+          if (cleanBuffer.length > 0) {
+            try {
+              const parsed = JSON.parse(cleanBuffer)
+              if (parsed.risks && Array.isArray(parsed.risks)) {
+                console.log(`[Privacy Inference] 成功解析完整JSON，风险数: ${parsed.risks.length}`)
               
               // 累积关键词到 sessionKeywords（直接推理模式下）
               if (inferenceMode === 'direct' && parsed.risks.length > 0) {
@@ -3803,12 +3929,15 @@ Output format:
             console.log(`[Privacy Inference] 完整JSON解析失败:`, parseErr.message)
           }
         }
+        }
+      } else {
+        // 紧凑格式：使用增量解析的结果
+        console.log(`[Privacy Inference] 检测到紧凑格式，使用增量解析结果`)
       }
       
       // 检查是否真的有内容
       const currentState = get().privacyInferences?.[session.id]
       const hasRisks = currentState?.risks && currentState.risks.length > 0
-      console.log(`[Privacy Inference] 解析器状态:`, get().privacyParsers?.[session.id])
       
       if (!hasRisks && buffer.length === 0) {
         console.warn('[Privacy Inference] 未收到任何内容，可能API调用失败')
