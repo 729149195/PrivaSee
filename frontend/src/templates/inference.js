@@ -120,14 +120,19 @@ field1,field2,field3,field4,field5
 
 ## Critical Requirements
 1. **Output ONLY Compact Format** - NO header line, NO JSON, NO markdown code blocks, NO explanatory text, NO statements like "cannot infer" or "insufficient data". Start directly with data lines. DO NOT output any text other than the risk data lines.
-2. **SKIP Uncertain Risks** - CRITICAL: If you CANNOT confidently infer a privacy risk from the input data, DO NOT output anything for that risk. DO NOT output statements like "无法推断", "不确定", "insufficient information", etc. Simply skip that risk and move to the next one.
+2. **ONLY OUTPUT ACTUAL RISKS** - CRITICAL: You must ONLY output privacy risks that are ACTUALLY PRESENT and SUPPORTED BY EVIDENCE in the input data. Do NOT:
+   - Output risks that "do not exist" or "are not present" - if a risk is not present, simply DO NOT output it
+   - List potential risk categories just to say they don't apply (e.g., "不构成风险", "未提及", "not mentioned")
+   - Output placeholder entries for risks that have no supporting evidence
+   - Include ANY risk where the inference_chain concludes with "no risk" or "not applicable"
+   **If you cannot find concrete evidence for a privacy risk in the input infons, DO NOT OUTPUT THAT RISK AT ALL.**
 3. **ONE RISK PER LINE** - CRITICAL: Each risk entry MUST be on its own separate line. Press Enter/newline after completing each risk. DO NOT output all risks in one continuous line.
 4. **Field Order Matters** - MUST output fields in the exact order: law_node_name, risk_level, privacy_exposure, inference_chain, used_infons
 5. **Map to LEAF NODES ONLY** - CRITICAL: Always identify the MOST SPECIFIC legal clause at the DEEPEST level in hierarchy (leaf nodes). NEVER map to intermediate/parent nodes. The law_node_name MUST be the final level clause name that appears in the law tree structure.
 6. **EXACT Name Matching** - The law_node_name MUST be copied EXACTLY from the law tree structure, character by character. DO NOT paraphrase, summarize, or modify the node name. Look for the [LEAF NODE - USE THIS] markers in the law tree and copy the name EXACTLY.
 7. **CUSTOM MODE RESTRICTION** - If you see "CUSTOM PRIVACY ANALYSIS MODE" in the law tree section, the law_node_name MUST be one of the explicitly listed selected items (marked with ✓). You CANNOT use any other privacy category names, even if you can infer them. If a privacy risk doesn't match any selected item, skip it entirely.
-8. **Deep Inference** - Don't just report explicit data; infer health conditions, beliefs, status from behavior/preferences
-9. **Comprehensive Coverage** - Analyze ALL possible privacy angles: direct exposure + implicit inference + contextual correlation (BUT respect Custom Mode restrictions)
+8. **Deep Inference** - Don't just report explicit data; infer health conditions, beliefs, status from behavior/preferences (but ONLY if there is actual evidence)
+9. **Evidence-Based Output** - Analyze possible privacy angles BUT only output risks with CONCRETE EVIDENCE. Do not speculatively list all possible risk categories.
 10. **Clear Attribution** - Every risk must trace back to specific information elements with logical reasoning
 11. **used_infons Extraction** - CRITICAL FORMAT: "TYPE:VALUE" separated by |
    - **For DESC infons**: Extract ONLY the attribute value (NOT "entity:attribute")
@@ -147,7 +152,7 @@ field1,field2,field3,field4,field5
 14. **Verify Before Output** - Before outputting each risk, find the [LEAF NODE - USE THIS] entry in the provided law tree and copy its exact name. If you cannot find an exact leaf node match, choose the closest leaf node from the tree.
 15. **LANGUAGE CONSISTENCY** - Write privacy_exposure and inference_chain in the SAME language as the input information elements. If the input data is in Chinese, write your analysis in Chinese. If in English, write in English. Match the language of the user's data.
 16. **Escape Special Characters** - Remember to escape commas (\\,), newlines (\\n), and backslashes (\\\\\\) in text fields.
-17. **NO UNCERTAIN OUTPUT** - CRITICAL: Do NOT output any risk if you are uncertain or cannot confidently infer it. Do NOT explain why you cannot infer something. Simply output nothing for uncertain cases.
+17. **NO NEGATIVE OUTPUT** - NEVER output entries that say "no risk", "not applicable", "不构成风险", "未提及" or similar. If there's no evidence for a risk, simply don't output it. Output ONLY confirmed risks.
 
 ## Example Output Format
 When you find a privacy risk, you MUST:

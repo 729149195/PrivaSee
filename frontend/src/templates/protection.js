@@ -248,18 +248,21 @@ export function parseCompactProtectionFormat(text) {
   // Fixed field order: level, label, modified_text, changes_summary, removed_risks
   const defaultFields = ['level', 'label', 'modified_text', 'changes_summary', 'removed_risks']
   
+  // 移除代码块标记
+  let cleanText = text.replace(/```[\w]*\n?/g, '').replace(/\n?```$/g, '').trim()
+  
   // Try to match optional header: suggestions[N]{field1,field2,...}:
-  const headerMatch = text.match(/suggestions\[(\d+)\]\{([^}]+)\}:/)
+  const headerMatch = cleanText.match(/suggestions\[(\d+)\]\{([^}]+)\}:/)
   
   let fields = defaultFields
-  let dataText = text
+  let dataText = cleanText
   
   if (headerMatch) {
     // Header found (old format), extract fields from header
     const fieldsStr = headerMatch[2]
     fields = fieldsStr.split(',').map(f => f.trim())
     const headerEnd = headerMatch.index + headerMatch[0].length
-    dataText = text.slice(headerEnd)
+    dataText = cleanText.slice(headerEnd)
   }
   // If no header, treat entire text as data (new format)
   
@@ -268,15 +271,15 @@ export function parseCompactProtectionFormat(text) {
   
   for (const line of lines) {
     const trimmed = line.trim()
-    if (!trimmed) continue
+    if (!trimmed || trimmed.startsWith('```') || trimmed === '---') continue
     
     const suggestion = parseCompactSuggestionLine(trimmed, fields)
-    if (suggestion) {
+    if (suggestion && suggestion.level) {
       suggestions.push(suggestion)
     }
   }
   
-  return { suggestions }
+  return suggestions.length > 0 ? suggestions : null
 }
 
 /**
@@ -338,11 +341,15 @@ function incrementalExtractSuggestionsCompact(streamText, parser) {
     fields: defaultFields,
     count: 0,
     scanPos: 0,
-    parsedLines: 0
+    parsedLines: 0,
+    suggestionIndex: 0
   }
   
   const yielded = []
-  const text = String(streamText || '')
+  let text = String(streamText || '')
+  
+  // 移除代码块标记 ``` 
+  text = text.replace(/```[\w]*\n?/g, '').replace(/\n?```$/g, '')
   
   // Step 1: Check for optional header
   if (!state.foundHeader) {
@@ -380,9 +387,15 @@ function incrementalExtractSuggestionsCompact(streamText, parser) {
       continue
     }
     
+    // 跳过非数据行（如空行、代码块标记等）
+    if (trimmed.startsWith('```') || trimmed === '---') {
+      state.parsedLines++
+      continue
+    }
+    
     const suggestion = parseCompactSuggestionLine(trimmed, state.fields)
-    if (suggestion) {
-      suggestion._objIndex = state.parsedLines
+    if (suggestion && suggestion.level) {
+      suggestion._objIndex = state.suggestionIndex++
       suggestion._isComplete = true
       yielded.push(suggestion)
     }
