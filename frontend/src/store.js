@@ -238,7 +238,6 @@ export const useStore = create((set, get) => ({
   },
 
   async sendMessageWithDeepSeekOCR(text, selectedCommands, selectedFiles, resolution = 'gundam') {
-    // 由于此方法太长，单独保留在 store 中
     // 完整实现请参考原 store.js
     const state = get()
     state._ensureCurrentSession()
