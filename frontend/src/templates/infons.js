@@ -234,6 +234,69 @@ export const AUDIO_EXTRACTION = String.raw`
 
 
 
+// ============================================================================
+// BENCHMARK EXTRACTION MODE - 精准提取用于评估
+// ============================================================================
+export const BENCHMARK_EXTRACTION = String.raw`
+**Benchmark Extraction Mode - PRECISION-FOCUSED EXTRACTION**
+
+Extract ONLY meaningful named entities and their relationships. Quality over quantity.
+
+**CRITICAL PRINCIPLE**: Match gold-standard annotation style:
+- Extract ONLY proper nouns and specific named entities
+- Skip generic words, common nouns, verbs, adjectives
+- Each DESC should be a distinct, identifiable entity
+
+**Extraction Rules - BALANCED PRECISION & RECALL**:
+
+1. **DESC - Extract ONLY named entities** (typically 5-15 per document):
+   ✅ EXTRACT these entity types:
+   - **Person**: Full names only (e.g., "John Smith", "王小明"), NOT pronouns
+   - **Organization**: Companies, institutions, agencies (e.g., "Apple Inc", "FBI")
+   - **Location/GPE**: Cities, countries, specific places (e.g., "California", "Beijing")
+   - **Facility**: Buildings, airports, stations (e.g., "JFK Airport")
+   - **Event**: Named events only (e.g., "World War II", "Olympics")
+   - **Time/Date**: Specific dates, years (e.g., "2023", "Monday")
+   - **Value**: Money, percentages with numbers (e.g., "$500", "30%")
+   
+   ❌ DO NOT extract:
+   - Generic nouns (man, woman, company, city, country)
+   - Pronouns (he, she, it, they, 他, 她)
+   - Verbs, adjectives, adverbs
+   - Common words without specific reference
+   - Repeated mentions of same entity (extract once)
+
+2. **SCEN - Extract ONLY explicit time-location pairs** (typically 0-3):
+   ✅ When a specific time AND location are mentioned together in context
+   ❌ DO NOT create SCEN for standalone times or locations
+   ❌ DO NOT create artificial combinations
+   
+3. **REL - Extract ONLY clear relationships** (typically 2-8):
+   ✅ Standard relation types: located_at, employed_by, part_of, member_of, subsidiary_of, owns, near, citizen_of, affiliated_with, founder_of
+   ✅ Only when relationship is explicitly stated or strongly implied
+   ❌ DO NOT create redundant or speculative relations
+
+**Output Format**: Compact CSV, one infon per line
+- DESC: iid,DESC,entity_type,entity_name,string,confidence
+- SCEN: iid,SCEN,temporal,spatial,confidence  
+- REL: iid,REL,relation_name,arg1|arg2,confidence
+
+**Example** (news text about company):
+desc:r1_1,DESC,Person,John Smith,string,0.95
+desc:r1_2,DESC,Organization,Apple Inc,string,0.95
+desc:r1_3,DESC,Location,California,string,0.95
+rel:r1_4,REL,employed_by,desc:r1_1|desc:r1_2,0.90
+rel:r1_5,REL,located_at,desc:r1_2|desc:r1_3,0.90
+
+**QUALITY CHECK before output**:
+- Is each DESC a proper named entity? (not generic noun)
+- Am I extracting < 20 DESC for typical text? (aim for 5-15)
+- Are REL relationships explicitly supported by text?
+- Have I avoided duplicates?
+
+**NOW EXTRACT NAMED ENTITIES FROM THE TEXT BELOW:**
+`;
+
 export const SELF_CHECKLIST = String.raw`
 **Pre-Output Checks**:
 ✓ DID YOU READ THE USER'S ACTUAL INPUT? (NOT examples!)

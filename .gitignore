@@ -66,5 +66,8 @@ tmp/
 temp/
 *.tmp
 
+#test data
+test-data/
+
 data/outputs/
 data/uploads/
