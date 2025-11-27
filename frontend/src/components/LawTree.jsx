@@ -6,7 +6,7 @@ const LAWS = [
   { key: 'PIPL', label: 'PIPL', file: './law/PIPL.json' },
   { key: 'GDPR', label: 'GDPR', file: './law/GDPR.json' },
   { key: 'CCPA_CPRA', label: 'CCPA/CPRA', file: './law/CCPA_CPRA.json' },
-  { key: 'CUSTOM', label: 'Custom', file: null }, // Custom mode uses checkboxes instead of tree
+  { key: 'CUSTOM', label: 'Custom', file: null }, 
 ]
 
 async function fetchLawData(file) {
@@ -46,6 +46,7 @@ export default function LawTree() {
   const holdTimerRef = useRef(null)
   const holdStartRef = useRef(null)
   const [size, setSize] = useState({ width: 928, height: 600 })
+  const clipId = useMemo(() => `clip-${Math.random().toString(36).slice(2, 9)}`, [])
   
   // 从 store 获取推理结果和相关方法（中文注释）
   const { 
@@ -93,11 +94,21 @@ export default function LawTree() {
   
   // 初始化时设置默认法律（中文注释）
   useEffect(() => {
-    if (lawData[0] && !useStore.getState().selectedLaw) {
+    if (useStore.getState().selectedLaw) return
+
+    // 如果第一个是 Custom（无文件），直接设置
+    if (LAWS[0].key === 'CUSTOM') {
+      const allItems = [...PRIVACY_ITEMS, ...customPrivacyItems]
+      const selectedDetails = allItems.filter(item => selectedPrivacyItems.has(item.id))
+      setSelectedLaw('CUSTOM', {
+        customItems: selectedDetails,
+        isCustom: true
+      })
+    } else if (lawData[0]) {
       setSelectedLaw(LAWS[0].key, lawData[0])
     }
     // eslint-disable-next-line
-  }, [lawData])
+  }, [lawData, customPrivacyItems, selectedPrivacyItems])
 
   // 容器自适应
   useEffect(() => {
@@ -408,6 +419,12 @@ export default function LawTree() {
       .join('g')
       .attr('transform', d => `translate(${px(d.y0)},${px(d.x0)})`)
 
+      cell.append('clipPath')
+        .attr('id', (d, i) => `${clipId}-${i}`)
+        .append('rect')
+        .attr('width',  d => Math.max(1, px(d.y1) - px(d.y0)))
+        .attr('height', d => Math.max(1, px(d.x1) - px(d.x0)))
+
       const rect = cell.append('rect')
       .attr('width',  d => Math.max(1, px(d.y1) - px(d.y0)))
       .attr('height', d => Math.max(1, px(d.x1) - px(d.x0)))
@@ -433,6 +450,7 @@ export default function LawTree() {
       })
 
     const text = cell.append('text')
+      .attr('clip-path', (d, i) => `url(#${clipId}-${i})`)
       .style('user-select', 'none')
       .attr('pointer-events', 'none')
       .attr('x', 6)
@@ -478,6 +496,11 @@ export default function LawTree() {
         .attr('transform', d => `translate(${px(d.target.y0)},${px(d.target.x0)})`)
 
       rect.transition(t)
+        .attr('width',  d => Math.max(1, px(d.target.y1) - px(d.target.y0)))
+        .attr('height', d => Math.max(1, px(d.target.x1) - px(d.target.x0)))
+
+      // Transition clip rects
+      svg.selectAll('clipPath rect').transition(t)
         .attr('width',  d => Math.max(1, px(d.target.y1) - px(d.target.y0)))
         .attr('height', d => Math.max(1, px(d.target.x1) - px(d.target.x0)))
 

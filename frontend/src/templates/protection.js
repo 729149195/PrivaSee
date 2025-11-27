@@ -329,8 +329,75 @@ export function validateSuggestion(suggestion) {
 }
 
 /**
+ * 部分解析紧凑格式行（支持流式渲染）
+ * 在行未完成时提取已有字段
+ */
+function parsePartialCompactLine(line, fields) {
+  if (!line || !line.trim()) return null
+  
+  // Split by comma, but respect escaped commas
+  const values = []
+  let currentValue = ''
+  let escaped = false
+  
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    
+    if (escaped) {
+      currentValue += ch
+      escaped = false
+      continue
+    }
+    
+    if (ch === '\\') {
+      currentValue += ch
+      escaped = true
+      continue
+    }
+    
+    if (ch === ',') {
+      values.push(currentValue)
+      currentValue = ''
+      continue
+    }
+    
+    currentValue += ch
+  }
+  
+  // Push the last (possibly incomplete) value
+  if (currentValue || values.length > 0) {
+    values.push(currentValue)
+  }
+  
+  // Field names in order (5 fields total)
+  const fieldNames = fields || ['level', 'label', 'modified_text', 'changes_summary', 'removed_risks']
+  
+  // Build the partial suggestion object
+  const suggestion = {}
+  for (let i = 0; i < fieldNames.length && i < values.length; i++) {
+    const fieldName = fieldNames[i]
+    let value = values[i]
+    
+    // Only trim for non-last values (last value might be incomplete)
+    if (i < values.length - 1) {
+      value = value.trim()
+    }
+    
+    // Handle array field
+    if (fieldName === 'removed_risks') {
+      suggestion[fieldName] = splitArrayField(value)
+    } else {
+      suggestion[fieldName] = unescapeValue(value)
+    }
+  }
+  
+  return Object.keys(suggestion).length > 0 ? suggestion : null
+}
+
+/**
  * 流式增量解析保护建议（紧凑格式）
  * 支持无表头格式（新）和带表头格式（旧，兼容）
+ * 支持流式渲染：对未完成的行也进行部分解析
  */
 function incrementalExtractSuggestionsCompact(streamText, parser) {
   // Fixed field order: level, label, modified_text, changes_summary, removed_risks
@@ -342,7 +409,9 @@ function incrementalExtractSuggestionsCompact(streamText, parser) {
     count: 0,
     scanPos: 0,
     parsedLines: 0,
-    suggestionIndex: 0
+    suggestionIndex: 0,
+    partialStates: new Map(), // 存储部分解析的状态
+    lastPartialHash: null // 上次部分解析的哈希
   }
   
   const yielded = []
@@ -375,32 +444,51 @@ function incrementalExtractSuggestionsCompact(streamText, parser) {
   // Process each line after the already parsed ones
   for (let i = state.parsedLines; i < lines.length; i++) {
     const line = lines[i]
-    
-    // Skip if we're at the last line and it might be incomplete
-    if (i === lines.length - 1 && !dataText.endsWith('\n')) {
-      break
-    }
-    
     const trimmed = line.trim()
+    const isLastLine = i === lines.length - 1
+    const isIncomplete = isLastLine && !dataText.endsWith('\n')
+    
+    // Skip empty lines
     if (!trimmed) {
-      state.parsedLines++
+      if (!isIncomplete) state.parsedLines++
       continue
     }
     
     // 跳过非数据行（如空行、代码块标记等）
     if (trimmed.startsWith('```') || trimmed === '---') {
-      state.parsedLines++
+      if (!isIncomplete) state.parsedLines++
       continue
     }
     
-    const suggestion = parseCompactSuggestionLine(trimmed, state.fields)
-    if (suggestion && suggestion.level) {
-      suggestion._objIndex = state.suggestionIndex++
-      suggestion._isComplete = true
-      yielded.push(suggestion)
+    if (isIncomplete) {
+      // 最后一行可能不完整，进行部分解析
+      const currentHash = computeHashId(trimmed)
+      
+      // 只有当内容变化时才重新解析
+      if (currentHash !== state.lastPartialHash) {
+        state.lastPartialHash = currentHash
+        const partialSuggestion = parsePartialCompactLine(trimmed, state.fields)
+        
+        if (partialSuggestion && partialSuggestion.level) {
+          partialSuggestion._objIndex = state.suggestionIndex
+          partialSuggestion._isComplete = false // 标记为未完成
+          yielded.push(partialSuggestion)
+        }
+      }
+    } else {
+      // 完整行，进行完整解析
+      const suggestion = parseCompactSuggestionLine(trimmed, state.fields)
+      if (suggestion && suggestion.level) {
+        suggestion._objIndex = state.suggestionIndex++
+        suggestion._isComplete = true
+        yielded.push(suggestion)
+        
+        // 重置部分解析状态
+        state.lastPartialHash = null
+      }
+      
+      state.parsedLines++
     }
-    
-    state.parsedLines++
   }
   
   return { state, yielded }
