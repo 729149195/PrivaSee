@@ -385,7 +385,10 @@ export const createMessageSlice = (set, get) => ({
       }
 
       let filesToProcess = selectedFiles
-      let commandsToUse = selectedCommands
+      // 确保至少有一个默认命令
+      let commandsToUse = selectedCommands?.length > 0 
+        ? selectedCommands 
+        : [{ id: 'free_ocr', label: '自由OCR识别', icon: '📝' }]
 
       // 如果没有文件，尝试使用历史消息中的文件
       if (selectedFiles.length === 0 && text?.trim()) {
@@ -457,9 +460,10 @@ export const createMessageSlice = (set, get) => ({
       }
 
       // 处理文件
+      const defaultCommand = { id: 'free_ocr', label: '自由OCR识别', icon: '📝' }
       for (let i = 0; i < filesToProcess.length; i++) {
         const fileData = filesToProcess[i]
-        const command = commandsToUse[i] || commandsToUse[0]
+        const command = commandsToUse[i] || commandsToUse[0] || defaultCommand
 
         if (filesToProcess.length > 1) {
           if (i > 0) currentContent += '\n\n'

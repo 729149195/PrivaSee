@@ -26,25 +26,27 @@ export default defineConfig({
       '*.ts.net'
     ],
     proxy: {
-      // DeepSeek OCR API 代理 - 端口 5001
+      // PrivaSee 统一后端 API 代理 - 端口 5000
+      // OCR 服务: /ocr-api -> /api/ocr
       '/ocr-api': {
-        target: 'http://127.0.0.1:5001',
+        target: 'http://127.0.0.1:5000',
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/ocr-api/, '/api')
+        rewrite: (path) => path.replace(/^\/ocr-api/, '/api/ocr')
       },
-      // Whisper API 代理 - 端口 5000，必须放在 /api 之前，避免路径冲突
+      // Whisper 服务: /whisper-api -> /api/whisper
       '/whisper-api': {
         target: 'http://127.0.0.1:5000',
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/whisper-api/, '/api')
+        rewrite: (path) => path.replace(/^\/whisper-api/, '/api/whisper')
       },
+      // Whisper 直接访问（兼容旧路径）
       '/whisper': {
         target: 'http://127.0.0.1:5000',
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/whisper/, '')
+        rewrite: (path) => path.replace(/^\/whisper/, '/api/whisper')
       },
       '/api': {
         target: 'http://127.0.0.1:11434',
