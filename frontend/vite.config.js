@@ -21,10 +21,7 @@ export default defineConfig({
     host: true,
     port: 5173,
     strictPort: true,
-    allowedHosts: [
-      'zhangxiangxuan-precision-3660.tail7b7f0c.ts.net',
-      '*.ts.net'
-    ],
+    allowedHosts: true, // 允许所有主机 (Cloudflare Tunnel / Tailscale)
     proxy: {
       // PrivaSee 统一后端 API 代理 - 端口 5000
       // OCR 服务: /ocr-api -> /api/ocr

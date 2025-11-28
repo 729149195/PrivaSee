@@ -29,26 +29,122 @@ logger = logging.getLogger(__name__)
 # 延迟导入配置，避免循环导入
 def get_config():
     from config import (
-        DEEPSEEK_OCR_MODEL_PATH, OCR_UPLOAD_FOLDER, OCR_OUTPUT_FOLDER
+        DEEPSEEK_OCR_MODEL_PATH, OCR_UPLOAD_FOLDER, OCR_OUTPUT_FOLDER,
+        OCR_AUTO_UNLOAD_TIMEOUT, OCR_AUTO_UNLOAD_CHECK_INTERVAL
     )
     return {
         'model_path': str(DEEPSEEK_OCR_MODEL_PATH),
         'upload_folder': str(OCR_UPLOAD_FOLDER),
-        'output_folder': str(OCR_OUTPUT_FOLDER)
+        'output_folder': str(OCR_OUTPUT_FOLDER),
+        'auto_unload_timeout': OCR_AUTO_UNLOAD_TIMEOUT,
+        'auto_unload_check_interval': OCR_AUTO_UNLOAD_CHECK_INTERVAL
     }
 
 # 全局模型变量
 ocr_model = None
 ocr_tokenizer = None
 
+# =============================================================================
+# 自动卸载机制（空闲时自动释放显存）
+# =============================================================================
+
+import time
+
+# 模型状态
+_last_use_time = 0  # 最后使用时间戳
+_model_lock = threading.Lock()  # 模型加载/卸载锁
+_auto_unload_thread = None  # 自动卸载线程
+_auto_unload_running = False  # 线程运行标志
+
+def _update_last_use_time():
+    """更新最后使用时间"""
+    global _last_use_time
+    _last_use_time = time.time()
+
+def _auto_unload_worker():
+    """自动卸载工作线程"""
+    global _auto_unload_running
+    
+    config = get_config()
+    timeout = config['auto_unload_timeout']
+    check_interval = config['auto_unload_check_interval']
+    
+    logger.debug(f"Auto-unload thread started (timeout: {timeout}s)")
+    
+    while _auto_unload_running:
+        time.sleep(check_interval)
+        
+        if not _auto_unload_running:
+            break
+        
+        with _model_lock:
+            if ocr_model is not None and _last_use_time > 0:
+                idle_time = time.time() - _last_use_time
+                if idle_time >= timeout:
+                    logger.info(f"OCR model idle {idle_time:.0f}s, unloading...")
+                    _do_unload_model()
+    
+    logger.debug("Auto-unload thread stopped")
+
+def _start_auto_unload_thread():
+    """启动自动卸载线程"""
+    global _auto_unload_thread, _auto_unload_running
+    
+    if _auto_unload_thread is not None and _auto_unload_thread.is_alive():
+        return  # 已在运行
+    
+    _auto_unload_running = True
+    _auto_unload_thread = threading.Thread(target=_auto_unload_worker, daemon=True)
+    _auto_unload_thread.start()
+
+def _do_unload_model():
+    """执行模型卸载（内部函数，不加锁）"""
+    global ocr_model, ocr_tokenizer, _last_use_time
+    
+    if ocr_model is None:
+        return False
+    
+    try:
+        # 删除模型引用
+        del ocr_model
+        ocr_model = None
+        
+        # 删除 tokenizer 引用
+        del ocr_tokenizer
+        ocr_tokenizer = None
+        
+        # 重置使用时间
+        _last_use_time = 0
+        
+        # 强制清理 CUDA 缓存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
+        
+        logger.info("OCR model unloaded")
+        return True
+    except Exception as e:
+        logger.error(f"Model unload failed: {e}")
+        return False
+
+def unload_model():
+    """卸载模型，释放显存（外部调用，带锁）"""
+    with _model_lock:
+        if ocr_model is None:
+            return False
+        return _do_unload_model()
+
 # PDF 支持
 try:
     from pdf2image import convert_from_path
     PDF_SUPPORT = True
-    logger.info("✓ PDF 支持已启用")
+    logger.debug("PDF support enabled")
 except ImportError:
     PDF_SUPPORT = False
-    logger.warning("✗ PDF 支持未启用 (需要安装 pdf2image 和 poppler-utils)")
+    logger.debug("PDF support disabled")
 
 # =============================================================================
 # OCR 功能模板定义
@@ -113,11 +209,14 @@ RESOLUTION_MODES = {
 # =============================================================================
 
 def load_model():
-    """加载 DeepSeek-OCR 模型"""
+    """加载 DeepSeek-OCR 模型（按需加载，空闲自动释放）"""
     global ocr_model, ocr_tokenizer
     
-    if ocr_model is not None and ocr_tokenizer is not None:
-        return ocr_model, ocr_tokenizer
+    with _model_lock:
+        # 如果模型已加载，直接返回
+        if ocr_model is not None and ocr_tokenizer is not None:
+            _update_last_use_time()
+            return ocr_model, ocr_tokenizer
     
     config = get_config()
     model_path = config['model_path']
@@ -173,13 +272,16 @@ def load_model():
             )
             ocr_model = ocr_model.eval()
         
-        logger.info("✓ DeepSeek-OCR 模型加载完成")
-        logger.info("=" * 70)
+        logger.info(f"OCR model loaded ({device})")
+        
+        # 更新最后使用时间并启动自动卸载线程
+        _update_last_use_time()
+        _start_auto_unload_thread()
         
         return ocr_model, ocr_tokenizer
         
     except Exception as e:
-        logger.error(f"✗ 模型加载失败: {e}", exc_info=True)
+        logger.error(f"Model load failed: {e}")
         raise
 
 # =============================================================================
@@ -189,8 +291,6 @@ def load_model():
 def convert_office_to_pdf(input_path: str, output_dir: str) -> str:
     """将 Office 文档转换为 PDF"""
     import subprocess
-    
-    logger.info(f"转换 Office 文档为 PDF: {input_path}")
     
     try:
         subprocess.run(['libreoffice', '--version'], capture_output=True, check=True, timeout=5)
@@ -325,9 +425,6 @@ def process_image(
         output_dir = os.path.join(config['output_folder'], datetime.now().strftime('%Y%m%d_%H%M%S'))
     os.makedirs(output_dir, exist_ok=True)
     
-    logger.info(f"处理图片: {Path(image_path).name}")
-    logger.info(f"  功能: {function_config['name']}, 分辨率: {resolution_mode}")
-    
     custom_streamer = None
     if stream_callback:
         custom_streamer = CallbackTextStreamer(tokenizer, callback=stream_callback, skip_prompt=True)
@@ -356,14 +453,47 @@ def process_image(
         if len(unique_words) < len(words) * 0.15:
             result = result[:500] + "\n\n[检测到重复内容，已自动截断]"
     
+    # 更新最后使用时间（重置空闲计时器）
+    _update_last_use_time()
+    
+    # 清理 CUDA 缓存
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+        import gc
+        gc.collect()
     
     return result
 
 # =============================================================================
 # API 路由
 # =============================================================================
+
+@ocr_bp.route('/unload', methods=['POST'])
+def unload_model_endpoint():
+    """卸载模型，释放显存"""
+    try:
+        success = unload_model()
+        if success:
+            # 获取释放后的显存状态
+            gpu_info = None
+            if torch.cuda.is_available():
+                gpu_info = {
+                    'memory_allocated': f"{torch.cuda.memory_allocated(0) / 1024**3:.2f} GB",
+                    'memory_reserved': f"{torch.cuda.memory_reserved(0) / 1024**3:.2f} GB"
+                }
+            return jsonify({
+                'success': True,
+                'message': '模型已卸载，显存已释放',
+                'gpu_info': gpu_info
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'message': '模型未加载，无需卸载'
+            })
+    except Exception as e:
+        logger.error(f"Unload failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @ocr_bp.route('/health', methods=['GET'])
 def health_check():
@@ -380,6 +510,17 @@ def health_check():
                 'memory_allocated': f"{torch.cuda.memory_allocated(0) / 1024**3:.2f} GB"
             }
         
+        # 自动卸载状态
+        auto_unload_info = {
+            'enabled': True,
+            'timeout_seconds': config['auto_unload_timeout'],
+            'check_interval_seconds': config['auto_unload_check_interval']
+        }
+        if ocr_model is not None and _last_use_time > 0:
+            idle_seconds = int(time.time() - _last_use_time)
+            auto_unload_info['idle_seconds'] = idle_seconds
+            auto_unload_info['will_unload_in'] = max(0, config['auto_unload_timeout'] - idle_seconds)
+        
         return jsonify({
             'status': 'ok',
             'service': 'DeepSeek-OCR',
@@ -387,7 +528,8 @@ def health_check():
             'device': device,
             'gpu_info': gpu_info,
             'pdf_support': PDF_SUPPORT,
-            'model_path': config['model_path']
+            'model_path': config['model_path'],
+            'auto_unload': auto_unload_info
         })
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
@@ -439,8 +581,6 @@ def upload_file():
         upload_path = os.path.join(config['upload_folder'], filename)
         file.save(upload_path)
         
-        logger.info(f"✓ 文件上传成功: {filename}")
-        
         return jsonify({
             'success': True,
             'filename': filename,
@@ -449,7 +589,7 @@ def upload_file():
             'size': os.path.getsize(upload_path)
         })
     except Exception as e:
-        logger.error(f"文件上传失败: {e}")
+        logger.error(f"Upload failed: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @ocr_bp.route('/process', methods=['POST'])
@@ -498,8 +638,6 @@ def process_file():
             return jsonify({'error': f'不支持的功能: {function_type}'}), 400
         if resolution_mode not in RESOLUTION_MODES:
             return jsonify({'error': f'不支持的分辨率: {resolution_mode}'}), 400
-        
-        logger.info(f"处理请求: {filename}, 功能: {OCR_FUNCTIONS[function_type]['name']}")
         
         try:
             file_ext = Path(filename).suffix.lower()
@@ -553,7 +691,7 @@ def process_file():
                 cleanup_files([], dirs_to_cleanup)
     
     except Exception as e:
-        logger.error(f"处理失败: {e}", exc_info=True)
+        logger.error(f"Process failed: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @ocr_bp.route('/process/stream', methods=['POST'])
@@ -701,7 +839,7 @@ def process_file_stream():
                 yield f"data: {json.dumps({'type': 'done', 'metadata': metadata})}\n\n"
         
         except Exception as e:
-            logger.error(f"流式处理失败: {e}", exc_info=True)
+            logger.error(f"Stream failed: {e}")
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
         finally:
             if dirs_to_cleanup:
@@ -718,9 +856,6 @@ def process_file_stream():
 
 def init_ocr_service(preload_model: bool = False):
     """初始化 OCR 服务"""
-    logger.info("初始化 OCR 服务模块...")
-    
-    # 确保目录存在
     config = get_config()
     os.makedirs(config['upload_folder'], exist_ok=True)
     os.makedirs(config['output_folder'], exist_ok=True)
@@ -728,6 +863,5 @@ def init_ocr_service(preload_model: bool = False):
     if preload_model:
         try:
             load_model()
-            logger.info("✓ OCR 模型预加载完成")
         except Exception as e:
-            logger.warning(f"OCR 模型预加载失败: {e}")
+            logger.warning(f"OCR preload failed: {e}")

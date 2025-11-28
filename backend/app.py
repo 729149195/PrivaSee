@@ -68,18 +68,16 @@ def create_app(enable_ocr: bool = True, enable_whisper: bool = True):
             from services.ocr_service import ocr_bp, init_ocr_service
             app.register_blueprint(ocr_bp)
             enabled_services.append('OCR')
-            logger.info("✓ OCR 服务模块已注册 (/api/ocr/*)")
         except ImportError as e:
-            logger.warning(f"OCR 服务模块导入失败: {e}")
+            logger.warning(f"OCR import failed: {e}")
     
     if enable_whisper:
         try:
             from services.whisper_service import whisper_bp, init_whisper_service
             app.register_blueprint(whisper_bp)
             enabled_services.append('Whisper')
-            logger.info("✓ Whisper 服务模块已注册 (/api/whisper/*)")
         except ImportError as e:
-            logger.warning(f"Whisper 服务模块导入失败: {e}")
+            logger.warning(f"Whisper import failed: {e}")
     
     # =============================================================================
     # 通用 API 路由
@@ -120,7 +118,8 @@ def create_app(enable_ocr: bool = True, enable_whisper: bool = True):
                     'resolutions': '/api/ocr/resolutions',
                     'upload': '/api/ocr/upload',
                     'process': '/api/ocr/process',
-                    'process_stream': '/api/ocr/process/stream'
+                    'process_stream': '/api/ocr/process/stream',
+                    'unload': '/api/ocr/unload (POST - 卸载模型释放显存)'
                 }
             })
         
@@ -169,10 +168,6 @@ def main():
     
     args = parser.parse_args()
     
-    logger.info("=" * 70)
-    logger.info("  PrivaSee 统一后端服务")
-    logger.info("=" * 70)
-    
     # 创建应用
     app = create_app(
         enable_ocr=not args.no_ocr,
@@ -181,28 +176,22 @@ def main():
     
     # 预加载模型
     if args.preload:
-        logger.info("预加载模型...")
-        
         if not args.no_ocr:
             try:
                 from services.ocr_service import init_ocr_service
                 init_ocr_service(preload_model=True)
             except Exception as e:
-                logger.warning(f"OCR 模型预加载失败: {e}")
+                logger.warning(f"OCR preload failed: {e}")
         
         if not args.no_whisper:
             try:
                 from services.whisper_service import init_whisper_service
                 init_whisper_service(preload_model=True)
             except Exception as e:
-                logger.warning(f"Whisper 模型预加载失败: {e}")
+                logger.warning(f"Whisper preload failed: {e}")
     
     # 启动服务
-    logger.info("=" * 70)
-    logger.info(f"监听地址: http://{args.host}:{args.port}")
-    logger.info("API 文档: /api/services")
-    logger.info("健康检查: /api/health")
-    logger.info("=" * 70)
+    logger.info(f"PrivaSee Backend running at http://{args.host}:{args.port}")
     
     app.run(
         host=args.host,

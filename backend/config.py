@@ -42,6 +42,10 @@ MODELS_DIR = PROJECT_ROOT / 'models'
 # DeepSeek-OCR 模型路径
 DEEPSEEK_OCR_MODEL_PATH = MODELS_DIR / 'deepseek-ocr'
 
+# OCR 模型自动卸载配置（空闲时自动释放显存）
+OCR_AUTO_UNLOAD_TIMEOUT = 30  # 空闲超时时间（秒），默认 5 分钟后自动卸载
+OCR_AUTO_UNLOAD_CHECK_INTERVAL = 30  # 检查间隔（秒）
+
 # Whisper 模型配置
 WHISPER_MODEL_SIZE = 'base'  # 可选: tiny, base, small, medium, large
 
