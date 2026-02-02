@@ -18,7 +18,6 @@ import { buildInfonIndex } from '../utils/infonUtils'
 // 导入提取的组件
 import InfonLegend from './agent/InfonLegend'
 import ImagePreviewModal from './agent/ImagePreviewModal'
-import InfonRunCard from './agent/InfonRunCard'
 import ChatSessionItem from './agent/ChatSessionItem'
 import ModelPickerToolbar from './agent/ModelPickerToolbar'
 import MessageBubble from './agent/MessageBubble'
@@ -1021,19 +1020,6 @@ export default function AgentPage() {
                   <Timeline onTimeSelect={setSelectedTime} />
                   {/* 信息元词云可视化（中文注释） */}
                   <WordCloud selectedTime={selectedTime} />
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 8, paddingLeft: 4 }}>
-                      Infons Results
-                    </div>
-                    <div className={styles.infonRuns}>
-                      {(() => {
-                        const runs = (infonSessions?.[currentSession?.id]?.runs) || []
-                        if (!runs.length) return <div className={styles.infonEmpty}>No infons yet</div>
-                        const sorted = [...runs].sort((a, b) => b.createdAt - a.createdAt)
-                        return sorted.map((r) => <InfonRunCard key={r.id} run={r} />)
-                      })()}
-                    </div>
-                  </div>
                 </div>
               </div>
             </Splitter.Panel>

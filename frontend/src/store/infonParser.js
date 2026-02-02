@@ -17,11 +17,12 @@ export async function incrementalExtractInfons(streamText, parser) {
   
   // Auto-detect format on first call
   if (!parser || !parser.formatDetected) {
-    // Look for compact format patterns:
-    // 1. Old format with header: infons[N]:
-    // 2. New format without header: starts with desc:/scen:/rel:
+    // Look for compact format patterns (宽松匹配):
+    // 1. Header: infons[N]:
+    // 2. CSV lines: desc:xxx,DESC,... or similar
+    // 3. Any line containing desc:/scen:/rel: followed by comma
     const compactHeaderMatch = text.match(/infons\[\d+\]:/)
-    const compactDataMatch = text.match(/^\s*(desc|scen|rel):[^\n]+,/)
+    const compactDataMatch = text.match(/(^|\n)\s*[-*\d.)\s]*(desc|scen|rel):\w+,/im)
     const compactMatch = compactHeaderMatch || compactDataMatch
     
     // Look for JSON format
@@ -30,28 +31,32 @@ export async function incrementalExtractInfons(streamText, parser) {
     // Determine format based on which appears first
     let useCompact = false
     if (compactMatch && jsonMatch) {
-      useCompact = compactMatch.index < jsonMatch.index
+      const compactIdx = compactMatch.index || 0
+      const jsonIdx = jsonMatch.index || 0
+      useCompact = compactIdx < jsonIdx
     } else if (compactMatch) {
       useCompact = true
     } else if (jsonMatch) {
       useCompact = false
     } else {
-      // No format detected yet, keep old state if exists
-      if (parser) return { state: parser, yielded: [] }
-      
-      // Initialize with default (try compact first)
-      useCompact = true
+      // 更宽松的检测：任何包含 desc: 或 scen: 或 rel: 的内容
+      const looseMatch = text.match(/(desc|scen|rel):/i)
+      if (looseMatch) {
+        useCompact = true
+      } else if (text.length > 100) {
+        // 内容足够多但没检测到格式，默认使用 compact
+        useCompact = true
+      } else {
+        // 内容太少，等待更多
+        return { state: parser || { formatDetected: false }, yielded: [] }
+      }
     }
     
     // Initialize parser state with format info
-    if (!parser) {
-      parser = {
-        formatDetected: true,
-        isCompact: useCompact
-      }
-    } else {
-      parser.formatDetected = true
-      parser.isCompact = useCompact
+    parser = {
+      ...(parser || {}),
+      formatDetected: true,
+      isCompact: useCompact
     }
   }
   
