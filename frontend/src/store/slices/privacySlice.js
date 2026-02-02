@@ -8,6 +8,7 @@ export const createPrivacySlice = (set, get) => ({
   // 状态
   privacyInferences: {},
   privacyParsers: {},
+  privacyIdMaps: {},  // Store ID maps for resolving L1/I1 -> actual names
 
   // 启动隐私推理
   async startPrivacyInference() {
@@ -44,7 +45,29 @@ export const createPrivacySlice = (set, get) => ({
       const maxTokens = isOmni ? 2000 : 4096
       
       const { fillPromptTemplate } = await import('../../templates/inference.js')
-      const prompt = fillPromptTemplate(allInfons, selectedLaw.data, null, [])
+      const { prompt, lawIdMap, infonIdMap, isEmpty, emptyReason } = fillPromptTemplate(allInfons, selectedLaw.data)
+      
+      // 如果没有可用的隐私类别或信息元，提前返回
+      if (isEmpty) {
+        set(s => ({
+          privacyInferences: {
+            ...s.privacyInferences,
+            [session.id]: { 
+              status: 'done', 
+              risks: [], 
+              buffer: '', 
+              emptyReason,
+              lawKey: selectedLaw.key, 
+              createdAt: Date.now(), 
+              updatedAt: Date.now() 
+            }
+          }
+        }))
+        return
+      }
+      
+      // Store ID maps for resolving risk IDs later
+      set(s => ({ privacyIdMaps: { ...s.privacyIdMaps, [session.id]: { lawIdMap, infonIdMap } } }))
       
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
@@ -63,16 +86,22 @@ export const createPrivacySlice = (set, get) => ({
       
       const performParsing = async () => {
         let cleanedBuffer = buffer.replace(/<think>[\s\S]*?<\/think>/gi, '')
-        const { incrementalExtractRisks } = await import('../../templates/inference.js')
+        const { incrementalExtractRisks, resolveRiskIds } = await import('../../templates/inference.js')
         const parserState = get().privacyParsers?.[session.id] || null
         const { state: newState, yielded } = incrementalExtractRisks(cleanedBuffer, parserState)
         
         set(s => ({ privacyParsers: { ...s.privacyParsers, [session.id]: newState } }))
         
         if (yielded?.length > 0) {
+          // Resolve IDs to actual names using stored maps
+          const idMaps = get().privacyIdMaps?.[session.id]
+          const resolvedRisks = yielded.map(risk => 
+            idMaps ? resolveRiskIds(risk, idMaps.lawIdMap, idMaps.infonIdMap) : risk
+          )
+          
           set(s => {
             const currentRisks = s.privacyInferences?.[session.id]?.risks || []
-            const updatedRisks = mergeRisks(currentRisks, yielded)
+            const updatedRisks = mergeRisks(currentRisks, resolvedRisks)
             return { privacyInferences: { ...s.privacyInferences, [session.id]: { ...s.privacyInferences[session.id], status: 'running', risks: updatedRisks, buffer, updatedAt: Date.now() } } }
           })
         }

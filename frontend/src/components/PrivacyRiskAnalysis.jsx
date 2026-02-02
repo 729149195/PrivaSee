@@ -138,71 +138,80 @@ function RiskCard({ risk, idx, infonMap }) {
   const usedIids = Array.isArray(usedInfons) ? usedInfons.map(x => (typeof x === 'string' ? x : x?.iid)).filter(Boolean) : []
   const relatedInfons = usedIids.map(iid => infonMap.get(iid)).filter(Boolean)
   
+  // 获取边框颜色
+  const borderColor = riskLevel === 'HIGH' ? '#ef4444' : riskLevel === 'MEDIUM' ? '#f59e0b' : riskLevel === 'LOW' ? '#10b981' : '#94a3b8'
+  
   return (
     <div 
       key={uniqueKey}
       className={styles.riskItem}
       style={{ 
-        flex: '0 0 calc(50% - 3px)',
-        padding: 12, 
-        borderRadius: 8, 
+        flex: '1 1 180px',
+        minWidth: 160,
+        maxWidth: 280,
+        padding: '8px 10px', 
+        borderRadius: 6, 
         background: 'var(--color-bg-tertiary)',
-        border: `1px solid ${riskLevel === 'HIGH' ? '#ef4444' : riskLevel === 'MEDIUM' ? '#f59e0b' : riskLevel === 'LOW' ? '#10b981' : '#94a3b8'}`,
+        border: '1px solid var(--color-border-light)',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
         opacity: isPartial ? 0.85 : 1,
         transition: 'opacity 0.3s ease'
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+      {/* 标题行：风险等级 + 法律类别名称 */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 4 }}>
         <span style={{ 
-          fontSize: 10, 
+          fontSize: 9, 
           fontWeight: 700, 
-          padding: '2px 6px', 
-          borderRadius: 4,
-          background: riskLevel === 'HIGH' ? '#ef4444' : riskLevel === 'MEDIUM' ? '#f59e0b' : riskLevel === 'LOW' ? '#10b981' : '#94a3b8',
-          color: '#fff'
+          padding: '1px 5px', 
+          borderRadius: 3,
+          background: borderColor,
+          color: '#fff',
+          flexShrink: 0,
+          lineHeight: '14px'
         }}>
           {riskLevel}
         </span>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+        <span style={{ 
+          fontSize: 11, 
+          fontWeight: 600, 
+          color: 'var(--color-text-secondary)',
+          lineHeight: '14px',
+          wordBreak: 'break-word'
+        }}>
           {lawNodeName}
         </span>
         {isPartial && (
-          <span style={{ 
-            fontSize: 10, 
-            color: 'var(--color-accent-primary)', 
-            fontStyle: 'italic',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4
-          }}>
-            <span className={styles.analyzingDot} style={{ width: 4, height: 4 }}></span>
-            streaming...
-          </span>
+          <span className={styles.analyzingDot} style={{ width: 4, height: 4, flexShrink: 0, marginTop: 5 }}></span>
         )}
       </div>
+      
+      {/* 中文说明 */}
       {(privacyExposure || (isPartial && !risk.privacy_exposure)) && (
         <div style={{ 
-          fontSize: 11, 
-          color: 'var(--color-text-primary)', 
-          marginBottom: 6,
+          fontSize: 10, 
+          color: 'var(--color-text-tertiary)', 
+          marginBottom: 4,
           fontStyle: isPartial && !risk.privacy_exposure ? 'italic' : 'normal',
-          minHeight: '1.5em'
+          lineHeight: 1.3
         }}>
           {privacyExposure || 'Analyzing...'}
         </div>
       )}
+      
+      {/* 推理链（更紧凑） */}
       {(inferenceChain || (isPartial && !risk.inference_chain)) && (
         <div style={{ 
-          fontSize: 10, 
+          fontSize: 9, 
           color: 'var(--color-text-tertiary)', 
-          marginBottom: 6,
+          marginBottom: 4,
           fontStyle: isPartial && !risk.inference_chain ? 'italic' : 'normal',
-          minHeight: '1.5em'
+          lineHeight: 1.3
         }}>
           {inferenceChain ? (
             inferenceChainSegments.length > 0 ? (
               inferenceChainSegments.map((segment, segIdx) => (
-                <div key={segIdx} style={{ marginBottom: segIdx < inferenceChainSegments.length - 1 ? 4 : 0 }}>
+                <div key={segIdx} style={{ marginBottom: segIdx < inferenceChainSegments.length - 1 ? 2 : 0 }}>
                   {segment}
                 </div>
               ))
@@ -210,18 +219,18 @@ function RiskCard({ risk, idx, infonMap }) {
               inferenceChain
             )
           ) : (
-            'Streaming reasoning...'
+            'Streaming...'
           )}
         </div>
       )}
       
-      {/* 相关信息元列表 */}
+      {/* 相关信息元列表 - 更紧凑 */}
       {relatedInfons.length > 0 && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--color-border-light)' }}>
-          <div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 4, fontWeight: 600 }}>
+        <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px dashed var(--color-border-light)' }}>
+          <div style={{ fontSize: 9, color: 'var(--color-text-tertiary)', marginBottom: 3 }}>
             Related Infons ({relatedInfons.length})
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
             {relatedInfons.map((infon, infonIdx) => {
               const keyword = getInfonKeyword(infon)
               const color = getInfonColor(infon.infon_type)
@@ -239,15 +248,18 @@ function RiskCard({ risk, idx, infonMap }) {
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    padding: '4px 8px',
-                    borderRadius: isRelation ? 8 : 4,
-                    background: isRelation ? 'rgba(255, 255, 255, 0.95)' : `${color}26`,
+                    padding: '2px 5px',
+                    borderRadius: isRelation ? 6 : 3,
+                    background: isRelation ? 'rgba(255, 255, 255, 0.95)' : `${color}15`,
                     border: `1px solid ${color}`,
                     borderStyle: isRelation ? 'dashed' : 'solid',
-                    fontSize: 9,
-                    fontWeight: isRelation ? 700 : 600,
+                    fontSize: 8,
+                    fontWeight: 600,
                     color: color,
-                    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
+                    maxWidth: '100%',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
                   }}
                 >
                   {keyword}
@@ -341,28 +353,56 @@ export default function PrivacyRiskAnalysis({
       </div>
       <div className={styles.wordCloudRoot}>
       
-      {inference && inference.risks && inference.risks.length > 0 ? (
-        <details className={styles.wordCloudDetails} open={inference.status === 'running' || inference.status === 'done'}>
-          <summary className={styles.wordCloudDetailsSummary}>
-            Inference Results ({inference.risks.length} risk{inference.risks.length > 1 ? 's' : ''})
-            {inference.status === 'running' && (
-              <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--color-accent-primary)' }}>
-                (streaming...)
-              </span>
-            )}
-          </summary>
-          <div className={styles.wordCloudDetailsContent} style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {inference.risks.map((risk, idx) => (
-              <RiskCard
-                key={risk._objIndex ?? idx}
-                risk={risk}
-                idx={idx}
-                infonMap={infonMap}
-              />
-            ))}
-          </div>
-        </details>
-      ) : inference?.status === 'running' ? (
+      {inference && inference.risks && inference.risks.length > 0 ? (() => {
+        // 过滤掉无效的风险项：
+        // 1. reason 包含"未提及"或"not mentioned"
+        // 2. risk_level 无效（空或不是 HIGH/MEDIUM/LOW）
+        // 3. 没有关联的 infon
+        const validRisks = inference.risks.filter(risk => {
+          const reason = (risk.inference_chain || risk.reason || '').toLowerCase()
+          const level = (risk.risk_level || '').toUpperCase()
+          const hasValidLevel = ['HIGH', 'MEDIUM', 'LOW'].includes(level)
+          const hasInvalidReason = reason.includes('未提及') || reason.includes('not mentioned') || reason.includes('无相关')
+          const hasInfons = Array.isArray(risk.used_infons) && risk.used_infons.length > 0
+          
+          return hasValidLevel && !hasInvalidReason && hasInfons
+        })
+        
+        if (validRisks.length === 0) {
+          return (
+            <div className={styles.infonEmpty} style={{ padding: 12, textAlign: 'center' }}>
+              No matching privacy risks found
+            </div>
+          )
+        }
+        
+        return (
+          <details className={styles.wordCloudDetails} open={inference.status === 'running' || inference.status === 'done'}>
+            <summary className={styles.wordCloudDetailsSummary}>
+              Inference Results ({validRisks.length} risk{validRisks.length > 1 ? 's' : ''})
+              {inference.status === 'running' && (
+                <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--color-accent-primary)' }}>
+                  (streaming...)
+                </span>
+              )}
+            </summary>
+            <div className={styles.wordCloudDetailsContent} style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', 
+              gap: 6 
+            }}>
+              {validRisks.map((risk, idx) => (
+                <RiskCard
+                  key={risk._objIndex ?? idx}
+                  risk={risk}
+                  idx={idx}
+                  infonMap={infonMap}
+                />
+              ))}
+            </div>
+          </details>
+        )
+      })() : inference?.status === 'running' ? (
         <div style={{ padding: 20, fontSize: 11, color: 'var(--color-text-tertiary)', textAlign: 'center' }}>
           <div style={{ marginBottom: 8, fontWeight: 600, color: 'var(--color-accent-primary)' }}>
             Analyzing privacy risks...
