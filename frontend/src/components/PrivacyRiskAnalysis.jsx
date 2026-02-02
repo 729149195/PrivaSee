@@ -107,7 +107,7 @@ function parseInferenceChain(text) {
 /**
  * 单个风险卡片组件 - 带打字机效果
  */
-function RiskCard({ risk, idx, inferenceMode, infonMap }) {
+function RiskCard({ risk, idx, infonMap }) {
   const isPartial = risk._isComplete === false
   const isComplete = risk._isComplete !== false
   const uniqueKey = risk._objIndex ?? idx
@@ -134,16 +134,9 @@ function RiskCard({ risk, idx, inferenceMode, infonMap }) {
     [inferenceChain]
   )
   
-  // 区分两种模式的 used_infons 格式
-  let relatedInfons = []
-  let textSnippets = []
-  
-  if (inferenceMode === 'direct') {
-    textSnippets = Array.isArray(usedInfons) ? usedInfons.filter(x => typeof x === 'string' && x.trim()) : []
-  } else {
-    const usedIids = Array.isArray(usedInfons) ? usedInfons.map(x => (typeof x === 'string' ? x : x?.iid)).filter(Boolean) : []
-    relatedInfons = usedIids.map(iid => infonMap.get(iid)).filter(Boolean)
-  }
+  // 获取关联的信息元
+  const usedIids = Array.isArray(usedInfons) ? usedInfons.map(x => (typeof x === 'string' ? x : x?.iid)).filter(Boolean) : []
+  const relatedInfons = usedIids.map(iid => infonMap.get(iid)).filter(Boolean)
   
   return (
     <div 
@@ -222,74 +215,45 @@ function RiskCard({ risk, idx, inferenceMode, infonMap }) {
         </div>
       )}
       
-      {/* 相关信息元/文本片段列表 */}
-      {(relatedInfons.length > 0 || textSnippets.length > 0) && (
+      {/* 相关信息元列表 */}
+      {relatedInfons.length > 0 && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--color-border-light)' }}>
           <div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginBottom: 4, fontWeight: 600 }}>
-            {inferenceMode === 'direct' ? `Related Text (${textSnippets.length})` : `Related Infons (${relatedInfons.length})`}
+            Related Infons ({relatedInfons.length})
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {inferenceMode === 'direct' ? (
-              // 直接推断模式：显示文本片段
-              textSnippets.map((snippet, snippetIdx) => (
+            {relatedInfons.map((infon, infonIdx) => {
+              const keyword = getInfonKeyword(infon)
+              const color = getInfonColor(infon.infon_type)
+              const infonType = String(infon.infon_type || '').toUpperCase()
+              const isRelation = infonType === 'REL'
+              
+              // 过滤掉 SIT 类型
+              if (infonType === 'SIT') {
+                return null
+              }
+              
+              return (
                 <div
-                  key={snippetIdx}
+                  key={infon.iid || infonIdx}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
                     padding: '4px 8px',
-                    borderRadius: 4,
-                    background: '#3b82f626',
-                    border: '1px solid #3b82f6',
+                    borderRadius: isRelation ? 8 : 4,
+                    background: isRelation ? 'rgba(255, 255, 255, 0.95)' : `${color}26`,
+                    border: `1px solid ${color}`,
+                    borderStyle: isRelation ? 'dashed' : 'solid',
                     fontSize: 9,
-                    fontWeight: 500,
-                    color: '#3b82f6',
-                    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
-                    maxWidth: '200px',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
+                    fontWeight: isRelation ? 700 : 600,
+                    color: color,
+                    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
                   }}
-                  title={snippet}
                 >
-                  {snippet}
+                  {keyword}
                 </div>
-              ))
-            ) : (
-              // 提取信息元模式：显示信息元
-              relatedInfons.map((infon, infonIdx) => {
-                const keyword = getInfonKeyword(infon)
-                const color = getInfonColor(infon.infon_type)
-                const infonType = String(infon.infon_type || '').toUpperCase()
-                const isRelation = infonType === 'REL'
-                
-                // 过滤掉 SIT 类型
-                if (infonType === 'SIT') {
-                  return null
-                }
-                
-                return (
-                  <div
-                    key={infon.iid || infonIdx}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      padding: '4px 8px',
-                      borderRadius: isRelation ? 8 : 4,
-                      background: isRelation ? 'rgba(255, 255, 255, 0.95)' : `${color}26`,
-                      border: `1px solid ${color}`,
-                      borderStyle: isRelation ? 'dashed' : 'solid',
-                      fontSize: 9,
-                      fontWeight: isRelation ? 700 : 600,
-                      color: color,
-                      boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
-                    }}
-                  >
-                    {keyword}
-                  </div>
-                )
-              })
-            )}
+              )
+            })}
           </div>
         </div>
       )}
@@ -332,7 +296,7 @@ export default function PrivacyRiskAnalysis({
   inference, 
   selectedLaw
 }) {
-  const { getCurrentSession, infonSessions, inferenceMode } = useStore()
+  const { getCurrentSession, infonSessions } = useStore()
   const session = getCurrentSession()
   
   // 获取所有信息元映射（中文注释）
@@ -393,7 +357,6 @@ export default function PrivacyRiskAnalysis({
                 key={risk._objIndex ?? idx}
                 risk={risk}
                 idx={idx}
-                inferenceMode={inferenceMode}
                 infonMap={infonMap}
               />
             ))}

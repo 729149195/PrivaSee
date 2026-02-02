@@ -2,23 +2,11 @@
 // 为每个登录用户单独保存会话历史和信息元数据
 
 // 保存用户的所有会话数据
-export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, conversationModel, directInferenceModel, infonExtractionModel, infonPrivacyInferenceModel, imageParsingModel, protectionSuggestionModel, inferenceMode, sessionKeywords, autoPrivacyInference) {
+export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, conversationModel, infonExtractionModel, infonPrivacyInferenceModel, imageParsingModel, protectionSuggestionModel, autoPrivacyInference) {
   if (!userId) return
   
   try {
     const key = `privasee_history_${userId}`
-    
-    // 将sessionKeywords中的Set转换为数组以便JSON序列化
-    const serializedKeywords = {}
-    if (sessionKeywords && typeof sessionKeywords === 'object') {
-      Object.entries(sessionKeywords).forEach(([sessionId, keywordSet]) => {
-        if (keywordSet instanceof Set) {
-          serializedKeywords[sessionId] = Array.from(keywordSet)
-        } else if (Array.isArray(keywordSet)) {
-          serializedKeywords[sessionId] = keywordSet
-        }
-      })
-    }
     
     const data = {
       sessions: sessions || [],
@@ -29,19 +17,16 @@ export function saveUserSessions(userId, sessions, infonSessions, privacyInferen
       selectedPrivacyItems: selectedPrivacyItems || [],
       // 模型配置
       conversationModel: conversationModel || 'deepseek-chat',
-      directInferenceModel: directInferenceModel || 'deepseek-chat',
       infonExtractionModel: infonExtractionModel || 'deepseek-chat',
       infonPrivacyInferenceModel: infonPrivacyInferenceModel || 'deepseek-chat',
       imageParsingModel: imageParsingModel || 'gemma3:12b',
       protectionSuggestionModel: protectionSuggestionModel || 'deepseek-chat',
-      inferenceMode: inferenceMode || 'extract', // 保存推断模式
       autoPrivacyInference: autoPrivacyInference ?? true, // 保存自动隐私保护开关
-      sessionKeywords: serializedKeywords, // 保存关键词（数组格式）
       savedAt: Date.now()
     }
     
     localStorage.setItem(key, JSON.stringify(data))
-    console.log(`[PrivaSee] 已保存用户 ${userId} 的会话数据（包含 ${Object.keys(serializedKeywords).length} 个会话的关键词）`)
+    console.log(`[PrivaSee] 已保存用户 ${userId} 的会话数据`)
   } catch (error) {
     console.error('[PrivaSee] 保存会话数据失败:', error)
   }
@@ -59,17 +44,7 @@ export function loadUserSessions(userId, defaultModelsConfig = {}) {
     
     const parsed = JSON.parse(data)
     
-    // 将sessionKeywords中的数组转换回Set
-    const deserializedKeywords = {}
-    if (parsed.sessionKeywords && typeof parsed.sessionKeywords === 'object') {
-      Object.entries(parsed.sessionKeywords).forEach(([sessionId, keywordArray]) => {
-        if (Array.isArray(keywordArray)) {
-          deserializedKeywords[sessionId] = new Set(keywordArray)
-        }
-      })
-    }
-    
-    console.log(`[PrivaSee] 已加载用户 ${userId} 的会话数据（包含 ${Object.keys(deserializedKeywords).length} 个会话的关键词）`)
+    console.log(`[PrivaSee] 已加载用户 ${userId} 的会话数据`)
     
     return {
       sessions: parsed.sessions || [],
@@ -80,14 +55,11 @@ export function loadUserSessions(userId, defaultModelsConfig = {}) {
       selectedPrivacyItems: parsed.selectedPrivacyItems || [],
       // 模型配置
       conversationModel: parsed.conversationModel || defaultModelsConfig.conversationModel || 'deepseek-chat',
-      directInferenceModel: parsed.directInferenceModel || defaultModelsConfig.directInferenceModel || 'deepseek-chat',
       infonExtractionModel: parsed.infonExtractionModel || defaultModelsConfig.infonExtractionModel || 'deepseek-chat',
       infonPrivacyInferenceModel: parsed.infonPrivacyInferenceModel || defaultModelsConfig.infonPrivacyInferenceModel || 'deepseek-chat',
       imageParsingModel: parsed.imageParsingModel || defaultModelsConfig.imageParsingModel || 'gemma3:12b',
       protectionSuggestionModel: parsed.protectionSuggestionModel || defaultModelsConfig.protectionSuggestionModel || 'deepseek-chat',
-      inferenceMode: parsed.inferenceMode || defaultModelsConfig.inferenceMode || 'extract', // 加载推断模式
       autoPrivacyInference: parsed.autoPrivacyInference ?? true, // 加载自动隐私保护开关
-      sessionKeywords: deserializedKeywords, // 加载关键词（Set格式）
       savedAt: parsed.savedAt
     }
   } catch (error) {
@@ -166,13 +138,10 @@ export function importUserData(userId, file) {
           data.selectedLawIdx,
           data.selectedPrivacyItems,
           data.conversationModel,
-          data.directInferenceModel,
           data.infonExtractionModel,
           data.infonPrivacyInferenceModel,
           data.imageParsingModel,
           data.protectionSuggestionModel,
-          data.inferenceMode,
-          data.sessionKeywords || {},
           data.autoPrivacyInference
         )
         resolve(data)

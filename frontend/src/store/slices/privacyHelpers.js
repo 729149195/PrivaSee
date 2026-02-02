@@ -1,113 +1,9 @@
 /**
  * 隐私推理辅助函数
- * 提供隐私风险分析的流式解析和关键词提取逻辑
+ * 提供隐私风险分析的流式解析逻辑
  */
 
 import { tryParseJSON, extractFirstJSONObject } from '../utils.js'
-
-// ============== 直接推断模式的文本提取辅助函数 ==============
-
-/**
- * 从消息内容中提取文本（支持字符串和多模态数组）
- */
-export function extractTextFromContent(content) {
-  if (!content) return ''
-  if (typeof content === 'string') return content
-  if (Array.isArray(content)) {
-    return content
-      .filter(part => part && part.type === 'text')
-      .map(part => part.text || '')
-      .join('\n')
-  }
-  return ''
-}
-
-/**
- * 从消息中提取音频转写文本，并加上<audio></audio>标签
- */
-export function extractAudioTranscripts(message) {
-  const audios = message?.audios || []
-  return audios
-    .filter(audio => audio && audio.transcript && audio.transcript.trim())
-    .map(audio => `<audio>${audio.transcript.trim()}</audio>`)
-    .join('\n')
-}
-
-/**
- * 从消息中提取图片分析文本，并加上<img></img>标签
- */
-export function extractImageAnalysis(message) {
-  const imageAnalysisMap = message?.imageAnalysis || {}
-  const imageUrls = message?.images || []
-  return imageUrls
-    .map(url => imageAnalysisMap[url])
-    .filter(analysis => analysis && analysis.trim())
-    .map(analysis => `<img>${analysis.trim()}</img>`)
-    .join('\n')
-}
-
-/**
- * 收集直接推断模式的用户输入
- * @param {Object} params - 参数对象
- * @param {Array} params.messages - 会话消息列表
- * @param {string} params.editingMessageId - 正在编辑的消息ID
- * @param {string} params.pendingUserInput - 待发送的用户输入
- * @param {Array} params.pendingAudios - 待发送的音频列表
- * @param {Array} params.pendingImages - 待发送的图片列表
- * @returns {{ directInput: string, stats: Object }}
- */
-export function collectDirectModeInput({ messages, editingMessageId, pendingUserInput, pendingAudios, pendingImages }) {
-  const textParts = []
-  
-  // 1. 获取所有已发送的用户消息（排除正在编辑的消息）
-  const userMessages = (messages || []).filter(msg => msg.role === 'user' && msg.id !== editingMessageId)
-  userMessages.forEach(msg => {
-    const text = extractTextFromContent(msg.content)
-    const audioText = extractAudioTranscripts(msg)
-    const imageText = extractImageAnalysis(msg)
-    if (text) textParts.push(text)
-    if (audioText) textParts.push(audioText)
-    if (imageText) textParts.push(imageText)
-  })
-  
-  // 2. 获取 pending 输入
-  if (pendingUserInput && pendingUserInput.trim()) {
-    textParts.push(pendingUserInput.trim())
-  }
-  
-  // 3. 获取 pending 音频
-  (pendingAudios || []).forEach(audio => {
-    if (audio && audio.transcript && audio.transcript.trim()) {
-      textParts.push(`<audio>${audio.transcript.trim()}</audio>`)
-    }
-  })
-  
-  // 4. 获取 pending 图片
-  (pendingImages || []).forEach(image => {
-    if (image && image.analysis && image.analysis.trim()) {
-      textParts.push(`<img>${image.analysis.trim()}</img>`)
-    }
-  })
-  
-  // 统计信息
-  const audioCount = userMessages.reduce((sum, msg) => sum + (msg.audios?.length || 0), 0) + (pendingAudios?.length || 0)
-  const sentImagesWithAnalysis = userMessages.reduce((sum, msg) => {
-    const imageAnalysisMap = msg.imageAnalysis || {}
-    const images = msg.images || []
-    return sum + images.filter(url => imageAnalysisMap[url] && imageAnalysisMap[url].trim()).length
-  }, 0)
-  const imageCount = sentImagesWithAnalysis + (pendingImages?.length || 0)
-  
-  return {
-    directInput: textParts.filter(Boolean).join('\n\n'),
-    stats: {
-      messageCount: userMessages.length,
-      hasPendingInput: !!(pendingUserInput && pendingUserInput.trim()),
-      audioCount,
-      imageCount
-    }
-  }
-}
 
 /**
  * 收集提取信息元模式的信息元
@@ -287,30 +183,25 @@ export function parsePrivacyBuffer(buffer) {
 /**
  * 构建隐私推理的系统提示词
  */
-export function buildPrivacyInferencePrompt({ inferenceMode, infons, pendingContent, lawData, selectedPrivacyItems, customPrivacyItems }) {
+export function buildPrivacyInferencePrompt({ infons, lawData, selectedPrivacyItems, customPrivacyItems }) {
   const privacyCategories = selectedPrivacyItems.length > 0 
     ? [...selectedPrivacyItems, ...customPrivacyItems.map(item => item.name)]
     : ['姓名', '身份证件号码', '电话号码', '地址', '生物识别信息']
   
   const categoryList = privacyCategories.map((c, i) => `${i + 1}. ${c}`).join('\n')
   
-  let inputDescription = ''
-  if (inferenceMode === 'direct') {
-    inputDescription = `用户输入内容:\n${pendingContent}`
-  } else {
-    const infonsList = infons.map((inf, i) => {
-      const type = inf.infon_type || 'unknown'
-      if (type === 'DESC') {
-        return `[${i + 1}] ${inf.entity}: ${inf.attribute}`
-      } else if (type === 'REL') {
-        return `[${i + 1}] ${inf.relation_name}: ${(inf.arg_refs || []).join(' → ')}`
-      } else if (type === 'SCEN') {
-        return `[${i + 1}] 场景: ${inf.description || inf.spatial || inf.temporal}`
-      }
-      return `[${i + 1}] ${JSON.stringify(inf)}`
-    }).join('\n')
-    inputDescription = `提取的信息元:\n${infonsList}`
-  }
+  const infonsList = infons.map((inf, i) => {
+    const type = inf.infon_type || 'unknown'
+    if (type === 'DESC') {
+      return `[${i + 1}] ${inf.entity}: ${inf.attribute}`
+    } else if (type === 'REL') {
+      return `[${i + 1}] ${inf.relation_name}: ${(inf.arg_refs || []).join(' → ')}`
+    } else if (type === 'SCEN') {
+      return `[${i + 1}] 场景: ${inf.description || inf.spatial || inf.temporal}`
+    }
+    return `[${i + 1}] ${JSON.stringify(inf)}`
+  }).join('\n')
+  const inputDescription = `提取的信息元:\n${infonsList}`
   
   return `你是一个隐私风险分析专家。请分析以下内容中可能存在的隐私风险。
 
@@ -335,22 +226,6 @@ ${lawData ? `参考法律法规: ${lawData.name || '个人信息保护法'}` : '
 }
 
 // ============== 隐私推理状态更新辅助函数 ==============
-
-/**
- * 从 risks 中累积关键词到临时集合
- */
-export function accumulateTempKeywords(tempKeywords, risks) {
-  const keywords = tempKeywords || new Set()
-  risks.forEach(risk => {
-    const usedInfons = risk.used_infons || []
-    usedInfons.forEach(keyword => {
-      if (typeof keyword === 'string' && keyword.trim()) {
-        keywords.add(keyword.trim())
-      }
-    })
-  })
-  return keywords
-}
 
 /**
  * 合并新解析的 risks 到现有列表（基于 _objIndex 去重）

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { useStore } from '../store'
 import styles from './AgentPage.module.css'
-import { Splitter, Progress, Spin, Switch, Tooltip, Button } from 'antd'
+import { Splitter, Progress, Spin, Tooltip, Button } from 'antd'
 import { PlusOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import WordCloud from './WordCloud'
 import LawTree from './LawTree'
@@ -71,17 +71,10 @@ export default function AgentPage() {
     abortPrivacyInference,
     clearCurrentInferenceAndRestore,
     selectedLaw,
-    sessionKeywords,
     // 隐私保护建议
     protectionSuggestions,
     generateProtectionSuggestions,
     clearProtectionSuggestions,
-    // 推断模式
-    inferenceMode,
-    setInferenceMode,
-    setPendingUserInput,
-    setPendingAudios,
-    setPendingImages,
     // 自动推理开关
     autoPrivacyInference,
     setSelectedLaw,
@@ -125,7 +118,7 @@ export default function AgentPage() {
   } = useImageSelection()
   
   // 使用图片分析 Hook
-  const { processImageUpload } = useImageAnalysis(inferenceMode)
+  const { processImageUpload } = useImageAnalysis()
 
   const {
     getMessageInfons,
@@ -135,7 +128,7 @@ export default function AgentPage() {
     pendingRelations,
     pendingInfonIndex,
     renderHighlightedText
-  } = useInfonHighlight(currentSession, infonSessions, inferenceMode, privacyInferences, sessionKeywords)
+  } = useInfonHighlight(currentSession, infonSessions, privacyInferences)
 
   const {
     draggingSessionId,
@@ -181,7 +174,6 @@ export default function AgentPage() {
     startMessageInfons,
     clearAllPendingInfons,
     lastInferenceRunCountRef,
-    inferenceMode,
     startPrivacyInference
   )
 
@@ -277,7 +269,6 @@ export default function AgentPage() {
     originalEditingContent,
     originalEditingImages,
     originalEditingAudios,
-    inferenceMode,
     autoPrivacyInference,
     startPendingInfons,
     clearAllPendingInfons,
@@ -288,7 +279,6 @@ export default function AgentPage() {
   // 使用隐私推理自动触发 Hook
   usePrivacyAutoInference({
     currentSession,
-    inferenceMode,
     selectedLaw,
     input,
     landingInput,
@@ -356,23 +346,6 @@ export default function AgentPage() {
   // 获取当前会话的保护建议（中文注释）
   const suggestions = useMemo(() => (currentSession ? protectionSuggestions?.[currentSession.id] : null), [currentSession, protectionSuggestions])
 
-  // 更新pending用户输入状态（用于直接推断模式）
-  useEffect(() => {
-    if (inferenceMode === 'direct') {
-      // 如果在编辑模式，使用编辑内容；否则使用主输入框或landing输入框
-      const isEditing = editingMessageId !== null
-      let pendingText = ''
-      if (isEditing) {
-        pendingText = (editingContent || '').trim()
-      } else {
-        pendingText = hasMessages ? (input || '').trim() : (landingInput || '').trim()
-      }
-      setPendingUserInput(pendingText)
-    } else {
-      setPendingUserInput('')
-    }
-  }, [input, landingInput, hasMessages, inferenceMode, setPendingUserInput, editingMessageId, editingContent])
-
   // 拉取模型列表（中文注释）：页面挂载时
   useEffect(() => { fetchModels?.() }, [fetchModels])
 
@@ -385,64 +358,7 @@ export default function AgentPage() {
       return { locked: true, stage: 'waiting', label: 'Preparing...' }
     }
     
-    // 直接推断模式：跳过信息元相关的锁定检查
-    if (inferenceMode === 'direct') {
-      // 检查是否有图片正在处理中
-      const isEditing = editingMessageId !== null
-      const imagesToCheck = isEditing ? editingImages : selectedImages
-      const hasProcessingImages = imagesToCheck.some(img => {
-        const imgObj = typeof img === 'string' ? { status: 'done' } : img
-        return imgObj.status === 'uploading' || imgObj.status === 'analyzing'
-      })
-      
-      if (hasProcessingImages) {
-        return { locked: true, stage: 'analyzing', label: 'Processing Images...' }
-      }
-      
-      const currentInference = privacyInferences?.[currentSession.id]
-      const isInferenceRunning = currentInference?.status === 'running'
-      const hasCompletedInference = currentInference?.status === 'done'
-      
-      // 检查隐私推理状态
-      if (isInferenceRunning) {
-        return { locked: true, stage: 'analyzing', label: 'Privacy Analyzing...' }
-      }
-      
-      // 检查是否有 pending 输入但推理未完成
-      // 获取当前的 pending 输入
-      let pendingInput = ''
-      let pendingAudios = []
-      let pendingImages = []
-      
-      if (isEditing) {
-        const hasContentChanged = 
-          editingContent !== originalEditingContent || 
-          JSON.stringify(editingImages) !== JSON.stringify(originalEditingImages) ||
-          JSON.stringify(editingAudios) !== JSON.stringify(originalEditingAudios)
-        
-        if (hasContentChanged) {
-          pendingInput = (editingContent || '').trim()
-          pendingAudios = editingAudios || []
-          pendingImages = editingImages || []
-        }
-      } else {
-        pendingInput = (input || landingInput || '').trim()
-        pendingAudios = selectedAudios || []
-        pendingImages = selectedImages || []
-      }
-      
-      // 如果有 pending 输入但推理未完成，保持锁定
-      const hasPendingContent = pendingInput || pendingAudios.length > 0 || pendingImages.length > 0
-      
-      if (hasPendingContent && selectedLaw && !hasCompletedInference) {
-        return { locked: true, stage: 'waiting', label: 'Preparing...' }
-      }
-      
-      return { locked: false, stage: 'ready', label: 'Send' }
-    }
-    
-    // 提取信息元模式：完整的流程检查
-    // 首先检查是否有图片正在处理中（任何模式下都需要等待图片处理完成）
+    // 首先检查是否有图片正在处理中
     const isEditing = editingMessageId !== null
     const imagesToCheck = isEditing ? editingImages : selectedImages
     const hasProcessingImages = imagesToCheck.some(img => {
@@ -498,18 +414,9 @@ export default function AgentPage() {
     privacyInferences, 
     selectedLaw, 
     isWaitingForDebounce, 
-    inferenceMode, 
     editingMessageId, 
     editingImages, 
-    selectedImages,
-    editingContent,
-    originalEditingContent,
-    editingAudios,
-    originalEditingAudios,
-    originalEditingImages,
-    input,
-    landingInput,
-    selectedAudios
+    selectedImages
   ])
 
   const removeSelectedAudio = (index) => {
@@ -558,17 +465,6 @@ export default function AgentPage() {
     // 设置标志，防止useEffect清空pending
     isAdoptingPendingRef.current = true
     
-    // 提取图片 analysis 数据（直接推理模式）
-    const imageAnalysisMap = {}
-    if (inferenceMode === 'direct' && hasImages) {
-      selectedImages.forEach(img => {
-        const imgObj = typeof img === 'string' ? { url: img } : img
-        if (imgObj.url && imgObj.analysis) {
-          imageAnalysisMap[imgObj.url] = imgObj.analysis
-        }
-      })
-    }
-    
     // 判断是否是 OCR 模式（包括 API 和本地版本）
     const isOcrMode = model === 'deepseek-ocr' || model === 'deepseek-ocr-local'
     
@@ -584,7 +480,6 @@ export default function AgentPage() {
       setSelectedCommand(null)
       setSelectedFiles([])
       setSelectedResolution('gundam') // 重置为默认分辨率
-      useStore.getState().setPendingImages([])
       
       // 异步处理 OCR（不阻塞UI）
       const userId = await useStore.getState().sendMessageWithDeepSeekOCR(textToSend, commandsToSend, filesToSend, resolutionToSend)
@@ -597,14 +492,14 @@ export default function AgentPage() {
         }
 
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0 && inferenceMode === 'extract') {
-          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
           startMessageInfons?.(userId)
         }
       } catch (_) {}
       // 标志会在 useEffect 中检测并重置
     } else if (hasImages || hasAudios) {
-      const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios, imageAnalysisMap)
+      const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios, {})
       try {
         // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
         if (pendingRunIds.length > 0) {
@@ -614,8 +509,8 @@ export default function AgentPage() {
         }
 
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0 && inferenceMode === 'extract') {
-          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
           startMessageInfons?.(userId)
         }
       } catch (_) {}
@@ -623,8 +518,6 @@ export default function AgentPage() {
       setInput('')
       setSelectedImages([])
       setSelectedAudios([])
-      // 清空 pending 图片（直接推断模式）
-      useStore.getState().setPendingImages([])
       // 标志会在 useEffect 中检测并重置
     } else {
       const userId = await sendMessage(text, audios)
@@ -637,8 +530,8 @@ export default function AgentPage() {
         }
 
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0 && inferenceMode === 'extract') {
-          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
           startMessageInfons?.(userId)
         }
       } catch (_) {}
@@ -646,8 +539,6 @@ export default function AgentPage() {
       setInput('')
       setSelectedImages([])
       setSelectedAudios([])
-      // 清空 pending 图片（直接推断模式）
-      useStore.getState().setPendingImages([])
       // 标志会在 useEffect 中检测并重置
     }
     
@@ -694,17 +585,6 @@ export default function AgentPage() {
     // 设置标志，防止useEffect清空pending
     isAdoptingPendingRef.current = true
     
-    // 提取图片 analysis 数据（直接推理模式）
-    const imageAnalysisMap = {}
-    if (inferenceMode === 'direct' && hasImages) {
-      selectedImages.forEach(img => {
-        const imgObj = typeof img === 'string' ? { url: img } : img
-        if (imgObj.url && imgObj.analysis) {
-          imageAnalysisMap[imgObj.url] = imgObj.analysis
-        }
-      })
-    }
-    
     // 判断是否是 OCR 模式（包括 API 和本地版本）
     const isOcrMode = model === 'deepseek-ocr' || model === 'deepseek-ocr-local'
     
@@ -720,7 +600,6 @@ export default function AgentPage() {
       setSelectedCommand(null)
       setSelectedFiles([])
       setSelectedResolution('gundam') // 重置为默认分辨率
-      useStore.getState().setPendingImages([])
       
       // 异步处理 OCR（不阻塞UI）
       const userId = await useStore.getState().sendMessageWithDeepSeekOCR(textToSend, commandsToSend, filesToSend, resolutionToSend)
@@ -733,14 +612,14 @@ export default function AgentPage() {
         }
 
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0 && inferenceMode === 'extract') {
-          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
           startMessageInfons?.(userId)
         }
       } catch (_) {}
       // 标志会在 useEffect 中检测并重置
     } else if (hasImages || hasAudios) {
-      const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios, imageAnalysisMap)
+      const userId = await useStore.getState().sendMessageWithImages(text, imgs, audios, {})
       try {
         // 如果有 pending infons，先更新签名，再 adopt（避免时序问题）
         if (pendingRunIds.length > 0) {
@@ -750,8 +629,8 @@ export default function AgentPage() {
         }
         
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0 && inferenceMode === 'extract') {
-          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
           startMessageInfons?.(userId)
         }
       } catch (_) {}
@@ -759,8 +638,6 @@ export default function AgentPage() {
       setLandingInput('')
       setSelectedImages([])
       setSelectedAudios([])
-      // 清空 pending 图片（直接推断模式）
-      useStore.getState().setPendingImages([])
       // 标志会在 useEffect 中检测并重置
     } else {
       const userId = await sendMessage(text, audios)
@@ -773,8 +650,8 @@ export default function AgentPage() {
         }
         
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0 && inferenceMode === 'extract') {
-          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
           startMessageInfons?.(userId)
         }
       } catch (_) {}
@@ -782,8 +659,6 @@ export default function AgentPage() {
       setLandingInput('')
       setSelectedImages([])
       setSelectedAudios([])
-      // 清空 pending 图片（直接推断模式）
-      useStore.getState().setPendingImages([])
       // 标志会在 useEffect 中检测并重置
     }
     
@@ -941,8 +816,8 @@ export default function AgentPage() {
           />
           <Splitter className={styles.splitterRoot} key={rightPanelVisible ? 'with-panel' : 'no-panel'}>
             <Splitter.Panel style={{ overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-              {/* 信息元类型图例 - 仅在提取模式下显示 */}
-              {inferenceMode !== 'direct' && <InfonLegend />}
+              {/* 信息元类型图例 */}
+              <InfonLegend />
               
               {/* 右边栏切换按钮 */}
               {!rightPanelVisible && (
@@ -1016,7 +891,6 @@ export default function AgentPage() {
                           messageRelations={messageRelations}
                           infonIndex={infonIndex}
                           pendingHighlights={pendingHighlights}
-                          inferenceMode={inferenceMode}
                           processImageUpload={processImageUpload}
                           pendingRelations={pendingRelations}
                           pendingInfonIndex={pendingInfonIndex}
@@ -1050,7 +924,6 @@ export default function AgentPage() {
                     pendingInfonIndex={pendingInfonIndex}
                     currentModelIsMultimodal={currentModelIsMultimodal}
                     renderHighlightedText={renderHighlightedText}
-                    inferenceMode={inferenceMode}
                     processImageUpload={processImageUpload}
                     model={model}
                     selectedFiles={selectedFiles}
@@ -1087,7 +960,6 @@ export default function AgentPage() {
                   currentModelIsMultimodal={currentModelIsMultimodal}
                   isEditingMessage={editingMessageId !== null}
                   renderHighlightedText={renderHighlightedText}
-                  inferenceMode={inferenceMode}
                   processImageUpload={processImageUpload}
                   model={model}
                   selectedFiles={selectedFiles}
@@ -1105,37 +977,7 @@ export default function AgentPage() {
                 <div className={styles.rightPaneScroll}>
                   <div className={styles.rightPaneHeader}>
                     <div className={styles.rightPaneTitle} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ display: 'flex', alignItems: 'center' }}>
-                        Privacy inference
-                        {/* 推断模式开关（中文注释）：低调样式，紧贴标题右侧 */}
-                        <Tooltip title={inferenceMode === 'direct' ? '直接推断：跳过信息元提取，直接对输入进行隐私推断' : '提取信息元：先提取信息元，再基于信息元进行隐私推断'}>
-                          <div style={{ 
-                          display: 'inline-flex', 
-                          alignItems: 'center', 
-                          gap: 6, 
-                          marginLeft: 12,
-                          fontSize: 11, 
-                          color: 'var(--color-text-tertiary)',
-                          opacity: 0.7,
-                          transition: 'opacity 0.2s'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
-                        onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
-                        >
-                          <span style={{ userSelect: 'none', whiteSpace: 'nowrap' }}>
-                            {inferenceMode === 'direct' ? '直接推断' : '提取信息元'}
-                          </span>
-                          <Switch 
-                            size="small"
-                            checked={inferenceMode === 'direct'}
-                            onChange={(checked) => {
-                              const newMode = checked ? 'direct' : 'extract'
-                              setInferenceMode(newMode)
-                            }}
-                          />
-                        </div>
-                      </Tooltip>
-                      </div>
+                      <span>Privacy inference</span>
                       
                       {/* 隐藏右边栏按钮 */}
                       <Tooltip title="隐藏右边栏">
@@ -1175,28 +1017,23 @@ export default function AgentPage() {
                         : (hasMessages ? (input || '').trim().length > 0 : (landingInput || '').trim().length > 0)
                     }
                   />
-                  {/* 信息元相关组件（中文注释）：仅在提取信息元模式下显示 */}
-                  {inferenceMode === 'extract' && (
-                    <>
-                      {/* 时间线组件（中文注释）：用于按时间筛选信息元 */}
-                      <Timeline onTimeSelect={setSelectedTime} />
-                      {/* 信息元词云可视化（中文注释） */}
-                      <WordCloud selectedTime={selectedTime} />
-                      <div style={{ marginBottom: 16 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 8, paddingLeft: 4 }}>
-                          Infons Results
-                        </div>
-                        <div className={styles.infonRuns}>
-                          {(() => {
-                            const runs = (infonSessions?.[currentSession?.id]?.runs) || []
-                            if (!runs.length) return <div className={styles.infonEmpty}>No infons yet</div>
-                            const sorted = [...runs].sort((a, b) => b.createdAt - a.createdAt)
-                            return sorted.map((r) => <InfonRunCard key={r.id} run={r} />)
-                          })()}
-                        </div>
-                      </div>
-                    </>
-                  )}
+                  {/* 时间线组件（中文注释）：用于按时间筛选信息元 */}
+                  <Timeline onTimeSelect={setSelectedTime} />
+                  {/* 信息元词云可视化（中文注释） */}
+                  <WordCloud selectedTime={selectedTime} />
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 8, paddingLeft: 4 }}>
+                      Infons Results
+                    </div>
+                    <div className={styles.infonRuns}>
+                      {(() => {
+                        const runs = (infonSessions?.[currentSession?.id]?.runs) || []
+                        if (!runs.length) return <div className={styles.infonEmpty}>No infons yet</div>
+                        const sorted = [...runs].sort((a, b) => b.createdAt - a.createdAt)
+                        return sorted.map((r) => <InfonRunCard key={r.id} run={r} />)
+                      })()}
+                    </div>
+                  </div>
                 </div>
               </div>
             </Splitter.Panel>

@@ -21,7 +21,6 @@ export function useMessageHandlers(
   startMessageInfons,
   clearAllPendingInfons,
   lastInferenceRunCountRef,
-  inferenceMode,
   startPrivacyInference
 ) {
   const [editingMessageId, setEditingMessageId] = useState(null)
@@ -270,42 +269,35 @@ export function useMessageHandlers(
     // 获取当前推理结果
     const currentPrivacyInference = privacyInferences?.[session.id]
     
-    // 在提取信息元模式下清空推理结果和关键词
-    if (inferenceMode === 'extract') {
-      // 清空隐私推理结果和隐私保护建议
-      if (currentPrivacyInference) {
-        useStore.setState({
-          privacyInferences: {
-            ...privacyInferences,
-            [session.id]: {
-              status: 'idle',
-              risks: [],
-              buffer: '',
-              abortController: null,
-              createdAt: Date.now(),
-              updatedAt: Date.now()
-            }
+    // 清空推理结果和关键词
+    // 清空隐私推理结果和隐私保护建议
+    if (currentPrivacyInference) {
+      useStore.setState({
+        privacyInferences: {
+          ...privacyInferences,
+          [session.id]: {
+            status: 'idle',
+            risks: [],
+            buffer: '',
+            abortController: null,
+            createdAt: Date.now(),
+            updatedAt: Date.now()
           }
-        })
-      }
-      
-      // 清空隐私保护建议
-      const protectionSuggestions = useStore.getState().protectionSuggestions
-      if (protectionSuggestions?.[session.id]) {
-        const newSuggestions = { ...protectionSuggestions }
-        delete newSuggestions[session.id]
-        useStore.setState({ protectionSuggestions: newSuggestions })
-      }
-      
-      // 重置推理记录，以便在信息元提取完成后触发自动推理
-      lastInferenceRunCountRef.current = ''
-      console.log('[SaveEdit] 提取信息元模式：清空隐私推理结果、保护建议并重置推理记录')
-    } else {
-      // 直接推理模式：保留推理结果和高亮，只清空签名（与handleSend保持一致）
-      // 如果pending输入框有内容，会触发新的推理；否则保持当前推理结果
-      lastInferenceRunCountRef.current = ''
-      console.log('[SaveEdit] 直接推理模式：保留推理结果，仅重置签名')
+        }
+      })
     }
+    
+    // 清空隐私保护建议
+    const protectionSuggestions = useStore.getState().protectionSuggestions
+    if (protectionSuggestions?.[session.id]) {
+      const newSuggestions = { ...protectionSuggestions }
+      delete newSuggestions[session.id]
+      useStore.setState({ protectionSuggestions: newSuggestions })
+    }
+    
+    // 重置推理记录，以便在信息元提取完成后触发自动推理
+    lastInferenceRunCountRef.current = ''
+    console.log('[SaveEdit] 清空隐私推理结果、保护建议并重置推理记录')
     
     // 更新 store 的 sessions
     useStore.setState({ sessions: updatedSessions })
@@ -377,58 +369,39 @@ export function useMessageHandlers(
       // OCR 模式下处理信息元逻辑
       try {
         const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-        if (result.adopted === 0 && inferenceMode === 'extract') {
-          // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
           startMessageInfons?.(userId)
         }
-        console.log('[SaveEdit] OCR 模式信息元处理完成', { adopted: result.adopted, mode: inferenceMode })
+        console.log('[SaveEdit] OCR 模式信息元处理完成', { adopted: result.adopted })
       } catch (_) {}
     } else if (editingImages.length > 0 || editingAudios.length > 0) {
       // 提取图片 URL（兼容字符串和对象格式）
       const imageUrls = editingImages.map(img => typeof img === 'string' ? img : img.url)
       
-      // 提取图片 analysis 数据（直接推理模式）
-      const imageAnalysisMap = {}
-      if (inferenceMode === 'direct' && editingImages.length > 0) {
-        editingImages.forEach(img => {
-          const imgObj = typeof img === 'string' ? { url: img } : img
-          if (imgObj.url && imgObj.analysis) {
-            imageAnalysisMap[imgObj.url] = imgObj.analysis
-          }
-        })
-      }
+      const userId = await useStore.getState().sendMessageWithImages(text, imageUrls, editingAudios, {})
       
-      const userId = await useStore.getState().sendMessageWithImages(text, imageUrls, editingAudios, imageAnalysisMap)
-      
-      // 只在提取信息元模式下处理信息元相关逻辑
-      if (inferenceMode === 'extract') {
-        try {
-          const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-          if (result.adopted === 0) {
-            // 没有 pending infons，需要重新提取
-            startMessageInfons?.(userId)
-          }
-          console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0, mode: inferenceMode })
-        } catch (_) {}
-      } else {
-        console.log('[SaveEdit] 直接推理模式：跳过信息元处理')
-      }
+      // 处理信息元相关逻辑
+      try {
+        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
+          startMessageInfons?.(userId)
+        }
+        console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0 })
+      } catch (_) {}
     } else {
       const userId = await sendMessage(text, editingAudios)
       
-      // 只在提取信息元模式下处理信息元相关逻辑
-      if (inferenceMode === 'extract') {
-        try {
-          const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-          if (result.adopted === 0) {
-            // 没有 pending infons，需要重新提取
-            startMessageInfons?.(userId)
-          }
-          console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0, mode: inferenceMode })
-        } catch (_) {}
-      } else {
-        console.log('[SaveEdit] 直接推理模式：跳过信息元处理')
-      }
+      // 处理信息元相关逻辑
+      try {
+        const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
+          startMessageInfons?.(userId)
+        }
+        console.log('[SaveEdit] 信息元处理完成', { adopted: result.adopted, hasPending: pendingRunIds.length > 0 })
+      } catch (_) {}
     }
 
     // 清理编辑状态（不调用handleCancelEdit，避免清空pending导致自动推理失败）
@@ -630,17 +603,15 @@ export function useMessageHandlers(
       
       newUserMessageId = await useStore.getState().sendMessageWithDeepSeekOCR(userMessage.content, commandsToSend, filesToSend, resolutionToSend)
       
-      // OCR 模式下处理信息元逻辑（仅在提取信息元模式下）
-      if (inferenceMode === 'extract') {
-        try {
-          const result = useStore.getState().adoptPendingInfonsToMessage?.(newUserMessageId) || { adopted: 0, runIds: [] }
-          if (result.adopted === 0) {
-            // 没有 pending infons，需要重新提取
-            startMessageInfons?.(newUserMessageId)
-          }
-          console.log('[Retry] OCR 模式信息元处理完成', { adopted: result.adopted, mode: inferenceMode })
-        } catch (_) {}
-      }
+      // OCR 模式下处理信息元逻辑
+      try {
+        const result = useStore.getState().adoptPendingInfonsToMessage?.(newUserMessageId) || { adopted: 0, runIds: [] }
+        if (result.adopted === 0) {
+          // 没有 pending infons，需要重新提取
+          startMessageInfons?.(newUserMessageId)
+        }
+        console.log('[Retry] OCR 模式信息元处理完成', { adopted: result.adopted })
+      } catch (_) {}
     } else if (Array.isArray(userMessage.images) && userMessage.images.length > 0) {
       // 多模态模式：重新发送带图片的消息
       // 提取图片 URL（兼容字符串和对象格式）

@@ -61,14 +61,8 @@ export {
   extractKeywordsFromRisks,
   parsePrivacyBuffer,
   buildPrivacyInferencePrompt,
-  // 直接推断模式辅助函数
-  extractTextFromContent,
-  extractAudioTranscripts,
-  extractImageAnalysis,
-  collectDirectModeInput,
   collectInfonsForInference,
   // 状态更新辅助函数
-  accumulateTempKeywords,
   mergeRisks,
   cleanAndParseBuffer,
   parseSSELine

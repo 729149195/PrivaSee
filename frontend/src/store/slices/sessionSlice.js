@@ -38,12 +38,10 @@ export const createSessionSlice = (set, get) => ({
       const nextSessions = s.sessions.filter(x => x.id !== id)
       if (nextSessions.length === 0) {
         const newSession = createEmptySession()
-        return { sessions: [newSession], currentSessionId: newSession.id, sessionKeywords: {} }
+        return { sessions: [newSession], currentSessionId: newSession.id }
       }
       const nextCurrent = s.currentSessionId === id ? nextSessions[0]?.id : s.currentSessionId
-      const updatedKeywords = { ...s.sessionKeywords }
-      delete updatedKeywords[id]
-      return { sessions: nextSessions, currentSessionId: nextCurrent, sessionKeywords: updatedKeywords }
+      return { sessions: nextSessions, currentSessionId: nextCurrent }
     })
     deleteSessionFiles(id).catch(err => console.error('[deleteSession] 清理失败:', err))
   },

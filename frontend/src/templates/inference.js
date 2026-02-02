@@ -283,102 +283,10 @@ export function extractLawTreeSummary(lawData) {
 }
 
 // Fill prompt template
-export function fillPromptTemplate(infons, lawData, directInput = null, historicalKeywords = []) {
+export function fillPromptTemplate(infons, lawData) {
   const lawTreeSummary = extractLawTreeSummary(lawData)
   
-  // 直接推断模式：使用用户原始输入
-  if (directInput !== null) {
-    // 分析输入结构：区分历史消息和当前输入
-    const inputLines = directInput.split('\n\n').filter(Boolean)
-    const hasMultipleMessages = inputLines.length > 1
-    
-    // 构建历史关键词上下文
-    let keywordsContext = ''
-    if (historicalKeywords && historicalKeywords.length > 0) {
-      keywordsContext = `\n\nKNOWN PRIVACY KEYWORDS:
-${historicalKeywords.join(', ')}
-
-IMPORTANT: The above keywords are from previous messages. When analyzing the complete conversation below, you MUST:
-1. Identify privacy risks by considering ALL messages together (cross-message correlation)
-2. Extract NEW keywords from ALL messages (not just the last one)
-3. Recognize that privacy information may be split across multiple messages
-4. Example: Message 1 has "name", Message 2 has "address" → Together they reveal identity
-`
-    }
-    
-    // 构建用户输入说明
-    let inputDescription = hasMultipleMessages 
-      ? `COMPLETE USER CONVERSATION (${inputLines.length} messages, analyze ALL together for comprehensive privacy assessment):`
-      : 'USER INPUT (single message):'
-    
-    const simplePrompt = `You are a privacy risk analyzer. Analyze the COMPLETE user conversation below and identify ALL privacy risks by considering cross-message correlations.
-
-${inputDescription}
-${directInput}${keywordsContext}
-
-LEGAL FRAMEWORK:
-${lawTreeSummary}
-
-CRITICAL TASK REQUIREMENTS:
-1. ANALYZE ALL MESSAGES TOGETHER: Information from different messages may combine to create privacy risks
-   - Example: If message 1 mentions "name" and message 2 mentions "address", this is HIGH risk (full identity)
-   - Example: If message 1 mentions "hospital visit" and message 2 mentions "medication", infer health condition
-2. EXTRACT KEYWORDS FROM ALL MESSAGES: Don't just focus on the last message
-3. IDENTIFY CROSS-MESSAGE PATTERNS: Look for information that connects across messages
-4. MAP EACH RISK to the most specific legal clause name
-5. Output ONLY compact format (no JSON, no markdown, no extra text, NO header line)
-6. **ONE RISK PER LINE**: Each risk MUST be on a separate line (press Enter after each risk)
-
-OUTPUT FORMAT (COMPACT - NO HEADER, direct data output, ONE RISK PER LINE):
-value1,value2,value3,value4,value5
-value1,value2,value3,value4,value5
-
-FIELD DEFINITIONS:
-- law_node_name: exact leaf node name from legal framework (NO translation, NO abbreviation)
-- risk_level: HIGH | MEDIUM | LOW (based on INFERENCE CERTAINTY)
-- privacy_exposure: what privacy info is exposed (consider information from ALL messages)
-- inference_chain: reasoning - what data appears, how they connect, what can be inferred, confidence level
-- used_infons: information elements in format "TYPE:VALUE" separated by |
-  * **DESC format**: DESC:attribute_value (ONLY attribute, NOT "entity:attribute")
-  * **SCEN format**: SCEN:temporal@spatial
-  * **REL format**: REL:relation_name
-  * Example: DESC:Klook|DESC:台北|SCEN:下周@东京
-  * Extract concrete keywords from input, NOT inferences
-
-CRITICAL RULES:
-- Output ONLY the compact format, no other text
-- **NO UNCERTAIN OUTPUT**: DO NOT output "无法推断", "不确定", "insufficient data", etc. If you cannot confidently infer a privacy risk, skip it entirely. Do NOT output any explanatory text.
-- **ONE RISK PER LINE**: Each complete risk entry MUST be on its own line (use real line breaks between risks)
-- Escape commas in text with \\,, newlines with \\n, backslashes with \\\\
-- law_node_name MUST be exact copy from legal framework above (NO translation, NO abbreviation)
-- used_infons format: "TYPE:VALUE" separated by | (e.g., DESC:Klook|DESC:台北|SCEN:下周@东京)
-- If you see "CUSTOM PRIVACY ANALYSIS MODE", ONLY analyze the selected items marked with ✓
-- Deep inference: infer health conditions, beliefs from behaviors across messages
-- RISK LEVEL ASSIGNMENT: Evaluate inference CERTAINTY based on data clarity and context
-- CROSS-MESSAGE ANALYSIS: A single privacy risk may be supported by keywords from multiple messages
-- Sort by risk_level: HIGH first
-- LANGUAGE CONSISTENCY: Write privacy_exposure and inference_chain in the SAME language as the input
-
-**FINAL FORMAT CHECK BEFORE OUTPUT**:
-Each line MUST have EXACTLY 5 fields in this order:
-1. law_node_name (copy from legal framework)
-2. risk_level (HIGH or MEDIUM or LOW)
-3. privacy_exposure (what is exposed)
-4. inference_chain (reasoning)
-5. used_infons (format: TYPE:VALUE separated by |)
-
-Example format to follow:
-姓名,HIGH,暴露真实姓名,明确提到姓名信息,DESC:王小明
-年龄,HIGH,暴露精确年龄,明确的年龄数值,DESC:27岁
-
-REMEMBER: Output ONLY valid risk data lines. DO NOT output any statements like "无法推断", "不确定", "cannot determine", etc. If uncertain about a risk, simply don't output it.
-
-NOW OUTPUT THE COMPACT FORMAT:`
-    
-    return simplePrompt
-  }
-  
-  // 提取信息元模式：使用信息元列表
+  // 使用信息元列表
   const infonsSummary = extractInfonsSummary(infons)
   
   // 构建简洁版提示词，更适合本地模型

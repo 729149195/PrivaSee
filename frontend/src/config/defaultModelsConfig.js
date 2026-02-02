@@ -10,11 +10,6 @@ export const DEFAULT_MODELS_CONFIG = {
     model: 'qwen-flash', // 默认对话模型
   },
 
-  // 直接推理模式的默认模型配置
-  directInference: {
-    model: 'qwen2.5:7b-instruct', // 直接推理模式：隐私推理模型
-  },
-
   // 提取信息元模式的默认模型配置
   infonExtraction: {
     extractionModel: 'niels32167/qwen3-4b-instruct:latest', // 提取信息元模式：信息元提取模型
@@ -26,9 +21,6 @@ export const DEFAULT_MODELS_CONFIG = {
     imageParsingModel: 'qwen3-vl-8b-instruct', // 图片解析模型（共用）
     protectionSuggestionModel: 'qwen2.5:7b-instruct', // Privacy Protection Suggestions模型（共用）
   },
-
-  // 推断模式的默认值
-  inferenceMode: 'extract', // 默认为提取信息元模式：extract（提取信息元）或 direct（直接推断）
 }
 
 /**
@@ -38,12 +30,10 @@ export const DEFAULT_MODELS_CONFIG = {
 export const getDefaultModelsConfig = () => {
   return {
     conversationModel: DEFAULT_MODELS_CONFIG.conversation.model,
-    directInferenceModel: DEFAULT_MODELS_CONFIG.directInference.model,
     infonExtractionModel: DEFAULT_MODELS_CONFIG.infonExtraction.extractionModel,
     infonPrivacyInferenceModel: DEFAULT_MODELS_CONFIG.infonExtraction.privacyInferenceModel,
     imageParsingModel: DEFAULT_MODELS_CONFIG.shared.imageParsingModel,
     protectionSuggestionModel: DEFAULT_MODELS_CONFIG.shared.protectionSuggestionModel,
-    inferenceMode: DEFAULT_MODELS_CONFIG.inferenceMode,
   }
 }
 

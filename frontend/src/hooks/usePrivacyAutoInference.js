@@ -3,11 +3,10 @@ import { useStore } from '../store'
 
 /**
  * 隐私推理自动触发 Hook
- * 从 AgentPage 中提取的核心推理触发逻辑
+ * 从 AgentPage 中提取的核心推理触发逻辑（提取信息元模式）
  * 
  * @param {object} params - 配置参数
  * @param {object} params.currentSession - 当前会话对象
- * @param {string} params.inferenceMode - 推断模式 ('extract' | 'direct')
  * @param {object} params.selectedLaw - 当前选中的法律
  * @param {string} params.input - 主输入框内容
  * @param {string} params.landingInput - 着陆页输入框内容
@@ -25,7 +24,6 @@ import { useStore } from '../store'
  */
 export function usePrivacyAutoInference({
   currentSession,
-  inferenceMode,
   selectedLaw,
   input,
   landingInput,
@@ -45,14 +43,9 @@ export function usePrivacyAutoInference({
     autoPrivacyInference,
     infonSessions,
     privacyInferences,
-    sessionKeywords,
     abortPrivacyInference,
     startPrivacyInference,
     clearProtectionSuggestions,
-    clearCurrentInferenceAndRestore,
-    setPendingUserInput,
-    setPendingAudios,
-    setPendingImages,
   } = useStore()
 
   const currentSessionId = currentSession?.id
@@ -66,181 +59,13 @@ export function usePrivacyAutoInference({
     lastInferenceLawKeyRef.current = null
   }, [currentSessionId, lastInferenceRunCountRef])
 
-  // 计算当前签名（直接推断模式）
-  const computeDirectModeSignature = () => {
-    const isEditing = editingMessageId !== null
-    const hasContentChanged = isEditing && (
-      editingContent !== originalEditingContent ||
-      JSON.stringify(editingImages) !== JSON.stringify(originalEditingImages) ||
-      JSON.stringify(editingAudios) !== JSON.stringify(originalEditingAudios)
-    )
-
-    let pendingInput = ''
-    let pendingAudios = []
-    let pendingImages = []
-
-    if (isEditing) {
-      if (hasContentChanged) {
-        pendingInput = (editingContent || '').trim()
-        pendingAudios = editingAudios || []
-        pendingImages = editingImages || []
-      }
-    } else {
-      pendingInput = (input || landingInput || '').trim()
-      pendingAudios = selectedAudios || []
-      pendingImages = selectedImages || []
-    }
-
-    const audioHash = pendingAudios
-      .map(audio => `${audio.id}:${audio.transcript?.length || 0}:${(audio.transcript || '').slice(0, 30)}`)
-      .join('|')
-    const imageHash = pendingImages
-      .map(img => {
-        const imgObj = typeof img === 'string' ? { id: 'legacy', url: img, status: 'done' } : img
-        return `${imgObj.id}:${imgObj.status}:${imgObj.analysis?.length || 0}`
-      })
-      .join('|')
-    const pendingHash = pendingInput ? `pending:${pendingInput.length}:${pendingInput.slice(0, 50)}` : ''
-    
-    return {
-      signature: [pendingHash, audioHash, imageHash].filter(Boolean).join('||'),
-      pendingInput,
-      pendingAudios,
-      pendingImages,
-      hasContentChanged,
-      isEditing,
-    }
-  }
-
-  // 检查图片是否都已完成分析
-  const checkAllImagesAnalyzed = (images) => {
-    return images.every(img => {
-      const imgObj = typeof img === 'string' ? { status: 'done' } : img
-      return imgObj.status === 'done' || imgObj.status === 'error'
-    })
-  }
-
-  // 清空当前推理结果
-  const clearCurrentInference = () => {
-    const privacyInferences = useStore.getState().privacyInferences || {}
-    useStore.setState({
-      privacyInferences: {
-        ...privacyInferences,
-        [currentSessionId]: {
-          status: 'idle',
-          risks: [],
-          buffer: '',
-          abortController: null,
-          createdAt: Date.now(),
-          updatedAt: Date.now()
-        }
-      }
-    })
-  }
-
-  // 清空当前会话的关键词
-  const clearSessionKeywords = () => {
-    const currentSessionKeywords = useStore.getState().sessionKeywords?.[currentSessionId]
-    if (currentSessionKeywords && currentSessionKeywords.size > 0) {
-      const updatedKeywords = { ...useStore.getState().sessionKeywords }
-      delete updatedKeywords[currentSessionId]
-      useStore.setState({ sessionKeywords: updatedKeywords })
-    }
-  }
-
-  // 主要推理触发逻辑
+  // 主要推理触发逻辑（提取信息元模式）
   useEffect(() => {
     if (!autoPrivacyInference) return
     if (!currentSessionId || !selectedLaw) return
 
     const currentInference = privacyInferences?.[currentSessionId]
     const isInferenceRunning = currentInference?.status === 'running'
-
-    // 直接推断模式
-    if (inferenceMode === 'direct') {
-      const userMessages = (currentSession?.messages || []).filter(msg => msg.role === 'user')
-      const {
-        signature: currentSignature,
-        pendingInput,
-        pendingAudios,
-        pendingImages,
-        hasContentChanged,
-        isEditing,
-      } = computeDirectModeSignature()
-
-      // 没有 pending 内容的情况处理
-      if (!pendingInput && pendingAudios.length === 0 && pendingImages.length === 0) {
-        // 编辑模式但内容未变化，保持当前状态
-        if (isEditing && !hasContentChanged) {
-          return
-        }
-
-        // 首次加载有消息但无推理结果，触发推理
-        if (userMessages.length > 0 && !lastInferenceRunCountRef.current && 
-            currentInference?.status !== 'done' && currentInference?.status !== 'running') {
-          lastInferenceRunCountRef.current = 'initial'
-          clearProtectionSuggestions?.()
-          setPendingUserInput('')
-          setPendingAudios([])
-          setPendingImages([])
-
-          const timer = setTimeout(() => {
-            startPrivacyInference?.(null)
-          }, 800)
-          return () => clearTimeout(timer)
-        }
-
-        // 输入被清空
-        if (lastInferenceRunCountRef.current && lastInferenceRunCountRef.current !== 'initial') {
-          if (isAdoptingPendingRef.current) {
-            // 发送消息后的清空，保留推理结果
-            isAdoptingPendingRef.current = false
-          } else {
-            // 手动清空，清除当前推理并恢复上一次结果
-            clearCurrentInferenceAndRestore?.()
-            setPendingUserInput('')
-            setPendingAudios([])
-            setPendingImages([])
-            clearSessionKeywords()
-            lastInferenceRunCountRef.current = ''
-          }
-        }
-        return
-      }
-
-      // 检测到变化，触发推理
-      if (currentSignature !== lastInferenceRunCountRef.current && currentSignature) {
-        // 图片还在处理中，等待完成
-        if (pendingImages.length > 0 && !checkAllImagesAnalyzed(pendingImages)) {
-          if (isInferenceRunning) {
-            abortPrivacyInference?.()
-          }
-          clearCurrentInference()
-          clearProtectionSuggestions?.()
-          clearSessionKeywords()
-          return
-        }
-
-        // 所有图片分析完成，触发推理
-        lastInferenceRunCountRef.current = currentSignature
-
-        if (isInferenceRunning) {
-          abortPrivacyInference?.()
-        }
-        clearCurrentInference()
-        clearProtectionSuggestions?.()
-
-        setPendingUserInput(pendingInput)
-        setPendingAudios(pendingAudios)
-        setPendingImages(pendingImages)
-
-        const timer = setTimeout(() => {
-          startPrivacyInference?.(editingMessageId)
-        }, 800)
-        return () => clearTimeout(timer)
-      }
-      return
-    }
 
     // 提取信息元模式
     const runs = infonSessions?.[currentSessionId]?.runs || []
@@ -249,13 +74,10 @@ export function usePrivacyAutoInference({
     const messageRuns = runs.filter(run => run.targetType === 'message' && run.status === 'done' && !run.expiring)
 
     let currentSignature = ''
-    let infonType = ''
     if (pendingRuns.length > 0) {
       currentSignature = pendingRuns.map(r => r.id).sort().join('|')
-      infonType = 'pending'
     } else if (messageRuns.length > 0) {
       currentSignature = messageRuns.map(r => r.id).sort().join('|')
-      infonType = 'message'
     }
 
     if (!currentSignature) return
@@ -276,7 +98,7 @@ export function usePrivacyAutoInference({
       clearProtectionSuggestions?.()
 
       const timer = setTimeout(() => {
-        startPrivacyInference?.(null)
+        startPrivacyInference?.()
       }, 300)
       return () => clearTimeout(timer)
     }
@@ -285,24 +107,12 @@ export function usePrivacyAutoInference({
     infonSessions?.[currentSessionId]?.runs,
     currentSessionId,
     selectedLaw?.key,
-    inferenceMode,
     autoPrivacyInference,
-    input,
-    landingInput,
-    selectedAudios,
-    selectedImages,
-    editingMessageId,
-    editingContent,
-    editingAudios,
-    editingImages,
-    originalEditingContent,
-    originalEditingImages,
-    originalEditingAudios,
   ])
 
   // 信息元开始重新提取时中止推理
   useEffect(() => {
-    if (!currentSessionId || inferenceMode === 'direct') return
+    if (!currentSessionId) return
 
     const runs = infonSessions?.[currentSessionId]?.runs || []
     const currentInference = privacyInferences?.[currentSessionId]
@@ -319,7 +129,6 @@ export function usePrivacyAutoInference({
     infonSessions?.[currentSessionId]?.runs,
     currentSessionId,
     privacyInferences?.[currentSessionId]?.status,
-    inferenceMode,
   ])
 
   // 切换法律时中止推理

@@ -18,7 +18,7 @@ export const createUserSlice = (set, get) => ({
     set({
       currentUserId: null, sessions: [emptySession], currentSessionId: emptySession.id,
       model: getDefaultModelsConfig().conversationModel, infonSessions: {},
-      privacyInferences: {}, sessionKeywords: {}
+      privacyInferences: {}
     })
   },
   
@@ -27,7 +27,7 @@ export const createUserSlice = (set, get) => ({
     set({
       sessions: [emptySession], currentSessionId: emptySession.id,
       model: getDefaultModelsConfig().conversationModel, infonSessions: {},
-      privacyInferences: {}, sessionKeywords: {}, protectionSuggestions: {},
+      privacyInferences: {}, protectionSuggestions: {},
       customPrivacyItems: [], selectedPrivacyItems: []
     })
   },
@@ -40,27 +40,23 @@ export const createUserSlice = (set, get) => ({
           sessions: data.sessions,
           infonSessions: data.infonSessions || {},
           privacyInferences: data.privacyInferences || {},
-          sessionKeywords: data.sessionKeywords || {},
           currentSessionId: data.sessions[0]?.id || null,
           customPrivacyItems: data.customPrivacyItems || [],
           selectedLawIdx: data.selectedLawIdx ?? 0,
           selectedPrivacyItems: data.selectedPrivacyItems || [],
           model: data.conversationModel || getDefaultModelsConfig().conversationModel,
-          directInferenceModel: data.directInferenceModel || getDefaultModelsConfig().directInferenceModel,
           infonExtractionModel: data.infonExtractionModel || getDefaultModelsConfig().infonExtractionModel,
           infonPrivacyInferenceModel: data.infonPrivacyInferenceModel || getDefaultModelsConfig().infonPrivacyInferenceModel,
           imageParsingModel: data.imageParsingModel || getDefaultModelsConfig().imageParsingModel,
           protectionSuggestionModel: data.protectionSuggestionModel || getDefaultModelsConfig().protectionSuggestionModel,
-          inferenceMode: data.inferenceMode || getDefaultModelsConfig().inferenceMode,
           autoPrivacyInference: data.autoPrivacyInference ?? true
         })
       } else {
         const newSession = createEmptySession()
         set({
           sessions: [newSession], currentSessionId: newSession.id,
-          infonSessions: {}, privacyInferences: {}, sessionKeywords: {},
-          customPrivacyItems: [], selectedLawIdx: 0, selectedPrivacyItems: [],
-          inferenceMode: 'extract'
+          infonSessions: {}, privacyInferences: {},
+          customPrivacyItems: [], selectedLawIdx: 0, selectedPrivacyItems: []
         })
       }
     } catch (error) {
@@ -83,9 +79,9 @@ export const createUserSlice = (set, get) => ({
       saveUserSessions(
         userId, state.sessions, state.infonSessions, serializableInferences,
         state.customPrivacyItems, state.selectedLawIdx, state.selectedPrivacyItems,
-        state.model, state.directInferenceModel, state.infonExtractionModel,
+        state.model, state.infonExtractionModel,
         state.infonPrivacyInferenceModel, state.imageParsingModel, state.protectionSuggestionModel,
-        state.inferenceMode, state.sessionKeywords, state.autoPrivacyInference
+        state.autoPrivacyInference
       )
     } catch (error) {
       console.error('[PrivaSee] 保存用户历史失败:', error)

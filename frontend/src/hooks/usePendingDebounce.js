@@ -24,7 +24,6 @@ export function usePendingDebounce({
   originalEditingImages,
   originalEditingAudios,
   // 模式
-  inferenceMode,
   autoPrivacyInference,
   // 回调
   startPendingInfons,
@@ -39,9 +38,6 @@ export function usePendingDebounce({
   useEffect(() => {
     // 如果未启用自动隐私保护，跳过
     if (!autoPrivacyInference) return
-
-    // 直接推断模式：跳过，推理由专门的 useEffect 处理
-    if (inferenceMode === 'direct') return
 
     // 清理上一个定时器
     if (pendingTimerRef.current) {
@@ -154,7 +150,6 @@ export function usePendingDebounce({
     originalEditingImages,
     originalEditingAudios,
     autoPrivacyInference,
-    inferenceMode,
     model,
   ])
 

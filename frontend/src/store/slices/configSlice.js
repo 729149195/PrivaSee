@@ -12,22 +12,16 @@ export const createConfigSlice = (set, get) => ({
   customProviders: getDefaultApiModels(),
   
   // 模型配置
-  directInferenceModel: getDefaultModelsConfig().directInferenceModel,
   infonExtractionModel: getDefaultModelsConfig().infonExtractionModel,
   infonPrivacyInferenceModel: getDefaultModelsConfig().infonPrivacyInferenceModel,
   imageParsingModel: getDefaultModelsConfig().imageParsingModel,
   protectionSuggestionModel: getDefaultModelsConfig().protectionSuggestionModel,
-  inferenceMode: getDefaultModelsConfig().inferenceMode,
   autoPrivacyInference: true,
   
-  // Pending 状态
-  pendingUserInput: '',
-  pendingAudios: [],
-  pendingImages: [],
+  // OCR 文件对象
   ocrFileObjects: {},
 
   // Setters
-  setDirectInferenceModel: (modelId) => set({ directInferenceModel: modelId }),
   setInfonExtractionModel: (modelId) => set({ infonExtractionModel: modelId }),
   setInfonPrivacyInferenceModel: (modelId) => set({ infonPrivacyInferenceModel: modelId }),
   setImageParsingModel: (modelId) => set({ imageParsingModel: modelId }),
@@ -36,31 +30,14 @@ export const createConfigSlice = (set, get) => ({
   resetToDefaultModels: () => {
     const d = getDefaultModelsConfig()
     set({
-      directInferenceModel: d.directInferenceModel,
       infonExtractionModel: d.infonExtractionModel,
       infonPrivacyInferenceModel: d.infonPrivacyInferenceModel,
       imageParsingModel: d.imageParsingModel,
       protectionSuggestionModel: d.protectionSuggestionModel,
-      inferenceMode: d.inferenceMode,
     })
   },
   
-  setInferenceMode: (mode) => {
-    const session = get().getCurrentSession()
-    if (session?.id) {
-      const box = get().infonSessions?.[session.id]
-      if (box) {
-        const runs = (box.runs || []).filter(r => r.targetType !== 'pending')
-        set(s => ({ infonSessions: { ...s.infonSessions, [session.id]: { ...box, runs } } }))
-      }
-    }
-    set({ inferenceMode: mode })
-  },
-  
   setAutoPrivacyInference: (enabled) => set({ autoPrivacyInference: enabled }),
-  setPendingUserInput: (input) => set({ pendingUserInput: input }),
-  setPendingAudios: (audios) => set({ pendingAudios: audios }),
-  setPendingImages: (images) => set({ pendingImages: images }),
   
   setModel(modelId) { set({ model: modelId }) },
 
@@ -95,7 +72,6 @@ export const createConfigSlice = (set, get) => ({
         customModels: (s.customModels || []).filter(m => m !== id),
         models: (s.models || []).filter(m => m !== id),
         model: s.model === id ? getDefaultModelsConfig().conversationModel : s.model,
-        directInferenceModel: s.directInferenceModel === id ? 'deepseek-chat' : s.directInferenceModel,
         infonExtractionModel: s.infonExtractionModel === id ? 'deepseek-chat' : s.infonExtractionModel,
         infonPrivacyInferenceModel: s.infonPrivacyInferenceModel === id ? 'deepseek-chat' : s.infonPrivacyInferenceModel,
         imageParsingModel: s.imageParsingModel === id ? 'gemma3:12b' : s.imageParsingModel,

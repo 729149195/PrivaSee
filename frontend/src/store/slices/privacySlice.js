@@ -1,48 +1,24 @@
 // 隐私推理 Slice
 import {
-  collectDirectModeInput, collectInfonsForInference, accumulateTempKeywords,
+  collectInfonsForInference,
   mergeRisks, cleanAndParseBuffer, parseSSELine
 } from './privacyHelpers'
 
 export const createPrivacySlice = (set, get) => ({
   // 状态
   privacyInferences: {},
-  sessionKeywords: {},
   privacyParsers: {},
 
   // 启动隐私推理
-  async startPrivacyInference(editingMessageId = null) {
+  async startPrivacyInference() {
     const session = get().getCurrentSession()
     if (!session) return
     
-    const { selectedLaw, infonSessions, inferenceMode } = get()
+    const { selectedLaw, infonSessions } = get()
     if (!selectedLaw?.data) return
     
-    // 编辑模式下清空关键词
-    if (inferenceMode === 'direct' && editingMessageId) {
-      const sessionKeywords = get().sessionKeywords || {}
-      if (sessionKeywords[session.id]) {
-        const updated = { ...sessionKeywords }
-        delete updated[session.id]
-        set({ sessionKeywords: updated })
-      }
-    }
-    
-    let allInfons = [], directInput = null
-    
-    if (inferenceMode === 'direct') {
-      const { directInput: input } = collectDirectModeInput({
-        messages: session.messages, editingMessageId,
-        pendingUserInput: get().pendingUserInput,
-        pendingAudios: get().pendingAudios,
-        pendingImages: get().pendingImages
-      })
-      directInput = input
-      if (!directInput?.trim()) return
-    } else {
-      allInfons = collectInfonsForInference(infonSessions, session.id)
-      if (!allInfons.length) return
-    }
+    const allInfons = collectInfonsForInference(infonSessions, session.id)
+    if (!allInfons.length) return
     
     const previousInference = get().privacyInferences?.[session.id]
     const previousRisks = previousInference?.status === 'done' ? (previousInference.risks || []) : []
@@ -53,16 +29,14 @@ export const createPrivacySlice = (set, get) => ({
         ...s.privacyInferences,
         [session.id]: {
           status: 'running', risks: [], buffer: '', abortController,
-          lawKey: selectedLaw.key, previousRisks, createdAt: Date.now(), updatedAt: Date.now(),
-          tempKeywords: inferenceMode === 'direct' ? new Set() : undefined
+          lawKey: selectedLaw.key, previousRisks, createdAt: Date.now(), updatedAt: Date.now()
         }
       },
       privacyParsers: { ...(s.privacyParsers || {}), [session.id]: null }
     }))
     
     try {
-      const mode = get().inferenceMode
-      const configuredModel = mode === 'direct' ? (get().directInferenceModel || 'deepseek-chat') : (get().infonPrivacyInferenceModel || 'deepseek-chat')
+      const configuredModel = get().infonPrivacyInferenceModel || 'deepseek-chat'
       const provider = get().customProviders?.[configuredModel]
       const apiUrl = provider ? provider.baseUrl : get().baseUrl
       const apiKey = provider?.apiKey || ''
@@ -70,11 +44,7 @@ export const createPrivacySlice = (set, get) => ({
       const maxTokens = isOmni ? 2000 : 4096
       
       const { fillPromptTemplate } = await import('../../templates/inference.js')
-      const historicalKeywords = get().sessionKeywords?.[session.id]
-      const keywordsArray = historicalKeywords instanceof Set ? Array.from(historicalKeywords) : []
-      const prompt = mode === 'direct' 
-        ? fillPromptTemplate([], selectedLaw.data, directInput, keywordsArray)
-        : fillPromptTemplate(allInfons, selectedLaw.data, null, [])
+      const prompt = fillPromptTemplate(allInfons, selectedLaw.data, null, [])
       
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
@@ -100,12 +70,6 @@ export const createPrivacySlice = (set, get) => ({
         set(s => ({ privacyParsers: { ...s.privacyParsers, [session.id]: newState } }))
         
         if (yielded?.length > 0) {
-          if (mode === 'direct') {
-            const currentInference = get().privacyInferences?.[session.id]
-            const tempKeywords = accumulateTempKeywords(currentInference?.tempKeywords, yielded)
-            set(s => ({ privacyInferences: { ...s.privacyInferences, [session.id]: { ...s.privacyInferences[session.id], tempKeywords } } }))
-          }
-          
           set(s => {
             const currentRisks = s.privacyInferences?.[session.id]?.risks || []
             const updatedRisks = mergeRisks(currentRisks, yielded)
@@ -137,16 +101,7 @@ export const createPrivacySlice = (set, get) => ({
       const parseResult = cleanAndParseBuffer(buffer)
       
       if (parseResult.success) {
-        if (mode === 'direct' && parseResult.risks.length > 0) {
-          const existingKeywords = get().sessionKeywords?.[session.id] || new Set()
-          const newKeywords = accumulateTempKeywords(existingKeywords, parseResult.risks)
-          set(s => ({ sessionKeywords: { ...s.sessionKeywords, [session.id]: newKeywords } }))
-        }
-        const tempKeywords = get().privacyInferences?.[session.id]?.tempKeywords
-        if (mode === 'direct' && tempKeywords?.size > 0) {
-          set(s => ({ sessionKeywords: { ...s.sessionKeywords, [session.id]: tempKeywords } }))
-        }
-        set(s => ({ privacyInferences: { ...s.privacyInferences, [session.id]: { ...s.privacyInferences[session.id], status: 'done', risks: parseResult.risks, buffer: parseResult.cleanBuffer, abortController: null, tempKeywords: undefined, updatedAt: Date.now() } } }))
+        set(s => ({ privacyInferences: { ...s.privacyInferences, [session.id]: { ...s.privacyInferences[session.id], status: 'done', risks: parseResult.risks, buffer: parseResult.cleanBuffer, abortController: null, updatedAt: Date.now() } } }))
         return
       }
       
@@ -156,20 +111,13 @@ export const createPrivacySlice = (set, get) => ({
         return
       }
       
-      if (mode === 'direct') {
-        const tempKeywords = currentState?.tempKeywords
-        if (tempKeywords?.size > 0) set(s => ({ sessionKeywords: { ...s.sessionKeywords, [session.id]: tempKeywords } }))
-      }
-      
-      const shouldKeepPrevious = get().inferenceMode === 'direct'
-      set(s => ({ privacyInferences: { ...s.privacyInferences, [session.id]: { ...s.privacyInferences[session.id], status: 'done', abortController: null, previousRisks: shouldKeepPrevious ? s.privacyInferences[session.id].previousRisks : undefined, tempKeywords: undefined, updatedAt: Date.now() } } }))
+      set(s => ({ privacyInferences: { ...s.privacyInferences, [session.id]: { ...s.privacyInferences[session.id], status: 'done', abortController: null, updatedAt: Date.now() } } }))
       
     } catch (err) {
       if (err.name === 'AbortError') {
         const currentState = get().privacyInferences?.[session.id]
         const previousRisks = currentState?.previousRisks || []
-        const shouldKeepPrevious = get().inferenceMode === 'direct'
-        set(s => ({ privacyInferences: { ...s.privacyInferences, [session.id]: { ...s.privacyInferences[session.id], status: previousRisks.length ? 'done' : 'aborted', risks: previousRisks, abortController: null, previousRisks: shouldKeepPrevious ? previousRisks : undefined, updatedAt: Date.now() } } }))
+        set(s => ({ privacyInferences: { ...s.privacyInferences, [session.id]: { ...s.privacyInferences[session.id], status: previousRisks.length ? 'done' : 'aborted', risks: previousRisks, abortController: null, updatedAt: Date.now() } } }))
       } else {
         set(s => ({ privacyInferences: { ...s.privacyInferences, [session.id]: { ...s.privacyInferences[session.id], status: 'error', error: err.message, abortController: null, updatedAt: Date.now() } } }))
       }

@@ -38,8 +38,7 @@ import { saveFile } from '../../utils/fileStorage'
  * @param {boolean} currentModelIsMultimodal - 当前模型是否支持多模态
  * @param {boolean} isEditingMessage - 是否正在编辑消息
  * @param {function} renderHighlightedText - 渲染高亮文本的函数
- * @param {string} inferenceMode - 推断模式 ('extract' | 'direct')
- * @param {function} processImageUpload - 处理图片上传的函数（用于直接推断模式）
+ * @param {function} processImageUpload - 处理图片上传的函数
  * @param {string} model - 当前选中的模型ID
  * @param {Array} selectedFiles - 已选择的文件（deepseek-ocr模式）
  * @param {function} setSelectedFiles - 设置已选择的文件
@@ -66,7 +65,6 @@ const MessageComposer = ({
   currentModelIsMultimodal,
   isEditingMessage,
   renderHighlightedText,
-  inferenceMode,
   processImageUpload,
   model,
   selectedFiles = [],
@@ -700,15 +698,9 @@ const MessageComposer = ({
 
                       hideLoading()
 
-                      // 直接推断模式：使用图片分析功能
-                      if (inferenceMode === 'direct' && processImageUpload) {
-                        await processImageUpload(compressed, setSelectedImages)
-                        message.success('图片上传成功，正在分析...')
-                      } else {
-                        // 提取信息元模式：直接添加图片（保持向后兼容）
-                        setSelectedImages((prev) => [...prev, compressed])
-                        message.success('图片上传成功')
-                      }
+                      // 添加图片
+                      setSelectedImages((prev) => [...prev, compressed])
+                      message.success('图片上传成功')
                     } catch (error) {
                       message.error(`图片处理失败: ${error.message}`)
                       console.error('[ImageUpload]', error)

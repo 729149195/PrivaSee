@@ -45,8 +45,7 @@ const ViteIcon = '/vite.svg'
  * @param {Array} pendingRelations - 待处理的关系
  * @param {object} pendingInfonIndex - 待处理的信息元索引
  * @param {boolean} currentModelIsMultimodal - 当前模型是否支持多模态
- * @param {string} inferenceMode - 推断模式 ('extract' | 'direct')
- * @param {function} processImageUpload - 处理图片上传的函数（用于直接推断模式）
+ * @param {function} processImageUpload - 处理图片上传的函数
  * @param {string} model - 当前选中的模型ID
  * @param {string} selectedResolution - 已选择的分辨率模式（deepseek-ocr模式）
  * @param {function} setSelectedResolution - 设置已选择的分辨率模式
@@ -86,7 +85,6 @@ const MessageBubble = ({
   pendingInfonIndex,
   sendLockState,
   currentModelIsMultimodal,
-  inferenceMode,
   processImageUpload,
   model,
   selectedResolution,
@@ -175,7 +173,6 @@ const MessageBubble = ({
               onEditingTranscriptChange={onEditingTranscriptChange}
               onSave={onSaveEdit}
               onCancel={onCancelEdit}
-              inferenceMode={inferenceMode}
               processImageUpload={processImageUpload}
               pendingHighlights={pendingHighlights}
               pendingRelations={pendingRelations}

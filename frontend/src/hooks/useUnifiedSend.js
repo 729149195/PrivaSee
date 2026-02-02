@@ -10,7 +10,6 @@ import { useStore } from '../store'
 export function useUnifiedSend({
   currentSession,
   model,
-  inferenceMode,
   infonSessions,
   sendMessage,
   startMessageInfons,
@@ -25,22 +24,6 @@ export function useUnifiedSend({
   const isOcrMode = useCallback(() => {
     return model === 'deepseek-ocr' || model === 'deepseek-ocr-local'
   }, [model])
-
-  /**
-   * 提取图片 analysis 数据（直接推理模式）
-   */
-  const extractImageAnalysis = useCallback((images) => {
-    const imageAnalysisMap = {}
-    if (inferenceMode === 'direct' && images.length > 0) {
-      images.forEach(img => {
-        const imgObj = typeof img === 'string' ? { url: img } : img
-        if (imgObj.url && imgObj.analysis) {
-          imageAnalysisMap[imgObj.url] = imgObj.analysis
-        }
-      })
-    }
-    return imageAnalysisMap
-  }, [inferenceMode])
 
   /**
    * 获取 pending run IDs（用于签名计算）
@@ -65,12 +48,12 @@ export function useUnifiedSend({
       }
 
       const result = useStore.getState().adoptPendingInfonsToMessage?.(userId) || { adopted: 0, runIds: [] }
-      if (result.adopted === 0 && inferenceMode === 'extract') {
-        // 没有 pending infons，需要重新提取（仅在提取信息元模式下）
+      if (result.adopted === 0) {
+        // 没有 pending infons，需要重新提取
         startMessageInfons?.(userId)
       }
     } catch (_) {}
-  }, [inferenceMode, startMessageInfons, lastInferenceRunCountRef])
+  }, [startMessageInfons, lastInferenceRunCountRef])
 
   /**
    * 自动生成会话标题（仅在第一条消息后）
@@ -133,9 +116,6 @@ export function useUnifiedSend({
     // 设置采纳标志
     isAdoptingPendingRef.current = true
 
-    // 提取图片分析数据
-    const imageAnalysisMap = extractImageAnalysis(images)
-
     let userId = null
 
     // OCR 模式
@@ -147,7 +127,6 @@ export function useUnifiedSend({
       callbacks.clearCommand?.()
       callbacks.clearFiles?.()
       callbacks.resetResolution?.()
-      useStore.getState().setPendingImages([])
 
       // 发送消息
       userId = await useStore.getState().sendMessageWithDeepSeekOCR(
@@ -164,7 +143,7 @@ export function useUnifiedSend({
         trimmedText, 
         imgs, 
         audioList, 
-        imageAnalysisMap
+        {}
       )
       await adoptPendingInfons(userId, pendingRunIds)
 
@@ -172,7 +151,6 @@ export function useUnifiedSend({
       callbacks.clearInput?.()
       callbacks.clearImages?.()
       callbacks.clearAudios?.()
-      useStore.getState().setPendingImages([])
     }
     // 纯文本
     else {
@@ -183,7 +161,6 @@ export function useUnifiedSend({
       callbacks.clearInput?.()
       callbacks.clearImages?.()
       callbacks.clearAudios?.()
-      useStore.getState().setPendingImages([])
     }
 
     // 自动生成标题
@@ -193,7 +170,6 @@ export function useUnifiedSend({
   }, [
     getPendingRunIds,
     isAdoptingPendingRef,
-    extractImageAnalysis,
     isOcrMode,
     adoptPendingInfons,
     sendMessage,
@@ -203,7 +179,6 @@ export function useUnifiedSend({
   return {
     unifiedSend,
     isOcrMode,
-    extractImageAnalysis,
     getPendingRunIds,
     adoptPendingInfons,
     autoGenerateTitle,

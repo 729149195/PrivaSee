@@ -14,12 +14,10 @@ const ModelConfigPanel = ({ visible, onClose }) => {
   const {
     models,
     customProviders,
-    directInferenceModel,
     infonExtractionModel,
     infonPrivacyInferenceModel,
     imageParsingModel,
     protectionSuggestionModel,
-    setDirectInferenceModel,
     setInfonExtractionModel,
     setInfonPrivacyInferenceModel,
     setImageParsingModel,
@@ -112,7 +110,6 @@ const ModelConfigPanel = ({ visible, onClose }) => {
         customPrivacyItems: customPrivacyItems || [],
         selectedLawIdx: selectedLawIdx || 0,
         selectedPrivacyItems: selectedPrivacyItems || [],
-        directInferenceModel,
         infonExtractionModel,
         infonPrivacyInferenceModel,
         imageParsingModel,
@@ -168,7 +165,6 @@ const ModelConfigPanel = ({ visible, onClose }) => {
                 selectedLawIdx: importedData.selectedLawIdx || 0,
                 selectedPrivacyItems: importedData.selectedPrivacyItems || [],
                 currentSessionId: importedData.sessions?.[0]?.id || null,
-                directInferenceModel: importedData.directInferenceModel || 'deepseek-chat',
                 infonExtractionModel: importedData.infonExtractionModel || 'deepseek-chat',
                 infonPrivacyInferenceModel: importedData.infonPrivacyInferenceModel || 'deepseek-chat',
                 imageParsingModel: importedData.imageParsingModel || 'gemma3:12b',
@@ -302,56 +298,33 @@ const ModelConfigPanel = ({ visible, onClose }) => {
 
         <Divider style={{ margin: 0 }} />
 
-        {/* 推理模式配置 - 双栏布局 */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          {/* 直接推理模式 */}
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: 'var(--color-text-primary)' }}>
-              直接推理模式
-            </div>
-            <div style={{ display: 'grid', gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
-                  隐私推理模型
-                </div>
-                <Select
-                  style={{ width: '100%' }}
-                  value={directInferenceModel}
-                  onChange={setDirectInferenceModel}
-                  options={allModels.map(renderModelOption)}
-                />
-              </div>
-            </div>
+        {/* 隐私推理模型配置 */}
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: 'var(--color-text-primary)' }}>
+            隐私推理模型
           </div>
-
-          {/* 提取信息元模式 */}
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: 'var(--color-text-primary)' }}>
-              提取信息元模式
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
+                信息元提取模型
+              </div>
+              <Select
+                style={{ width: '100%' }}
+                value={infonExtractionModel}
+                onChange={setInfonExtractionModel}
+                options={allModels.map(renderModelOption)}
+              />
             </div>
-            <div style={{ display: 'grid', gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
-                  信息元提取模型
-                </div>
-                <Select
-                  style={{ width: '100%' }}
-                  value={infonExtractionModel}
-                  onChange={setInfonExtractionModel}
-                  options={allModels.map(renderModelOption)}
-                />
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
+                隐私推理模型
               </div>
-              <div>
-                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
-                  隐私推理模型
-                </div>
-                <Select
-                  style={{ width: '100%' }}
-                  value={infonPrivacyInferenceModel}
-                  onChange={setInfonPrivacyInferenceModel}
-                  options={allModels.map(renderModelOption)}
-                />
-              </div>
+              <Select
+                style={{ width: '100%' }}
+                value={infonPrivacyInferenceModel}
+                onChange={setInfonPrivacyInferenceModel}
+                options={allModels.map(renderModelOption)}
+              />
             </div>
           </div>
         </div>
