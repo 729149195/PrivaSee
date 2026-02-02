@@ -7,7 +7,7 @@
 export const DEFAULT_MODELS_CONFIG = {
   // 对话模型的默认配置
   conversation: {
-    model: 'qwen-flash', // 默认对话模型
+    model: 'niels32167/qwen3-4b-instruct:latest', // 默认对话模型
   },
 
   // 提取信息元模式的默认模型配置
@@ -19,7 +19,7 @@ export const DEFAULT_MODELS_CONFIG = {
   // 共用模型的默认配置
   shared: {
     imageParsingModel: 'qwen3-vl-8b-instruct', // 图片解析模型（共用）
-    protectionSuggestionModel: 'qwen2.5:7b-instruct', // Privacy Protection Suggestions模型（共用）
+    protectionSuggestionModel: 'niels32167/qwen3-4b-instruct:latest', // Privacy Protection Suggestions模型（共用）
   },
 }
 
