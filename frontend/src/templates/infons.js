@@ -23,19 +23,29 @@ export const CORE_DEFINITION = String.raw`You are an information extractor. Extr
 export const OUTPUT_FORMAT = String.raw`**Output Format**: One CSV line per fact. Start output immediately with data lines.
 
 Format by type:
-- DESC: desc:r{round}_{n},DESC,entity,attribute,string,0.95
-- SCEN: scen:r{round}_{n},SCEN,time,place,0.90
-- REL: rel:r{round}_{n},REL,relation_name,iid1|iid2,0.90
+- DESC: desc:r{round}_{n},DESC,entity,attribute,string,{confidence}
+- SCEN: scen:r{round}_{n},SCEN,time,place,{confidence}
+- REL: rel:r{round}_{n},REL,relation_name,iid1|iid2,{confidence}
+
+**Confidence Scoring Guide** (0.0-1.0):
+- 0.95-1.0: Explicit, exact values (names, IDs, quoted text)
+- 0.85-0.94: Clear but could have variants (company names, titles)
+- 0.70-0.84: Inferred/approximate (age ranges, rough times, implied info)
+- 0.50-0.69: Uncertain/ambiguous (guessed context, unclear references)
+- <0.50: Very uncertain (avoid extracting)
 
 **Example output for "我叫张伟，今年28岁"**:
-desc:r1_1,DESC,姓名,张伟,string,0.95
+desc:r1_1,DESC,姓名,张伟,string,0.98
 desc:r1_2,DESC,年龄,28,number,0.95
 rel:r1_3,REL,个人信息,desc:r1_1|desc:r1_2,0.90
 
-**Example output for "Alice works at Google"**:
-desc:r1_1,DESC,name,Alice,string,0.95
-desc:r1_2,DESC,company,Google,string,0.95
-rel:r1_3,REL,employment,desc:r1_1|desc:r1_2,0.90
+**Example output for "Alice probably works at Google"**:
+desc:r1_1,DESC,name,Alice,string,0.98
+desc:r1_2,DESC,company,Google,string,0.75
+rel:r1_3,REL,employment,desc:r1_1|desc:r1_2,0.70
+
+**Example output for "他大概三十多岁"**:
+desc:r1_1,DESC,年龄,三十多岁,string,0.65
 
 Output ONLY the CSV lines, nothing else.
 `;
@@ -49,6 +59,12 @@ export const TEXT_EXTRACTION = String.raw`**What to Extract**:
 - Common words: is, have, go, the, a
 - Filler words: um, well, so
 - Already extracted items
+
+**Confidence Indicators**:
+- High (0.90+): "is", "叫", exact quotes, specific numbers
+- Medium (0.75-0.89): "works at", "住在", clear context
+- Lower (0.60-0.74): "probably", "maybe", "大概", "可能", implied info
+- Uncertain (<0.60): Don't extract
 
 **Limits**:
 - SCEN: 0-2 only (need both time AND place)
@@ -103,12 +119,14 @@ Skip:
 ✗ Generic nouns (man, company)
 ✗ Verbs, adjectives
 
+**Confidence**: 0.95+ exact match, 0.85-0.94 clear but variant possible, 0.70-0.84 inferred, 0.50-0.69 uncertain
+
 Output: 5-15 DESC, 0-2 SCEN, 2-5 REL
 
 Example:
-desc:r1_1,DESC,Person,John Smith,string,0.95
-desc:r1_2,DESC,Organization,Apple Inc,string,0.95
-rel:r1_3,REL,employed_by,desc:r1_1|desc:r1_2,0.90
+desc:r1_1,DESC,Person,John Smith,string,0.98
+desc:r1_2,DESC,Organization,Apple Inc,string,0.92
+rel:r1_3,REL,employed_by,desc:r1_1|desc:r1_2,0.85
 `;
 
 // ============================================================================
@@ -217,18 +235,21 @@ function parseCompactInfonLine(line, options = {}) {
     infon.attribute = unescapeValue(values[3] || '')
     infon.data_type = values[4] || 'string'
     const conf = parseFloat(values[5])
-    infon.confidence = !isNaN(conf) ? conf : 0.95
+    // 默认置信度降低到0.80，鼓励模型主动给出准确的置信度
+    infon.confidence = !isNaN(conf) ? Math.min(1.0, Math.max(0.0, conf)) : 0.80
   } else if (infon_type === 'SCEN') {
     infon.temporal = unescapeValue(values[2] || '')
     infon.spatial = unescapeValue(values[3] || '')
     const conf = parseFloat(values[4])
-    infon.confidence = !isNaN(conf) ? conf : 0.90
+    // SCEN通常需要推断，默认置信度0.75
+    infon.confidence = !isNaN(conf) ? Math.min(1.0, Math.max(0.0, conf)) : 0.75
   } else if (infon_type === 'REL') {
     infon.relation_name = unescapeValue(values[2] || '')
     infon.arg_refs = splitArrayField(values[3] || '')
     infon.arity = infon.arg_refs.length
     const conf = parseFloat(values[4])
-    infon.confidence = !isNaN(conf) ? conf : 0.90
+    // REL依赖引用的准确性，默认置信度0.75
+    infon.confidence = !isNaN(conf) ? Math.min(1.0, Math.max(0.0, conf)) : 0.75
   }
   
   return Object.keys(infon).length > 2 ? infon : null
