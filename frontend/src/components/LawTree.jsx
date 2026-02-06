@@ -122,7 +122,7 @@ export default function LawTree() {
       if (!containerRef.current) return
       const rect = containerRef.current.getBoundingClientRect()
       const w = Math.max(320, Math.floor(rect.width))
-      const h = Math.max(400, Math.floor(rect.width * 0.65))
+      const h = Math.max(400, Math.floor(rect.width * 0.78))
       setSize({ width: w, height: h })
     }
     update()
@@ -360,7 +360,7 @@ export default function LawTree() {
     // 计算中心点和半径（考虑四角信息的空间）
     const cx = width / 2
     const cy = height / 2
-    const radius = Math.min(width, height) / 2 - 40  // 留出更多边距给四角信息
+    const radius = Math.min(width, height) / 2 - 30  // 适当边距
 
     // 鱼眼效果参数
     const fisheyeRadius = 120  // 鱼眼影响半径
@@ -397,7 +397,7 @@ export default function LawTree() {
         scale: scale
       }
     }
-
+    
     // 风险颜色映射（中文注释）
     const getRiskColor = (level) => {
       switch (level) {
@@ -411,10 +411,10 @@ export default function LawTree() {
     // 构建层级数据
     const root = d3.hierarchy(data)
     
-    // 放射状树布局
+    // 放射状树布局（更紧凑地利用空间）
     const treeLayout = d3.tree()
-      .size([2 * Math.PI, radius * 0.85])
-      .separation((a, b) => (a.parent === b.parent ? 1 : 1.5) / a.depth)
+      .size([2 * Math.PI, radius * 0.92])
+      .separation((a, b) => (a.parent === b.parent ? 1 : 1.2) / a.depth)
     
     treeLayout(root)
 
@@ -455,36 +455,50 @@ export default function LawTree() {
 
     // ========== 四角信息（统一边距 16px）==========
     const maxDepth = d3.max(nodes, d => d.depth)
-    const padding = 16
+    const padding = 12
     
-    // 左上角：悬停节点名称（动态）
+    // 左上角：整体安全状态 / 悬停节点名称
     const topLeft = svg.append('g')
-      .attr('transform', `translate(${padding}, ${padding + 8})`)
+      .attr('transform', `translate(${padding}, ${padding + 6})`)
     const topLeftText = topLeft.append('text')
       .attr('font-size', 13)
       .attr('font-weight', 600)
-      .attr('fill', 'var(--color-text-primary)')
-      .text('')
+      .attr('fill', directRiskNodes.length > 0 ? '#ef4444' : '#10b981')
+      .text(directRiskNodes.length > 0 
+        ? `${directRiskNodes.length} exposure${directRiskNodes.length > 1 ? 's' : ''} found` 
+        : 'No exposure')
     const topLeftSub = topLeft.append('text')
       .attr('y', 18)
       .attr('font-size', 10)
       .attr('fill', 'var(--color-text-tertiary)')
-      .text('')
+      .text(directRiskNodes.length > 0 
+        ? 'Hover on highlighted nodes for details'
+        : 'Your conversation looks safe under this law')
+    
+    // 记录默认文本用于恢复
+    const topLeftDefault = {
+      text: directRiskNodes.length > 0 
+        ? `${directRiskNodes.length} exposure${directRiskNodes.length > 1 ? 's' : ''} found`
+        : 'No exposure',
+      sub: directRiskNodes.length > 0 
+        ? 'Hover on highlighted nodes for details'
+        : 'Your conversation looks safe under this law',
+      color: directRiskNodes.length > 0 ? '#ef4444' : '#10b981'
+    }
 
-    // 右上角：风险统计
+    // 右上角：按级别的风险统计
     const topRight = svg.append('g')
-      .attr('transform', `translate(${width - padding}, ${padding + 8})`)
+      .attr('transform', `translate(${width - padding}, ${padding + 6})`)
       .attr('text-anchor', 'end')
     
-    // 标题
     topRight.append('text')
       .attr('font-size', 9)
       .attr('font-weight', 500)
       .attr('fill', 'var(--color-text-tertiary)')
+      .attr('letter-spacing', '0.5px')
       .text('RISK SUMMARY')
     
     if (directRiskNodes.length > 0) {
-      // 风险数字行
       const riskLine = []
       if (highRiskCount > 0) riskLine.push(`${highRiskCount} High`)
       if (mediumRiskCount > 0) riskLine.push(`${mediumRiskCount} Med`)
@@ -500,18 +514,19 @@ export default function LawTree() {
         .attr('y', 16)
         .attr('font-size', 11)
         .attr('fill', '#10b981')
-        .text('No risks detected')
+        .text('All clear')
     }
     
-    // 右下角：悬停节点风险详情
+    // 右下角：悬停时显示"为什么是风险"
     const bottomRight = svg.append('g')
-      .attr('transform', `translate(${width - padding}, ${height - padding - 32})`)
+      .attr('transform', `translate(${width - padding}, ${height - padding - 34})`)
       .attr('text-anchor', 'end')
     
     const riskDetailTitle = bottomRight.append('text')
       .attr('font-size', 9)
       .attr('font-weight', 500)
       .attr('fill', 'var(--color-text-tertiary)')
+      .attr('letter-spacing', '0.5px')
       .text('')
     const riskDetailLine1 = bottomRight.append('text')
       .attr('y', 16)
@@ -524,61 +539,48 @@ export default function LawTree() {
       .attr('fill', 'var(--color-text-tertiary)')
       .text('')
 
-    // 左下角：完整图例
+    // 左下角：图例
     const bottomLeft = svg.append('g')
-      .attr('transform', `translate(${padding}, ${height - padding - 68})`)
+      .attr('transform', `translate(${padding}, ${height - padding - 64})`)
     
-    // 风险等级图例
+    const rowHeight = 14
     const levelLegendData = [
       { color: '#ef4444', label: 'High Risk' },
       { color: '#f59e0b', label: 'Medium' },
       { color: '#10b981', label: 'Low' }
     ]
-    const rowHeight = 16
     levelLegendData.forEach((item, i) => {
       const row = bottomLeft.append('g')
         .attr('transform', `translate(0, ${i * rowHeight})`)
       row.append('circle')
-        .attr('r', 4)
-        .attr('cx', 4)
-        .attr('cy', 0)
+        .attr('r', 4).attr('cx', 4).attr('cy', 0)
         .attr('fill', item.color)
       row.append('text')
-        .attr('x', 14)
-        .attr('y', 4)
+        .attr('x', 14).attr('y', 4)
         .attr('font-size', 10)
         .attr('fill', 'var(--color-text-tertiary)')
         .text(item.label)
     })
     
-    // 节点类型图例
     const typeLegend = bottomLeft.append('g')
       .attr('transform', `translate(0, ${levelLegendData.length * rowHeight + 6})`)
-    // 直接风险：实心
     typeLegend.append('circle')
-      .attr('r', 4)
-      .attr('cx', 4)
-      .attr('cy', 0)
+      .attr('r', 4).attr('cx', 4).attr('cy', 0)
       .attr('fill', '#94a3b8')
     typeLegend.append('text')
-      .attr('x', 14)
-      .attr('y', 4)
+      .attr('x', 14).attr('y', 4)
       .attr('font-size', 10)
       .attr('fill', 'var(--color-text-tertiary)')
       .text('Direct risk')
-    // 继承风险：空心
     const inheritedRow = typeLegend.append('g')
       .attr('transform', `translate(0, ${rowHeight})`)
     inheritedRow.append('circle')
-      .attr('r', 4)
-      .attr('cx', 4)
-      .attr('cy', 0)
+      .attr('r', 4).attr('cx', 4).attr('cy', 0)
       .attr('fill', '#fff')
       .attr('stroke', '#94a3b8')
       .attr('stroke-width', 2)
     inheritedRow.append('text')
-      .attr('x', 14)
-      .attr('y', 4)
+      .attr('x', 14).attr('y', 4)
       .attr('font-size', 10)
       .attr('fill', 'var(--color-text-tertiary)')
       .text('Inherited')
@@ -862,32 +864,37 @@ export default function LawTree() {
         event.stopPropagation()
         setHoveredNode(d)
         
-        // 更新左上角节点名称
-        topLeftText.text(d.data.name)
+        // 更新左上角：显示当前节点信息
         const risk = riskMap.get(d.data.name)
+        topLeftText.text(d.data.name)
         if (risk && !risk.inherited) {
-          topLeftSub.text(`${risk.level} Risk`)
+          topLeftText.attr('fill', getRiskColor(risk.level))
+          topLeftSub.text(`Your data may be exposed here`)
             .attr('fill', getRiskColor(risk.level))
+        } else if (risk && risk.inherited) {
+          topLeftText.attr('fill', 'var(--color-text-primary)')
+          topLeftSub.text('Contains risk items below')
+            .attr('fill', 'var(--color-text-tertiary)')
         } else {
-          topLeftSub.text(`Level ${d.depth}`)
+          topLeftText.attr('fill', 'var(--color-text-primary)')
+          topLeftSub.text('No risk detected here')
             .attr('fill', 'var(--color-text-tertiary)')
         }
         
-        // 更新右下角风险详情
+        // 更新右下角：风险的具体原因
         if (risk && !risk.inherited && risk.risks && risk.risks.length > 0) {
-          riskDetailTitle.text('RISK DETAIL')
+          riskDetailTitle.text('WHY THIS IS A RISK')
           
-          // 显示推理原因
           const firstRisk = risk.risks[0]
           const reason = firstRisk.reason || firstRisk.inference_chain || ''
-          // 截断过长的原因
-          const reasonText = reason.length > 30 ? reason.slice(0, 30) + '...' : reason
-          riskDetailLine1.text(reasonText || '')
+          riskDetailLine1.text(reason.length > 36 ? reason.slice(0, 34) + '...' : reason)
           
-          // 显示涉及的信息元素数量
+          // 显示涉及多少条你的信息
           const usedInfons = firstRisk.used_infons || firstRisk.infon_ids || []
           const infonCount = Array.isArray(usedInfons) ? usedInfons.length : 0
-          riskDetailLine2.text(infonCount > 0 ? `${infonCount} info element(s)` : '')
+          riskDetailLine2.text(infonCount > 0 
+            ? `Based on ${infonCount} piece${infonCount > 1 ? 's' : ''} of your info`
+            : '')
         } else {
           riskDetailTitle.text('')
           riskDetailLine1.text('')
@@ -924,9 +931,11 @@ export default function LawTree() {
           })
       })
       .on('mouseleave', (event, d) => {
-        // 清空左上角
-        topLeftText.text('')
-        topLeftSub.text('')
+        // 恢复左上角默认安全状态
+        topLeftText.text(topLeftDefault.text)
+          .attr('fill', topLeftDefault.color)
+        topLeftSub.text(topLeftDefault.sub)
+          .attr('fill', 'var(--color-text-tertiary)')
         
         // 清空右下角
         riskDetailTitle.text('')
@@ -1450,8 +1459,8 @@ export default function LawTree() {
   )
 
   return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 8, paddingLeft: 4 }}>
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 6, paddingLeft: 4 }}>
         Law Tree
       </div>
       <div
@@ -1460,13 +1469,14 @@ export default function LawTree() {
           width: '100%',
           minHeight: 200,
           background: 'var(--color-bg-secondary)',
-          borderRadius: 16,
+          borderRadius: 14,
           boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
           border: '1px solid var(--color-border-light)',
-          padding: 6
+          padding: '4px 4px 0 4px',
+          overflow: 'hidden'
         }}
       >
-        <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 4, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center' }}>
           {LAWS.map((law, idx) => {
             const isHolding = holdingLawIdx === idx
             const isActive = lawIdx === idx
@@ -1481,10 +1491,10 @@ export default function LawTree() {
                   onTouchEnd={() => handleLawMouseUp(idx)}
                   style={{
                     cursor: 'pointer',
-                    padding: '6px 12px',
-                    borderRadius: 10,
+                    padding: '5px 10px',
+                    borderRadius: 8,
                     fontWeight: 600,
-                    fontSize: 12,
+                    fontSize: 11,
                     color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
                     background: isHolding
                       ? `linear-gradient(to right, #3b82f6 ${holdProgress}%, var(--color-bg-tertiary) ${holdProgress}%)`
