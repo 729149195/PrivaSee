@@ -48,6 +48,12 @@ export default function LawTree() {
   const [size, setSize] = useState({ width: 928, height: 600 })
   const clipId = useMemo(() => `clip-${Math.random().toString(36).slice(2, 9)}`, [])
   
+  // 鱼眼镜头：当前悬停的节点（中文注释）
+  const [hoveredNode, setHoveredNode] = useState(null)
+  
+  // 鱼眼效果：鼠标位置（相对于SVG中心）
+  const [mousePos, setMousePos] = useState(null)
+  
   // 从 store 获取推理结果和相关方法（中文注释）
   const { 
     getCurrentSession, 
@@ -341,7 +347,7 @@ export default function LawTree() {
     return propagatedMap
   }, [inference, lawData, lawIdx])
 
-  // 绘制
+  // 绘制放射状树 + 鱼眼效果（中文注释：radial tree layout with fisheye）
   useEffect(() => {
     const data = lawData[lawIdx]
     if (!data || !svgRef.current) return
@@ -351,168 +357,603 @@ export default function LawTree() {
     const svg = d3.select(svgRef.current)
     svg.selectAll('*').remove()
 
-    // 边框颜色：优先 CSS 变量，回退到浅灰
-    const strokeColor =
-      (getComputedStyle(document.documentElement).getPropertyValue('--color-border-strong') || '').trim() ||
-      (getComputedStyle(document.documentElement).getPropertyValue('--color-border-light') || '').trim() ||
-      '#334155' // slate-700
-    
+    // 计算中心点和半径（考虑四角信息的空间）
+    const cx = width / 2
+    const cy = height / 2
+    const radius = Math.min(width, height) / 2 - 40  // 留出更多边距给四角信息
+
+    // 鱼眼效果参数
+    const fisheyeRadius = 120  // 鱼眼影响半径
+    const fisheyeDistortion = 3  // 失真强度
+
+    // 鱼眼失真函数（中文注释：根据距离计算放大倍数和位移）
+    const fisheye = (point, focus) => {
+      if (!focus) return { x: point[0], y: point[1], scale: 1 }
+      
+      const dx = point[0] - focus[0]
+      const dy = point[1] - focus[1]
+      const distance = Math.sqrt(dx * dx + dy * dy)
+      
+      if (distance >= fisheyeRadius) {
+        return { x: point[0], y: point[1], scale: 1 }
+      }
+      
+      // 鱼眼变换公式
+      const k = fisheyeDistortion
+      const normalizedDist = distance / fisheyeRadius
+      const distortedDist = (1 - Math.exp(-k * normalizedDist)) / (1 - Math.exp(-k))
+      const scale = 1 + (2.5 - 1) * (1 - normalizedDist)  // 最大放大2.5倍
+      
+      if (distance === 0) {
+        return { x: point[0], y: point[1], scale: 2.5 }
+      }
+      
+      const newDist = distortedDist * fisheyeRadius
+      const ratio = newDist / distance
+      
+      return {
+        x: focus[0] + dx * ratio,
+        y: focus[1] + dy * ratio,
+        scale: scale
+      }
+    }
+
     // 风险颜色映射（中文注释）
     const getRiskColor = (level) => {
       switch (level) {
-        case 'HIGH': return '#ef4444'    // 红色
-        case 'MEDIUM': return '#f59e0b'  // 橙色
-        case 'LOW': return '#10b981'     // 绿色
+        case 'HIGH': return '#ef4444'
+        case 'MEDIUM': return '#f59e0b'
+        case 'LOW': return '#10b981'
         default: return null
       }
     }
 
-    // —— 层级 + “均分权重”（每个父节点把自己的 value 平均分给直接子节点）—— //
+    // 构建层级数据
     const root = d3.hierarchy(data)
-    root.value = 1
-    root.each(node => {
-      if (node.children && node.children.length) {
-        const share = node.value / node.children.length
-        node.children.forEach(c => { c.value = share })
-      }
+    
+    // 放射状树布局
+    const treeLayout = d3.tree()
+      .size([2 * Math.PI, radius * 0.85])
+      .separation((a, b) => (a.parent === b.parent ? 1 : 1.5) / a.depth)
+    
+    treeLayout(root)
+
+    // 径向坐标转换函数
+    const radialPoint = (x, y) => {
+      const angle = x - Math.PI / 2
+      return [y * Math.cos(angle), y * Math.sin(angle)]
+    }
+
+    // 预计算所有节点的基础位置
+    const nodes = root.descendants()
+    nodes.forEach(d => {
+      const [px, py] = radialPoint(d.x, d.y)
+      d.px = px
+      d.py = py
+      d.baseSize = d.depth === 0 ? 6 : (d.children ? 4 : 3)
+      const risk = riskMap.get(d.data.name)
+      if (risk) d.baseSize += 1.5
     })
+    
+    const links = root.links()
 
-    // —— icicle：纵向为“值”（高度），横向为“深度”（厚度） —— //
-    const visibleDepth = Math.max(1, root.height)   // 可见层（depth≥1）
-    const step = width / visibleDepth               // 每层横向厚度，正好铺满宽度
-
-    d3.partition().size([height, (root.height + 1) * step])(root)
-
-    // 去掉根的占位带：整体左移一个 step
-    root.each(d => { d.y0 -= step; d.y1 -= step })
-
-    // 只渲染 depth>0
-    const nodes = root.descendants().filter(d => d.depth > 0)
-
-    // 初始焦点
-    let focus = root
-
-    // SVG 容器（增加边距以避免边框被裁剪）
-    const margin = 4 // 边框留白
+    // SVG 设置
     svg
-      .attr('viewBox', `${-margin} ${-margin} ${width + margin * 2} ${height + margin * 2}`)
+      .attr('viewBox', `0 0 ${width} ${height}`)
       .attr('width', '100%')
       .attr('height', height)
-      .attr('preserveAspectRatio', 'none')
-      .attr('style', 'display:block; max-width:100%; height:auto; font:13px var(--font-family-main);')
+      .attr('style', 'display:block; max-width:100%; height:auto; cursor:crosshair;')
 
-    // 背景：点击返回根
-    svg.append('rect')
-      .attr('width', width)
-      .attr('height', height)
-      .attr('fill', 'transparent')
-      .on('click', () => clicked(root))
+    // 统计风险节点数（只统计叶子节点/直接风险，不统计继承的）
+    const directRiskNodes = nodes.filter(d => {
+      const risk = riskMap.get(d.data.name)
+      return risk && !risk.inherited  // 只计算直接风险，排除继承的
+    })
+    const highRiskCount = directRiskNodes.filter(d => riskMap.get(d.data.name)?.level === 'HIGH').length
+    const mediumRiskCount = directRiskNodes.filter(d => riskMap.get(d.data.name)?.level === 'MEDIUM').length
+    const lowRiskCount = directRiskNodes.filter(d => riskMap.get(d.data.name)?.level === 'LOW').length
 
-    // 像素取整，避免 1px 缝
-    const px = v => Math.round(v)
-
-    // 绘制
-    const cell = svg.append('g')
-      .attr('class', 'cells')
-      .selectAll('g')
-      .data(nodes)
-      .join('g')
-      .attr('transform', d => `translate(${px(d.y0)},${px(d.x0)})`)
-
-      cell.append('clipPath')
-        .attr('id', (d, i) => `${clipId}-${i}`)
-        .append('rect')
-        .attr('width',  d => Math.max(1, px(d.y1) - px(d.y0)))
-        .attr('height', d => Math.max(1, px(d.x1) - px(d.x0)))
-
-      const rect = cell.append('rect')
-      .attr('width',  d => Math.max(1, px(d.y1) - px(d.y0)))
-      .attr('height', d => Math.max(1, px(d.x1) - px(d.x0)))
-      .attr('fill', d => {
-        // 根据风险等级填充颜色（中文注释）
-        const nodeName = d.data.name
-        const risk = riskMap.get(nodeName)
-        if (risk) {
-          const color = getRiskColor(risk.level)
-          return color ? `${color}cc` : 'transparent' // 80% 不透明度，更显眼的填充高亮
-        }
-        return 'transparent'
-      })
-      .style('pointer-events', 'all')    // ← 明确允许接收点击/hover
-      .attr('stroke', strokeColor)  // 统一使用默认边框颜色
-      .attr('stroke-width', 0.75)   // 统一边框宽度
-      .attr('shape-rendering', 'geometricPrecision')
-      .attr('vector-effect', 'non-scaling-stroke')
-      .attr('cursor', 'pointer')
-      .on('click', (event, d) => {
-        event.stopPropagation()
-        clicked(d)
-      })
-
-    const text = cell.append('text')
-      .attr('clip-path', (d, i) => `url(#${clipId}-${i})`)
-      .style('user-select', 'none')
-      .attr('pointer-events', 'none')
-      .attr('x', 6)
-      .attr('y', 18)
-      .attr('fill', (getComputedStyle(document.documentElement).getPropertyValue('--color-text-primary') || '#0f172a').trim() || '#0f172a')
+    // ========== 四角信息（统一边距 16px）==========
+    const maxDepth = d3.max(nodes, d => d.depth)
+    const padding = 16
+    
+    // 左上角：悬停节点名称（动态）
+    const topLeft = svg.append('g')
+      .attr('transform', `translate(${padding}, ${padding + 8})`)
+    const topLeftText = topLeft.append('text')
       .attr('font-size', 13)
       .attr('font-weight', 600)
-      .attr('fill-opacity', d => +labelVisible(d))
-      .text(d => d.data.name)
+      .attr('fill', 'var(--color-text-primary)')
+      .text('')
+    const topLeftSub = topLeft.append('text')
+      .attr('y', 18)
+      .attr('font-size', 10)
+      .attr('fill', 'var(--color-text-tertiary)')
+      .text('')
 
-    // tooltip（中文注释）：如果有风险，显示风险信息，区分直接风险和继承风险
-    cell.append('title')
-      .text(d => {
-        const path = d.ancestors().map(d => d.data.name).reverse().join(' / ')
+    // 右上角：风险统计
+    const topRight = svg.append('g')
+      .attr('transform', `translate(${width - padding}, ${padding + 8})`)
+      .attr('text-anchor', 'end')
+    
+    // 标题
+    topRight.append('text')
+      .attr('font-size', 9)
+      .attr('font-weight', 500)
+      .attr('fill', 'var(--color-text-tertiary)')
+      .text('RISK SUMMARY')
+    
+    if (directRiskNodes.length > 0) {
+      // 风险数字行
+      const riskLine = []
+      if (highRiskCount > 0) riskLine.push(`${highRiskCount} High`)
+      if (mediumRiskCount > 0) riskLine.push(`${mediumRiskCount} Med`)
+      if (lowRiskCount > 0) riskLine.push(`${lowRiskCount} Low`)
+      
+      topRight.append('text')
+        .attr('y', 16)
+        .attr('font-size', 11)
+        .attr('fill', 'var(--color-text-secondary)')
+        .text(riskLine.join(' · '))
+    } else {
+      topRight.append('text')
+        .attr('y', 16)
+        .attr('font-size', 11)
+        .attr('fill', '#10b981')
+        .text('No risks detected')
+    }
+    
+    // 右下角：悬停节点风险详情
+    const bottomRight = svg.append('g')
+      .attr('transform', `translate(${width - padding}, ${height - padding - 32})`)
+      .attr('text-anchor', 'end')
+    
+    const riskDetailTitle = bottomRight.append('text')
+      .attr('font-size', 9)
+      .attr('font-weight', 500)
+      .attr('fill', 'var(--color-text-tertiary)')
+      .text('')
+    const riskDetailLine1 = bottomRight.append('text')
+      .attr('y', 16)
+      .attr('font-size', 10)
+      .attr('fill', 'var(--color-text-secondary)')
+      .text('')
+    const riskDetailLine2 = bottomRight.append('text')
+      .attr('y', 30)
+      .attr('font-size', 10)
+      .attr('fill', 'var(--color-text-tertiary)')
+      .text('')
+
+    // 左下角：完整图例
+    const bottomLeft = svg.append('g')
+      .attr('transform', `translate(${padding}, ${height - padding - 68})`)
+    
+    // 风险等级图例
+    const levelLegendData = [
+      { color: '#ef4444', label: 'High Risk' },
+      { color: '#f59e0b', label: 'Medium' },
+      { color: '#10b981', label: 'Low' }
+    ]
+    const rowHeight = 16
+    levelLegendData.forEach((item, i) => {
+      const row = bottomLeft.append('g')
+        .attr('transform', `translate(0, ${i * rowHeight})`)
+      row.append('circle')
+        .attr('r', 4)
+        .attr('cx', 4)
+        .attr('cy', 0)
+        .attr('fill', item.color)
+      row.append('text')
+        .attr('x', 14)
+        .attr('y', 4)
+        .attr('font-size', 10)
+        .attr('fill', 'var(--color-text-tertiary)')
+        .text(item.label)
+    })
+    
+    // 节点类型图例
+    const typeLegend = bottomLeft.append('g')
+      .attr('transform', `translate(0, ${levelLegendData.length * rowHeight + 6})`)
+    // 直接风险：实心
+    typeLegend.append('circle')
+      .attr('r', 4)
+      .attr('cx', 4)
+      .attr('cy', 0)
+      .attr('fill', '#94a3b8')
+    typeLegend.append('text')
+      .attr('x', 14)
+      .attr('y', 4)
+      .attr('font-size', 10)
+      .attr('fill', 'var(--color-text-tertiary)')
+      .text('Direct risk')
+    // 继承风险：空心
+    const inheritedRow = typeLegend.append('g')
+      .attr('transform', `translate(0, ${rowHeight})`)
+    inheritedRow.append('circle')
+      .attr('r', 4)
+      .attr('cx', 4)
+      .attr('cy', 0)
+      .attr('fill', '#fff')
+      .attr('stroke', '#94a3b8')
+      .attr('stroke-width', 2)
+    inheritedRow.append('text')
+      .attr('x', 14)
+      .attr('y', 4)
+      .attr('font-size', 10)
+      .attr('fill', 'var(--color-text-tertiary)')
+      .text('Inherited')
+
+    // 主容器，移到中心
+    const g = svg.append('g')
+      .attr('transform', `translate(${cx},${cy})`)
+
+    // 深度同心环背景（装饰性）
+    const depthRings = g.append('g')
+      .attr('class', 'depth-rings')
+      .style('pointer-events', 'none')
+    
+    for (let depth = 1; depth <= maxDepth; depth++) {
+      const ringRadius = (depth / maxDepth) * radius * 0.85
+      depthRings.append('circle')
+        .attr('r', ringRadius)
+        .attr('fill', 'none')
+        .attr('stroke', 'var(--color-border-light)')
+        .attr('stroke-width', depth === maxDepth ? 1.5 : 0.5)
+        .attr('stroke-dasharray', depth === maxDepth ? 'none' : '2,4')
+        .attr('opacity', 0.15 + (depth / maxDepth) * 0.15)
+    }
+
+    // 背景圆（用于追踪鼠标和清除悬停状态）
+    g.append('circle')
+      .attr('r', radius + 50)
+      .attr('fill', 'transparent')
+      .style('pointer-events', 'all')
+
+    // 鱼眼边框圆（跟随鼠标位置）
+    const fisheyeBorder = g.append('circle')
+      .attr('class', 'fisheye-border')
+      .attr('r', fisheyeRadius)
+      .attr('fill', 'none')
+      .attr('stroke', 'var(--color-accent-primary)')
+      .attr('stroke-width', 2)
+      .attr('stroke-dasharray', '6,4')
+      .attr('opacity', 0)
+      .style('pointer-events', 'none')
+
+    // 绘制连线
+    const linkGroup = g.append('g')
+      .attr('class', 'links')
+      .attr('fill', 'none')
+
+    const linkPaths = linkGroup.selectAll('path')
+      .data(links)
+      .join('path')
+      .attr('d', d => `M${d.source.px},${d.source.py}L${d.target.px},${d.target.py}`)
+      .attr('stroke', 'var(--color-border-light)')
+      .attr('stroke-width', 1)
+      .attr('stroke-opacity', 0.5)
+      .style('transition', 'stroke 0.15s ease, stroke-width 0.15s ease, stroke-opacity 0.15s ease')
+
+    // 绘制节点
+    const nodeGroup = g.append('g')
+      .attr('class', 'nodes')
+
+    const nodeGs = nodeGroup.selectAll('g')
+      .data(nodes)
+      .join('g')
+      .attr('transform', d => `translate(${d.px},${d.py})`)
+
+    // 高风险节点脉冲光环（动画效果）
+    const pulseRings = nodeGs.filter(d => {
+      const risk = riskMap.get(d.data.name)
+      return risk && risk.level === 'HIGH' && !risk.inherited
+    })
+    .append('circle')
+      .attr('class', 'pulse-ring')
+      .attr('r', d => d.baseSize)
+      .attr('fill', 'none')
+      .attr('stroke', '#ef4444')
+      .attr('stroke-width', 2)
+      .attr('opacity', 0)
+      .style('pointer-events', 'none')
+    
+    // 脉冲动画
+    function animatePulse() {
+      pulseRings
+        .attr('r', d => d.baseSize)
+        .attr('opacity', 0.8)
+        .attr('stroke-width', 2)
+        .transition()
+        .duration(1500)
+        .ease(d3.easeQuadOut)
+        .attr('r', d => d.baseSize + 12)
+        .attr('opacity', 0)
+        .attr('stroke-width', 0.5)
+        .on('end', animatePulse)
+    }
+    animatePulse()
+
+    // 节点圆点（带平滑过渡）
+    // 直接风险：实心填充 | 继承风险：空心+彩色边框 | 无风险：灰色
+    const nodeCircles = nodeGs.append('circle')
+      .attr('r', d => d.baseSize)
+      .attr('fill', d => {
         const risk = riskMap.get(d.data.name)
         if (risk) {
-          const riskType = risk.inherited ? '(Inherited from children)' : '(Direct match)'
-          const riskCount = risk.risks && risk.risks.length > 0 ? `\nDirect Risk Count: ${risk.risks.length}` : ''
-          return `${path}\n\nRisk Level: ${risk.level} ${riskType}\nConfidence: ${(risk.confidence * 100).toFixed(0)}%${riskCount}`
+          // 直接风险：实心填充
+          if (!risk.inherited) {
+            return getRiskColor(risk.level) || 'var(--color-accent-primary)'
+          }
+          // 继承风险：空心（白色填充）
+          return '#fff'
         }
-        return path
+        if (d.depth === 0) return 'var(--color-accent-primary)'
+        return d.children ? '#64748b' : '#94a3b8'
+      })
+      .attr('stroke', d => {
+        const risk = riskMap.get(d.data.name)
+        if (risk && risk.inherited) {
+          // 继承风险：用风险颜色作为边框
+          return getRiskColor(risk.level) || '#64748b'
+        }
+        return '#fff'
+      })
+      .attr('stroke-width', d => {
+        const risk = riskMap.get(d.data.name)
+        return (risk && risk.inherited) ? 2.5 : 1.5
+      })
+      .attr('cursor', 'pointer')
+      .style('pointer-events', 'all')
+      .style('transition', 'stroke 0.15s ease, stroke-width 0.15s ease')
+
+    // 顶层标签组（在所有节点之上，不会被遮盖）
+    const labelGroup = g.append('g')
+      .attr('class', 'labels')
+      .style('pointer-events', 'none')
+
+    const labelGs = labelGroup.selectAll('g')
+      .data(nodes)
+      .join('g')
+      .attr('transform', d => `translate(${d.px},${d.py})`)
+
+    // 节点文本标签背景（提高可读性）
+    const nodeLabelBgs = labelGs.append('rect')
+      .attr('class', 'node-label-bg')
+      .attr('fill', 'rgba(255,255,255,0.95)')
+      .attr('rx', 4)
+      .attr('ry', 4)
+      .attr('opacity', 0)
+      .attr('stroke', 'var(--color-border-light)')
+      .attr('stroke-width', 1)
+
+    // 节点文本标签（初始隐藏，鱼眼区域内显示）
+    const nodeLabels = labelGs.append('text')
+      .attr('class', 'node-label')
+      .attr('dy', d => -d.baseSize - 12)
+      .attr('text-anchor', 'middle')
+      .attr('font-size', 12)
+      .attr('font-weight', 600)
+      .attr('fill', 'var(--color-text-primary)')
+      .attr('opacity', 0)
+      .text(d => d.data.name)
+      .each(function(d) {
+        // 计算文本边界框用于背景
+        const bbox = this.getBBox()
+        d.labelWidth = bbox.width
+        d.labelHeight = bbox.height
       })
 
-    // —— 缩放：点击进入；再次点击同一节点→回父级；点击空白→回根 —— //
-    function clicked(p) {
-      focus = (p === focus && p.parent) ? p.parent : p
+    // 更新背景矩形尺寸
+    nodeLabelBgs
+      .attr('x', d => -(d.labelWidth || 0) / 2 - 6)
+      .attr('y', d => -d.baseSize - 12 - (d.labelHeight || 14) + 2)
+      .attr('width', d => (d.labelWidth || 0) + 12)
+      .attr('height', d => (d.labelHeight || 14) + 6)
 
-      // 以“去根后的起点”为基准；焦点为 root 时不补回根带
-      const baseY = Math.max(0, focus.y0)
-
-      root.each(d => {
-        d.target = {
-          // 垂直（值）归一化到整个高度
-          x0: (d.x0 - focus.x0) / (focus.x1 - focus.x0) * height,
-          x1: (d.x1 - focus.x0) / (focus.x1 - focus.x0) * height,
-          // 水平（深度）仅平移（保持每层厚度不缩放）
-          y0: d.y0 - baseY,
-          y1: d.y1 - baseY
+    // 鼠标移动时应用鱼眼效果
+    const applyFisheye = (focusX, focusY) => {
+      // 更新鱼眼边框位置
+      fisheyeBorder
+        .attr('cx', focusX)
+        .attr('cy', focusY)
+        .attr('opacity', 0.6)
+      
+      // 更新节点位置和大小
+      nodeGs.each(function(d) {
+        const result = fisheye([d.px, d.py], [focusX, focusY])
+        d.fx = result.x
+        d.fy = result.y
+        d.fscale = result.scale
+        
+        // 计算到鼠标的距离
+        const dx = d.px - focusX
+        const dy = d.py - focusY
+        d.distToMouse = Math.sqrt(dx * dx + dy * dy)
+      })
+      
+      // 找出离鼠标最近的1个节点
+      const sortedByDist = [...nodes].sort((a, b) => a.distToMouse - b.distToMouse)
+      const closestNode = sortedByDist[0]
+      
+      nodeGs.attr('transform', d => `translate(${d.fx},${d.fy})`)
+      nodeCircles.attr('r', d => d.baseSize * d.fscale)
+      
+      // 只显示最近的1个节点的标签
+      const getOpacity = d => {
+        if (d !== closestNode) return 0
+        if (d.distToMouse > fisheyeRadius) return 0
+        return 1
+      }
+      
+      // 智能调整标签位置，避免超出边界
+      labelGs.attr('transform', d => {
+        if (d !== closestNode) return `translate(${d.fx},${d.fy})`
+        
+        let lx = d.fx
+        let ly = d.fy
+        const labelW = (d.labelWidth || 100) / 2 + 10
+        const labelH = (d.labelHeight || 14) + (d.baseSize * d.fscale) + 20
+        
+        // 检查边界并调整
+        const maxX = cx - 10
+        const maxY = cy - 10
+        
+        // 水平边界
+        if (lx - labelW < -maxX) lx = -maxX + labelW
+        if (lx + labelW > maxX) lx = maxX - labelW
+        
+        // 垂直边界（标签在上方）
+        if (ly - labelH < -maxY) {
+          // 如果上方超出，把标签放到下方
+          d.labelBelow = true
+        } else {
+          d.labelBelow = false
         }
+        
+        return `translate(${lx},${ly})`
+      })
+      
+      nodeLabels
+        .attr('opacity', getOpacity)
+        .attr('font-size', 13)
+        .attr('dy', d => d.labelBelow ? (d.baseSize * d.fscale) + 20 : -(d.baseSize * d.fscale) - 14)
+      
+      nodeLabelBgs
+        .attr('opacity', d => getOpacity(d))
+        .attr('y', d => d.labelBelow 
+          ? (d.baseSize * d.fscale) + 20 - (d.labelHeight || 14) + 2
+          : -(d.baseSize * d.fscale) - 14 - (d.labelHeight || 14) + 2)
+      
+      // 更新连线
+      linkPaths.attr('d', d => {
+        const sourceResult = fisheye([d.source.px, d.source.py], [focusX, focusY])
+        const targetResult = fisheye([d.target.px, d.target.py], [focusX, focusY])
+        return `M${sourceResult.x},${sourceResult.y}L${targetResult.x},${targetResult.y}`
+      })
+    }
+
+    // 重置鱼眼效果
+    const resetFisheye = () => {
+      fisheyeBorder.attr('opacity', 0)
+      nodeGs.attr('transform', d => `translate(${d.px},${d.py})`)
+      labelGs.attr('transform', d => `translate(${d.px},${d.py})`)
+      nodeCircles.attr('r', d => d.baseSize)
+      nodeLabels.attr('opacity', 0)
+      nodeLabelBgs.attr('opacity', 0)
+      linkPaths.attr('d', d => `M${d.source.px},${d.source.py}L${d.target.px},${d.target.py}`)
+    }
+
+    // SVG 鼠标事件
+    svg.on('mousemove', (event) => {
+      const [mx, my] = d3.pointer(event, g.node())
+      setMousePos({ x: mx, y: my })
+      applyFisheye(mx, my)
+    })
+    
+    svg.on('mouseleave', () => {
+      setMousePos(null)
+      resetFisheye()
+      setHoveredNode(null)
+    })
+
+    // 节点交互
+    nodeCircles
+      .on('mouseenter', (event, d) => {
+        event.stopPropagation()
+        setHoveredNode(d)
+        
+        // 更新左上角节点名称
+        topLeftText.text(d.data.name)
+        const risk = riskMap.get(d.data.name)
+        if (risk && !risk.inherited) {
+          topLeftSub.text(`${risk.level} Risk`)
+            .attr('fill', getRiskColor(risk.level))
+        } else {
+          topLeftSub.text(`Level ${d.depth}`)
+            .attr('fill', 'var(--color-text-tertiary)')
+        }
+        
+        // 更新右下角风险详情
+        if (risk && !risk.inherited && risk.risks && risk.risks.length > 0) {
+          riskDetailTitle.text('RISK DETAIL')
+          
+          // 显示推理原因
+          const firstRisk = risk.risks[0]
+          const reason = firstRisk.reason || firstRisk.inference_chain || ''
+          // 截断过长的原因
+          const reasonText = reason.length > 30 ? reason.slice(0, 30) + '...' : reason
+          riskDetailLine1.text(reasonText || '')
+          
+          // 显示涉及的信息元素数量
+          const usedInfons = firstRisk.used_infons || firstRisk.infon_ids || []
+          const infonCount = Array.isArray(usedInfons) ? usedInfons.length : 0
+          riskDetailLine2.text(infonCount > 0 ? `${infonCount} info element(s)` : '')
+        } else {
+          riskDetailTitle.text('')
+          riskDetailLine1.text('')
+          riskDetailLine2.text('')
+        }
+        
+        // 高亮当前节点
+        d3.select(event.currentTarget)
+          .attr('stroke', 'var(--color-accent-primary)')
+          .attr('stroke-width', 2.5)
+        
+        // 高亮路径到根
+        const ancestors = d.ancestors()
+        const ancestorNames = new Set(ancestors.map(a => a.data.name))
+        
+        linkPaths
+          .attr('stroke', link => {
+            if (ancestorNames.has(link.source.data.name) && ancestorNames.has(link.target.data.name)) {
+              return 'var(--color-accent-primary)'
+            }
+            return 'var(--color-border-light)'
+          })
+          .attr('stroke-width', link => {
+            if (ancestorNames.has(link.source.data.name) && ancestorNames.has(link.target.data.name)) {
+              return 2.5
+            }
+            return 1
+          })
+          .attr('stroke-opacity', link => {
+            if (ancestorNames.has(link.source.data.name) && ancestorNames.has(link.target.data.name)) {
+              return 1
+            }
+            return 0.2
+          })
+      })
+      .on('mouseleave', (event, d) => {
+        // 清空左上角
+        topLeftText.text('')
+        topLeftSub.text('')
+        
+        // 清空右下角
+        riskDetailTitle.text('')
+        riskDetailLine1.text('')
+        riskDetailLine2.text('')
+        
+        // 恢复节点边框
+        d3.select(event.currentTarget)
+          .attr('stroke', d => {
+            const risk = riskMap.get(d.data.name)
+            if (risk && risk.inherited) {
+              return getRiskColor(risk.level) || '#64748b'
+            }
+            return '#fff'
+          })
+          .attr('stroke-width', d => {
+            const risk = riskMap.get(d.data.name)
+            return (risk && risk.inherited) ? 2.5 : 1.5
+          })
+        
+        // 恢复连线
+        linkPaths
+          .attr('stroke', 'var(--color-border-light)')
+          .attr('stroke-width', 1)
+          .attr('stroke-opacity', 0.5)
       })
 
-      const t = svg.selectAll('.cells g').transition().duration(750)
-        .attr('transform', d => `translate(${px(d.target.y0)},${px(d.target.x0)})`)
-
-      rect.transition(t)
-        .attr('width',  d => Math.max(1, px(d.target.y1) - px(d.target.y0)))
-        .attr('height', d => Math.max(1, px(d.target.x1) - px(d.target.x0)))
-
-      // Transition clip rects
-      svg.selectAll('clipPath rect').transition(t)
-        .attr('width',  d => Math.max(1, px(d.target.y1) - px(d.target.y0)))
-        .attr('height', d => Math.max(1, px(d.target.x1) - px(d.target.x0)))
-
-      text.transition(t)
-        .attr('fill-opacity', d => +labelVisible(d.target))
-    }
-
-    function labelVisible(d) {
-      const w = (d.y1 - d.y0)
-      const h = (d.x1 - d.x0)
-      return w > 38 && h > 18
-    }
   }, [lawData, lawIdx, size, riskMap])
 
   // 处理复选框变化
@@ -1100,7 +1541,11 @@ export default function LawTree() {
         {isCustomMode ? (
           renderCustomPrivacyOptions()
         ) : (
-          <svg ref={svgRef} style={{ width: '100%', height: size.height, display: 'block' }} />
+          <svg ref={svgRef} style={{ 
+            width: '100%', 
+            height: size.height, 
+            display: 'block'
+          }} />
         )}
       </div>
     </div>
