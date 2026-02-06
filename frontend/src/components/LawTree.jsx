@@ -424,15 +424,41 @@ export default function LawTree() {
       return [y * Math.cos(angle), y * Math.sin(angle)]
     }
 
-    // 预计算所有节点的基础位置
+    // 预计算所有节点的基础位置和信息
     const nodes = root.descendants()
     nodes.forEach(d => {
       const [px, py] = radialPoint(d.x, d.y)
       d.px = px
       d.py = py
-      d.baseSize = d.depth === 0 ? 6 : (d.children ? 4 : 3)
+      
+      // 节点大小：根据子树叶子节点数量编码（越多越大）
+      const leafCount = d.leaves().length
+      if (d.depth === 0) {
+        d.baseSize = 7
+      } else if (d.children) {
+        // 分支节点：大小根据叶子数量，区间 3.5 ~ 6
+        d.baseSize = Math.min(6, Math.max(3.5, 2 + Math.sqrt(leafCount) * 0.8))
+      } else {
+        // 叶子节点
+        d.baseSize = 3
+      }
+      
       const risk = riskMap.get(d.data.name)
-      if (risk) d.baseSize += 1.5
+      if (risk && !risk.inherited) d.baseSize += 1.5
+      
+      // 分支节点：计算风险覆盖率（子树中有多少比例的叶子有风险）
+      d.riskRatio = 0
+      if (d.children) {
+        const leaves = d.leaves()
+        const riskyLeaves = leaves.filter(l => {
+          const r = riskMap.get(l.data.name)
+          return r && !r.inherited
+        })
+        d.riskRatio = leaves.length > 0 ? riskyLeaves.length / leaves.length : 0
+      }
+      
+      // 标记是否是叶子
+      d.isLeaf = !d.children || d.children.length === 0
     })
     
     const links = root.links()
@@ -541,7 +567,7 @@ export default function LawTree() {
 
     // 左下角：图例
     const bottomLeft = svg.append('g')
-      .attr('transform', `translate(${padding}, ${height - padding - 64})`)
+      .attr('transform', `translate(${padding}, ${height - padding - 78})`)
     
     const rowHeight = 14
     const levelLegendData = [
@@ -564,16 +590,31 @@ export default function LawTree() {
     
     const typeLegend = bottomLeft.append('g')
       .attr('transform', `translate(0, ${levelLegendData.length * rowHeight + 6})`)
+    // 分支节点：圆形
     typeLegend.append('circle')
       .attr('r', 4).attr('cx', 4).attr('cy', 0)
-      .attr('fill', '#94a3b8')
+      .attr('fill', '#64748b')
     typeLegend.append('text')
       .attr('x', 14).attr('y', 4)
       .attr('font-size', 10)
       .attr('fill', 'var(--color-text-tertiary)')
-      .text('Direct risk')
-    const inheritedRow = typeLegend.append('g')
+      .text('Category')
+    // 叶子节点：方形
+    const leafRow = typeLegend.append('g')
       .attr('transform', `translate(0, ${rowHeight})`)
+    leafRow.append('rect')
+      .attr('x', 0.5).attr('y', -3.5)
+      .attr('width', 7).attr('height', 7)
+      .attr('rx', 1.5)
+      .attr('fill', '#94a3b8')
+    leafRow.append('text')
+      .attr('x', 14).attr('y', 4)
+      .attr('font-size', 10)
+      .attr('fill', 'var(--color-text-tertiary)')
+      .text('Specific item')
+    // 继承风险：空心
+    const inheritedRow = typeLegend.append('g')
+      .attr('transform', `translate(0, ${rowHeight * 2})`)
     inheritedRow.append('circle')
       .attr('r', 4).attr('cx', 4).attr('cy', 0)
       .attr('fill', '#fff')
@@ -622,7 +663,7 @@ export default function LawTree() {
       .attr('opacity', 0)
       .style('pointer-events', 'none')
 
-    // 绘制连线
+    // 绘制连线（粗细随层级，曲线连接，颜色根据风险状态）
     const linkGroup = g.append('g')
       .attr('class', 'links')
       .attr('fill', 'none')
@@ -630,10 +671,34 @@ export default function LawTree() {
     const linkPaths = linkGroup.selectAll('path')
       .data(links)
       .join('path')
-      .attr('d', d => `M${d.source.px},${d.source.py}L${d.target.px},${d.target.py}`)
-      .attr('stroke', 'var(--color-border-light)')
-      .attr('stroke-width', 1)
-      .attr('stroke-opacity', 0.5)
+      .attr('d', d => {
+        // 使用贝塞尔曲线让连线更柔和
+        const sx = d.source.px, sy = d.source.py
+        const tx = d.target.px, ty = d.target.py
+        const mx = (sx + tx) / 2, my = (sy + ty) / 2
+        // 控制点向中心偏移，让曲线有弧度
+        const cpx = mx * 0.85, cpy = my * 0.85
+        return `M${sx},${sy}Q${cpx},${cpy} ${tx},${ty}`
+      })
+      .attr('stroke', d => {
+        // 目标节点有直接风险时，连线带风险色
+        const targetRisk = riskMap.get(d.target.data.name)
+        if (targetRisk && !targetRisk.inherited) {
+          return getRiskColor(targetRisk.level) || 'var(--color-border-medium)'
+        }
+        return 'var(--color-border-medium)'
+      })
+      .attr('stroke-width', d => {
+        // 浅层粗，深层细
+        const depth = d.target.depth
+        return Math.max(0.8, 2.5 - depth * 0.4)
+      })
+      .attr('stroke-opacity', d => {
+        // 有风险的连线更醒目
+        const targetRisk = riskMap.get(d.target.data.name)
+        if (targetRisk && !targetRisk.inherited) return 0.7
+        return 0.35
+      })
       .style('transition', 'stroke 0.15s ease, stroke-width 0.15s ease, stroke-opacity 0.15s ease')
 
     // 绘制节点
@@ -644,6 +709,39 @@ export default function LawTree() {
       .data(nodes)
       .join('g')
       .attr('transform', d => `translate(${d.px},${d.py})`)
+
+    // 分支节点：风险覆盖弧线（背景圆弧，显示子节点中风险占比）
+    const riskArcGen = d3.arc()
+      .startAngle(-Math.PI / 2)
+    
+    nodeGs.filter(d => d.children && d.riskRatio > 0)
+      .append('path')
+      .attr('class', 'risk-arc')
+      .attr('d', d => {
+        const endAngle = -Math.PI / 2 + d.riskRatio * Math.PI * 2
+        return riskArcGen({
+          innerRadius: d.baseSize + 1.5,
+          outerRadius: d.baseSize + 3.5,
+          endAngle: endAngle
+        })
+      })
+      .attr('fill', d => {
+        const risk = riskMap.get(d.data.name)
+        if (risk) return getRiskColor(risk.level) || '#f59e0b'
+        return '#f59e0b'
+      })
+      .attr('opacity', 0.7)
+      .style('pointer-events', 'none')
+    
+    // 分支节点：弧线背景底环
+    nodeGs.filter(d => d.children && d.riskRatio > 0)
+      .append('circle')
+      .attr('r', d => d.baseSize + 2.5)
+      .attr('fill', 'none')
+      .attr('stroke', 'var(--color-border-light)')
+      .attr('stroke-width', 1)
+      .attr('opacity', 0.3)
+      .style('pointer-events', 'none')
 
     // 高风险节点脉冲光环（动画效果）
     const pulseRings = nodeGs.filter(d => {
@@ -675,38 +773,67 @@ export default function LawTree() {
     }
     animatePulse()
 
-    // 节点圆点（带平滑过渡）
-    // 直接风险：实心填充 | 继承风险：空心+彩色边框 | 无风险：灰色
-    const nodeCircles = nodeGs.append('circle')
-      .attr('r', d => d.baseSize)
+    // 获取节点颜色函数
+    const getNodeFill = (d) => {
+      const risk = riskMap.get(d.data.name)
+        if (risk) {
+        if (!risk.inherited) return getRiskColor(risk.level) || 'var(--color-accent-primary)'
+        return '#fff'
+      }
+      if (d.depth === 0) return 'var(--color-accent-primary)'
+      // 分支节点颜色根据深度渐变
+      if (d.children) {
+        const t = d.depth / maxDepth
+        return d3.interpolate('#475569', '#94a3b8')(t)
+      }
+      return '#b0bec5'
+    }
+    
+    const getNodeStroke = (d) => {
+      const risk = riskMap.get(d.data.name)
+      if (risk && risk.inherited) return getRiskColor(risk.level) || '#64748b'
+      return '#fff'
+    }
+    
+    const getNodeStrokeWidth = (d) => {
+      const risk = riskMap.get(d.data.name)
+      return (risk && risk.inherited) ? 2 : 1.5
+    }
+
+    // 风险节点光晕效果（底层阴影）
+    nodeGs.filter(d => {
+      const risk = riskMap.get(d.data.name)
+      return risk && !risk.inherited
+    })
+    .append('circle')
+      .attr('r', d => d.baseSize + 5)
       .attr('fill', d => {
         const risk = riskMap.get(d.data.name)
-        if (risk) {
-          // 直接风险：实心填充
-          if (!risk.inherited) {
-            return getRiskColor(risk.level) || 'var(--color-accent-primary)'
-          }
-          // 继承风险：空心（白色填充）
-          return '#fff'
+        return getRiskColor(risk.level) || '#f59e0b'
+      })
+      .attr('opacity', 0.15)
+      .style('pointer-events', 'none')
+      .style('filter', 'blur(3px)')
+
+    // 叶子节点用小方形，分支节点用圆形
+    const nodeCircles = nodeGs.append('path')
+      .attr('d', d => {
+        const s = d.baseSize
+        if (d.isLeaf) {
+          // 叶子：圆角方形
+          const r = 1.5
+          return `M${-s + r},${-s} L${s - r},${-s} Q${s},${-s} ${s},${-s + r} L${s},${s - r} Q${s},${s} ${s - r},${s} L${-s + r},${s} Q${-s},${s} ${-s},${s - r} L${-s},${-s + r} Q${-s},${-s} ${-s + r},${-s}Z`
         }
-        if (d.depth === 0) return 'var(--color-accent-primary)'
-        return d.children ? '#64748b' : '#94a3b8'
+        // 分支/根：圆形
+        return d3.symbol().type(d3.symbolCircle).size(s * s * Math.PI)()
       })
-      .attr('stroke', d => {
-        const risk = riskMap.get(d.data.name)
-        if (risk && risk.inherited) {
-          // 继承风险：用风险颜色作为边框
-          return getRiskColor(risk.level) || '#64748b'
-        }
-        return '#fff'
-      })
-      .attr('stroke-width', d => {
-        const risk = riskMap.get(d.data.name)
-        return (risk && risk.inherited) ? 2.5 : 1.5
-      })
+      .attr('fill', getNodeFill)
+      .attr('stroke', getNodeStroke)
+      .attr('stroke-width', getNodeStrokeWidth)
       .attr('cursor', 'pointer')
       .style('pointer-events', 'all')
       .style('transition', 'stroke 0.15s ease, stroke-width 0.15s ease')
+    
 
     // 顶层标签组（在所有节点之上，不会被遮盖）
     const labelGroup = g.append('g')
@@ -777,8 +904,8 @@ export default function LawTree() {
       const sortedByDist = [...nodes].sort((a, b) => a.distToMouse - b.distToMouse)
       const closestNode = sortedByDist[0]
       
-      nodeGs.attr('transform', d => `translate(${d.fx},${d.fy})`)
-      nodeCircles.attr('r', d => d.baseSize * d.fscale)
+      // 移动节点并缩放整个节点组（让弧线、光晕等子元素一起缩放）
+      nodeGs.attr('transform', d => `translate(${d.fx},${d.fy}) scale(${d.fscale})`)
       
       // 只显示最近的1个节点的标签
       const getOpacity = d => {
@@ -826,23 +953,30 @@ export default function LawTree() {
           ? (d.baseSize * d.fscale) + 20 - (d.labelHeight || 14) + 2
           : -(d.baseSize * d.fscale) - 14 - (d.labelHeight || 14) + 2)
       
-      // 更新连线
+      // 更新连线（保持曲线）
       linkPaths.attr('d', d => {
         const sourceResult = fisheye([d.source.px, d.source.py], [focusX, focusY])
         const targetResult = fisheye([d.target.px, d.target.py], [focusX, focusY])
-        return `M${sourceResult.x},${sourceResult.y}L${targetResult.x},${targetResult.y}`
+        const sx = sourceResult.x, sy = sourceResult.y
+        const tx = targetResult.x, ty = targetResult.y
+        const cpx = (sx + tx) / 2 * 0.85, cpy = (sy + ty) / 2 * 0.85
+        return `M${sx},${sy}Q${cpx},${cpy} ${tx},${ty}`
       })
     }
 
     // 重置鱼眼效果
     const resetFisheye = () => {
       fisheyeBorder.attr('opacity', 0)
-      nodeGs.attr('transform', d => `translate(${d.px},${d.py})`)
+      nodeGs.attr('transform', d => `translate(${d.px},${d.py}) scale(1)`)
       labelGs.attr('transform', d => `translate(${d.px},${d.py})`)
-      nodeCircles.attr('r', d => d.baseSize)
       nodeLabels.attr('opacity', 0)
       nodeLabelBgs.attr('opacity', 0)
-      linkPaths.attr('d', d => `M${d.source.px},${d.source.py}L${d.target.px},${d.target.py}`)
+      linkPaths.attr('d', d => {
+        const sx = d.source.px, sy = d.source.py
+        const tx = d.target.px, ty = d.target.py
+        const cpx = (sx + tx) / 2 * 0.85, cpy = (sy + ty) / 2 * 0.85
+        return `M${sx},${sy}Q${cpx},${cpy} ${tx},${ty}`
+      })
     }
 
     // SVG 鼠标事件
@@ -944,17 +1078,8 @@ export default function LawTree() {
         
         // 恢复节点边框
         d3.select(event.currentTarget)
-          .attr('stroke', d => {
-            const risk = riskMap.get(d.data.name)
-            if (risk && risk.inherited) {
-              return getRiskColor(risk.level) || '#64748b'
-            }
-            return '#fff'
-          })
-          .attr('stroke-width', d => {
-            const risk = riskMap.get(d.data.name)
-            return (risk && risk.inherited) ? 2.5 : 1.5
-          })
+          .attr('stroke', getNodeStroke(d))
+          .attr('stroke-width', getNodeStrokeWidth(d))
         
         // 恢复连线
         linkPaths
