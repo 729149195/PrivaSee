@@ -90,6 +90,34 @@ export function normalizeInfonOutput(raw, { recordTimeISO, defaultModality, sess
       normalized.run_metadata.modality = defaultModality || 'text'
     }
     
+    // === 主记忆流扩展字段 ===
+    
+    // 模态标签 (区分来源: text | image | audio)
+    if (!normalized.modality_tag) {
+      normalized.modality_tag = defaultModality || 'text'
+    }
+    
+    // 证据指针 (用于回溯到原始输入位置, 由后端 memory stream 填充)
+    if (!normalized.evidence_pointer) {
+      normalized.evidence_pointer = null
+    }
+    
+    // 语义向量 (由后端计算, 前端不存储)
+    // normalized.semantic_vector = null
+    
+    // 关联信息元列表 (由后端 memory stream ingest 时的 Top-K 绑定填充)
+    if (!normalized.associations) {
+      normalized.associations = []
+    }
+    
+    // 会话标识和轮次编号 (用于证据指针的构建)
+    if (!normalized.session_id) {
+      normalized.session_id = sessionId || ''
+    }
+    if (normalized.round_num === undefined) {
+      normalized.round_num = messageRound || 1
+    }
+    
     return normalized
   })
   

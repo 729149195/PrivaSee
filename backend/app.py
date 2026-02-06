@@ -79,6 +79,14 @@ def create_app(enable_ocr: bool = True, enable_whisper: bool = True):
         except ImportError as e:
             logger.warning(f"Whisper import failed: {e}")
     
+    # 主记忆流服务 (Memory Stream) - 始终启用
+    try:
+        from services.memory_stream_service import memory_bp, init_memory_stream_service
+        app.register_blueprint(memory_bp)
+        enabled_services.append('MemoryStream')
+    except ImportError as e:
+        logger.warning(f"MemoryStream import failed: {e}")
+    
     # =============================================================================
     # 通用 API 路由
     # =============================================================================
@@ -132,6 +140,21 @@ def create_app(enable_ocr: bool = True, enable_whisper: bool = True):
                     'transcribe': '/api/whisper/transcribe',
                     'models': '/api/whisper/models',
                     'languages': '/api/whisper/languages'
+                }
+            })
+        
+        if 'MemoryStream' in enabled_services:
+            services.append({
+                'name': 'MemoryStream',
+                'description': '主记忆流与关联回溯服务',
+                'endpoints': {
+                    'health': '/api/memory/health',
+                    'ingest': '/api/memory/ingest (POST - 批量写入信息元)',
+                    'search': '/api/memory/search (POST - 向量相似度检索)',
+                    'trigger_check': '/api/memory/trigger-check (POST - 风险触发检索)',
+                    'backtrace': '/api/memory/backtrace/<iid> (GET - 关联回溯查询)',
+                    'clear': '/api/memory/clear (POST - 一键清空)',
+                    'stats': '/api/memory/stats'
                 }
             })
         

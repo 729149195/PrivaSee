@@ -10,6 +10,7 @@ import { createPrivacySlice } from './store/slices/privacySlice'
 import { createProtectionSlice } from './store/slices/protectionSlice'
 import { createUserSlice } from './store/slices/userSlice'
 import { createMessageSlice } from './store/slices/messageSlice'
+import { createMemoryStreamSlice } from './store/slices/memoryStreamSlice'
 
 export const useStore = create((set, get) => ({
   // 组合所有 Slices
@@ -20,6 +21,7 @@ export const useStore = create((set, get) => ({
   ...createProtectionSlice(set, get),
   ...createUserSlice(set, get),
   ...createMessageSlice(set, get),
+  ...createMemoryStreamSlice(set, get),
 }))
 
 // 自动保存

@@ -1,0 +1,1220 @@
+#!/usr/bin/env python3
+"""
+Memory Stream Service - 主记忆流与关联回溯服务模块
+
+功能概述：
+1. 主记忆流 (MemoryStream): 跨会话的向量结构化信息元库，配合风险触发式可控检索
+2. 关联回溯 (AssociationBacktracking): 基于主记忆流索引库的 Top-K 关联嵌入机制
+
+核心特性：
+- 以信息元为最小存储单元，每个信息元对应一个语义向量
+- 采用 HNSW 算法实现毫秒级向量相似度检索
+- 仅追加不更新策略，保留完整历史轨迹
+- 风险触发式检索：准标识符组合检测、细化线索检测、敏感域命中
+- 写入时同步计算 Top-K 关联绑定，无需后台进程
+- 统一的跨模态证据标识格式
+"""
+
+import os
+import json
+import time
+import logging
+import threading
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple, Any
+
+import numpy as np
+from flask import Blueprint, request, jsonify
+
+# 创建 Blueprint
+memory_bp = Blueprint('memory', __name__, url_prefix='/api/memory')
+
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# 配置
+# =============================================================================
+
+def get_config():
+    """获取配置"""
+    from config import MEMORY_STREAM_DATA_DIR, MEMORY_STREAM_EMBEDDING_MODEL
+    return {
+        'data_dir': str(MEMORY_STREAM_DATA_DIR),
+        'embedding_model': MEMORY_STREAM_EMBEDDING_MODEL,
+    }
+
+# =============================================================================
+# 常量定义
+# =============================================================================
+
+# HNSW 参数
+HNSW_SPACE = 'cosine'
+HNSW_EF_CONSTRUCTION = 200
+HNSW_M = 16
+HNSW_EF_SEARCH = 50
+
+# 检索参数
+DEFAULT_TOP_K = 5
+MAX_RETRIEVAL_INFONS = 5
+MAX_RETRIEVAL_TOKENS = 500
+REFINEMENT_SIMILARITY_THRESHOLD = 0.85
+ASSOCIATION_TOP_K = 3
+
+# 准标识符类别关键词
+QUASI_IDENTIFIER_CATEGORIES = {
+    'geo_location': [
+        '地址', '位置', '城市', '省份', '区', '街道', '路', '号', '小区', '社区',
+        '地点', '坐标', '经纬度', '邮编',
+        'address', 'location', 'city', 'province', 'street', 'district',
+        'zip', 'postal', 'coordinates', 'latitude', 'longitude',
+    ],
+    'temporal': [
+        '日期', '时间', '年份', '月份', '出生日期', '生日',
+        'date', 'time', 'birthday', 'birth_date', 'year', 'month',
+        'schedule', 'appointment',
+    ],
+    'org_role': [
+        '公司', '单位', '组织', '学校', '大学', '部门', '职位', '职务', '工号',
+        '学号', '员工', '同事', '上司', '下属',
+        'company', 'organization', 'school', 'university', 'department',
+        'position', 'title', 'employee', 'colleague', 'student_id',
+    ],
+    'rare_interest': [
+        '病症', '过敏', '药物', '手术', '基因', '血型',
+        '收藏', '嗜好', '癖好', '特殊习惯', '罕见',
+        'rare', 'hobby', 'collection', 'allergy', 'medication',
+        'surgery', 'genetic', 'blood_type',
+    ],
+    'biometric': [
+        '指纹', '虹膜', '面部', '人脸', '声纹', '体重', '身高', '步态',
+        '基因', 'DNA',
+        'fingerprint', 'iris', 'face', 'facial', 'voiceprint',
+        'weight', 'height', 'gait', 'dna', 'biometric',
+    ],
+}
+
+# 敏感领域关键词
+SENSITIVE_DOMAINS = {
+    'health_medical': [
+        '病', '症', '诊断', '治疗', '手术', '药物', '处方', '病历', '体检',
+        '医院', '医生', '护士', '科室', '住院', '门诊', '化验', '检查',
+        '癌', '肿瘤', '糖尿病', '高血压', '心脏', '精神', '抑郁', '焦虑',
+        'disease', 'diagnosis', 'treatment', 'surgery', 'prescription',
+        'hospital', 'doctor', 'medical', 'health', 'cancer', 'diabetes',
+        'depression', 'anxiety', 'mental',
+    ],
+    'financial': [
+        '银行', '账户', '账号', '卡号', '信用卡', '贷款', '存款', '工资',
+        '收入', '税', '投资', '股票', '基金', '保险', '理财', '债务',
+        'bank', 'account', 'credit_card', 'loan', 'salary', 'income',
+        'tax', 'investment', 'stock', 'fund', 'insurance', 'debt',
+    ],
+    'legal_dispute': [
+        '案件', '诉讼', '法院', '律师', '判决', '犯罪', '逮捕', '拘留',
+        '罚款', '违法', '刑事', '民事', '仲裁',
+        'case', 'lawsuit', 'court', 'lawyer', 'verdict', 'crime',
+        'arrest', 'penalty', 'criminal', 'civil', 'arbitration',
+    ],
+    'intimate_relationship': [
+        '恋人', '配偶', '伴侣', '婚姻', '离婚', '约会', '性', '怀孕',
+        '情感', '亲密',
+        'spouse', 'partner', 'marriage', 'divorce', 'dating',
+        'pregnancy', 'intimate', 'relationship',
+    ],
+    'explicit_pii': [
+        '身份证', '护照', '社保', '驾照', '学历证', '毕业证', '户口',
+        '手机号', '电话', '邮箱', 'email', '微信', 'QQ',
+        'ID_card', 'passport', 'social_security', 'driver_license',
+        'phone', 'mobile', 'wechat',
+    ],
+    'document_image': [
+        '证件', '证书', '合同', '协议', '发票', '收据', '成绩单', '简历',
+        '委托书', '授权书',
+        'certificate', 'contract', 'agreement', 'invoice', 'receipt',
+        'transcript', 'resume', 'authorization',
+    ],
+}
+
+# =============================================================================
+# 全局变量
+# =============================================================================
+
+_embedding_model = None
+_embedding_lock = threading.Lock()
+_db_lock = threading.Lock()
+
+
+# =============================================================================
+# Embedding 模型管理
+# =============================================================================
+
+def load_embedding_model():
+    """加载 sentence-transformers 嵌入模型"""
+    global _embedding_model
+
+    if _embedding_model is None:
+        with _embedding_lock:
+            if _embedding_model is None:
+                from sentence_transformers import SentenceTransformer
+                config = get_config()
+                model_name = config['embedding_model']
+                logger.info(f"加载嵌入模型: {model_name}")
+                _embedding_model = SentenceTransformer(model_name)
+                logger.info(f"✓ 嵌入模型加载完成, 维度: {_embedding_model.get_sentence_embedding_dimension()}")
+
+    return _embedding_model
+
+
+def compute_embedding(text: str) -> np.ndarray:
+    """计算文本的语义向量"""
+    model = load_embedding_model()
+    embedding = model.encode(text, normalize_embeddings=True)
+    return embedding.astype(np.float32)
+
+
+def compute_embeddings_batch(texts: List[str]) -> np.ndarray:
+    """批量计算语义向量"""
+    model = load_embedding_model()
+    embeddings = model.encode(texts, normalize_embeddings=True, batch_size=32)
+    return embeddings.astype(np.float32)
+
+
+def get_embedding_dim() -> int:
+    """获取嵌入维度"""
+    model = load_embedding_model()
+    return model.get_sentence_embedding_dimension()
+
+
+# =============================================================================
+# SQLite 存储层
+# =============================================================================
+
+class MemoryStore:
+    """信息元持久化存储 (SQLite)"""
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self._init_db()
+
+    def _get_conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
+
+    def _init_db(self):
+        with self._get_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS infon_memory (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    iid TEXT NOT NULL UNIQUE,
+                    infon_type TEXT NOT NULL,
+                    modality TEXT NOT NULL DEFAULT 'text',
+                    session_id TEXT NOT NULL,
+                    round_num INTEGER NOT NULL DEFAULT 1,
+                    entity TEXT DEFAULT '',
+                    attribute TEXT DEFAULT '',
+                    text_for_embedding TEXT NOT NULL,
+                    vector BLOB NOT NULL,
+                    evidence_pointer TEXT DEFAULT '',
+                    associations TEXT DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    extra_json TEXT DEFAULT '{}'
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_infon_iid ON infon_memory(iid)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_infon_session ON infon_memory(session_id)
+            """)
+            conn.commit()
+
+    def insert_infon(self, record: Dict) -> bool:
+        """插入一条信息元记录 (append-only)"""
+        vector_blob = np.array(record['vector'], dtype=np.float32).tobytes()
+        try:
+            with _db_lock:
+                with self._get_conn() as conn:
+                    conn.execute("""
+                        INSERT OR IGNORE INTO infon_memory
+                        (iid, infon_type, modality, session_id, round_num,
+                         entity, attribute, text_for_embedding, vector,
+                         evidence_pointer, associations, created_at, extra_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        record['iid'],
+                        record.get('infon_type', 'DESC'),
+                        record.get('modality', 'text'),
+                        record.get('session_id', ''),
+                        record.get('round_num', 1),
+                        record.get('entity', ''),
+                        record.get('attribute', ''),
+                        record['text_for_embedding'],
+                        vector_blob,
+                        record.get('evidence_pointer', ''),
+                        json.dumps(record.get('associations', []), ensure_ascii=False),
+                        record.get('created_at', datetime.now().isoformat()),
+                        json.dumps(record.get('extra', {}), ensure_ascii=False),
+                    ))
+                    conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            logger.debug(f"信息元已存在 (append-only skip): {record['iid']}")
+            return False
+        except Exception as e:
+            logger.error(f"插入信息元失败: {e}")
+            return False
+
+    def get_all_vectors(self) -> Tuple[List[str], np.ndarray]:
+        """获取所有信息元的 iid 和向量"""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT iid, vector FROM infon_memory ORDER BY id"
+            ).fetchall()
+
+        if not rows:
+            return [], np.array([], dtype=np.float32)
+
+        iids = [r['iid'] for r in rows]
+        dim = len(np.frombuffer(rows[0]['vector'], dtype=np.float32))
+        vectors = np.zeros((len(rows), dim), dtype=np.float32)
+        for i, r in enumerate(rows):
+            vectors[i] = np.frombuffer(r['vector'], dtype=np.float32)
+
+        return iids, vectors
+
+    def get_infon_by_iid(self, iid: str) -> Optional[Dict]:
+        """根据 iid 查询信息元"""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM infon_memory WHERE iid = ?", (iid,)
+            ).fetchone()
+
+        if not row:
+            return None
+        return self._row_to_dict(row)
+
+    def get_infons_by_iids(self, iids: List[str]) -> List[Dict]:
+        """批量根据 iid 查询信息元"""
+        if not iids:
+            return []
+        placeholders = ','.join('?' * len(iids))
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM infon_memory WHERE iid IN ({placeholders})", iids
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def count(self) -> int:
+        """获取信息元总数"""
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT COUNT(*) as cnt FROM infon_memory").fetchone()
+        return row['cnt'] if row else 0
+
+    def clear_all(self):
+        """清空所有数据"""
+        with _db_lock:
+            with self._get_conn() as conn:
+                conn.execute("DELETE FROM infon_memory")
+                conn.commit()
+        logger.info("✓ 所有信息元记录已清空")
+
+    def _row_to_dict(self, row: sqlite3.Row) -> Dict:
+        """将数据库行转为字典"""
+        d = dict(row)
+        # 解析 vector
+        if 'vector' in d and isinstance(d['vector'], bytes):
+            d['vector'] = np.frombuffer(d['vector'], dtype=np.float32).tolist()
+        # 解析 associations
+        if 'associations' in d and isinstance(d['associations'], str):
+            try:
+                d['associations'] = json.loads(d['associations'])
+            except json.JSONDecodeError:
+                d['associations'] = []
+        # 解析 extra_json
+        if 'extra_json' in d and isinstance(d['extra_json'], str):
+            try:
+                d['extra_json'] = json.loads(d['extra_json'])
+            except json.JSONDecodeError:
+                d['extra_json'] = {}
+        return d
+
+
+# =============================================================================
+# HNSW 向量索引
+# =============================================================================
+
+class HNSWIndex:
+    """基于 hnswlib 的 HNSW 向量索引"""
+
+    def __init__(self, dim: int, max_elements: int = 100000):
+        self.dim = dim
+        self.max_elements = max_elements
+        self.index = None
+        self.iid_to_label = {}   # iid -> internal label
+        self.label_to_iid = {}   # internal label -> iid
+        self.current_count = 0
+        self._lock = threading.Lock()
+        self._init_index()
+
+    def _init_index(self):
+        """初始化 HNSW 索引"""
+        try:
+            import hnswlib
+            self.index = hnswlib.Index(space=HNSW_SPACE, dim=self.dim)
+            self.index.init_index(
+                max_elements=self.max_elements,
+                ef_construction=HNSW_EF_CONSTRUCTION,
+                M=HNSW_M
+            )
+            self.index.set_ef(HNSW_EF_SEARCH)
+            logger.info(f"✓ HNSW 索引初始化完成 (dim={self.dim})")
+        except ImportError:
+            logger.warning("hnswlib 未安装，回退到 FAISS")
+            self._init_faiss_index()
+
+    def _init_faiss_index(self):
+        """使用 FAISS 作为后备索引"""
+        import faiss
+        self.index = faiss.IndexFlatIP(self.dim)  # 内积 (已归一化 = 余弦相似度)
+        self._is_faiss = True
+        logger.info(f"✓ FAISS 索引初始化完成 (dim={self.dim})")
+
+    @property
+    def _is_hnswlib(self):
+        return not getattr(self, '_is_faiss', False)
+
+    def add(self, iid: str, vector: np.ndarray):
+        """添加向量到索引"""
+        with self._lock:
+            if iid in self.iid_to_label:
+                return  # 已存在，跳过
+
+            vec = vector.reshape(1, -1).astype(np.float32)
+            label = self.current_count
+
+            if self._is_hnswlib:
+                # 检查是否需要扩容
+                if self.current_count >= self.max_elements:
+                    new_max = self.max_elements * 2
+                    self.index.resize_index(new_max)
+                    self.max_elements = new_max
+                self.index.add_items(vec, np.array([label]))
+            else:
+                self.index.add(vec)
+
+            self.iid_to_label[iid] = label
+            self.label_to_iid[label] = iid
+            self.current_count += 1
+
+    def search(self, query_vector: np.ndarray, k: int = DEFAULT_TOP_K,
+               exclude_iids: Optional[set] = None) -> List[Tuple[str, float]]:
+        """检索最相似的 k 个向量，返回 [(iid, similarity), ...]"""
+        if self.current_count == 0:
+            return []
+
+        with self._lock:
+            vec = query_vector.reshape(1, -1).astype(np.float32)
+            # 多取一些以便排除
+            actual_k = min(k + len(exclude_iids or set()) + 1, self.current_count)
+
+            if self._is_hnswlib:
+                labels, distances = self.index.knn_query(vec, k=actual_k)
+                # hnswlib cosine space 返回的距离 = 1 - cos_sim
+                results = []
+                for lbl, dist in zip(labels[0], distances[0]):
+                    iid = self.label_to_iid.get(int(lbl))
+                    if iid and (not exclude_iids or iid not in exclude_iids):
+                        similarity = 1.0 - float(dist)
+                        results.append((iid, similarity))
+                    if len(results) >= k:
+                        break
+            else:
+                scores, indices = self.index.search(vec, actual_k)
+                results = []
+                for idx, score in zip(indices[0], scores[0]):
+                    if idx < 0:
+                        continue
+                    iid = self.label_to_iid.get(int(idx))
+                    if iid and (not exclude_iids or iid not in exclude_iids):
+                        results.append((iid, float(score)))
+                    if len(results) >= k:
+                        break
+
+        return results
+
+    def clear(self):
+        """清空索引"""
+        with self._lock:
+            self.iid_to_label.clear()
+            self.label_to_iid.clear()
+            self.current_count = 0
+            self._init_index()
+        logger.info("✓ HNSW 索引已清空")
+
+    def rebuild_from_store(self, store: MemoryStore):
+        """从存储中重建索引"""
+        iids, vectors = store.get_all_vectors()
+        if len(iids) == 0:
+            logger.info("存储为空，无需重建索引")
+            return
+
+        with self._lock:
+            self.iid_to_label.clear()
+            self.label_to_iid.clear()
+            self.current_count = 0
+
+            # 重新初始化
+            new_max = max(self.max_elements, len(iids) * 2)
+            if self._is_hnswlib:
+                import hnswlib
+                self.index = hnswlib.Index(space=HNSW_SPACE, dim=self.dim)
+                self.index.init_index(
+                    max_elements=new_max,
+                    ef_construction=HNSW_EF_CONSTRUCTION,
+                    M=HNSW_M
+                )
+                self.index.set_ef(HNSW_EF_SEARCH)
+                self.max_elements = new_max
+            else:
+                import faiss
+                self.index = faiss.IndexFlatIP(self.dim)
+
+        # 逐条添加
+        for iid, vec in zip(iids, vectors):
+            self.add(iid, vec)
+
+        logger.info(f"✓ 索引重建完成，共 {len(iids)} 条记录")
+
+
+# =============================================================================
+# 风险触发检测器
+# =============================================================================
+
+class RiskTriggerDetector:
+    """风险触发条件检测"""
+
+    @staticmethod
+    def classify_quasi_identifiers(infons: List[Dict]) -> Dict[str, List[Dict]]:
+        """将信息元按准标识符类别分类"""
+        categories_found = {}
+
+        for infon in infons:
+            entity = str(infon.get('entity', '')).lower()
+            attribute = str(infon.get('attribute', '')).lower()
+            combined = f"{entity} {attribute}"
+
+            for category, keywords in QUASI_IDENTIFIER_CATEGORIES.items():
+                for kw in keywords:
+                    if kw.lower() in combined:
+                        if category not in categories_found:
+                            categories_found[category] = []
+                        categories_found[category].append(infon)
+                        break
+
+        return categories_found
+
+    @staticmethod
+    def check_quasi_identifier_combination(infons: List[Dict]) -> Tuple[bool, Dict]:
+        """检测准标识符组合 (>= 2 类则触发)"""
+        categories = RiskTriggerDetector.classify_quasi_identifiers(infons)
+        triggered = len(categories) >= 2
+        return triggered, {
+            'trigger_type': 'quasi_identifier_combination',
+            'categories_count': len(categories),
+            'categories': list(categories.keys()),
+        }
+
+    @staticmethod
+    def check_refinement(infons: List[Dict], hnsw_index: 'HNSWIndex',
+                         threshold: float = REFINEMENT_SIMILARITY_THRESHOLD) -> Tuple[bool, Dict]:
+        """检测细化线索 (与历史信息元的语义相似度超过阈值)"""
+        if hnsw_index.current_count == 0:
+            return False, {'trigger_type': 'refinement_detection', 'max_similarity': 0.0}
+
+        max_sim = 0.0
+        triggered_infon = None
+        current_iids = {inf.get('iid', '') for inf in infons}
+
+        for infon in infons:
+            text = _build_embedding_text(infon)
+            if not text.strip():
+                continue
+
+            vec = compute_embedding(text)
+            results = hnsw_index.search(vec, k=1, exclude_iids=current_iids)
+
+            if results:
+                _, sim = results[0]
+                if sim > max_sim:
+                    max_sim = sim
+                    triggered_infon = infon
+
+        triggered = max_sim >= threshold
+        return triggered, {
+            'trigger_type': 'refinement_detection',
+            'max_similarity': round(max_sim, 4),
+            'threshold': threshold,
+            'triggered_infon_iid': triggered_infon.get('iid') if triggered_infon else None,
+        }
+
+    @staticmethod
+    def check_sensitive_domain(infons: List[Dict]) -> Tuple[bool, Dict]:
+        """检测敏感领域命中"""
+        domains_hit = set()
+
+        for infon in infons:
+            entity = str(infon.get('entity', '')).lower()
+            attribute = str(infon.get('attribute', '')).lower()
+            combined = f"{entity} {attribute}"
+
+            for domain, keywords in SENSITIVE_DOMAINS.items():
+                for kw in keywords:
+                    if kw.lower() in combined:
+                        domains_hit.add(domain)
+                        break
+
+        triggered = len(domains_hit) > 0
+        return triggered, {
+            'trigger_type': 'sensitive_domain_hit',
+            'domains_hit': list(domains_hit),
+        }
+
+
+# =============================================================================
+# 辅助函数
+# =============================================================================
+
+def _build_embedding_text(infon: Dict) -> str:
+    """构建用于嵌入的文本 (entity + attribute 拼接)"""
+    infon_type = str(infon.get('infon_type', '')).upper()
+
+    if infon_type == 'DESC':
+        entity = infon.get('entity', '')
+        attribute = infon.get('attribute', '')
+        return f"{entity} {attribute}".strip()
+    elif infon_type == 'SCEN':
+        temporal = infon.get('temporal', '')
+        spatial = infon.get('spatial', '')
+        return f"{temporal} {spatial}".strip()
+    elif infon_type == 'REL':
+        rel_name = infon.get('relation_name', '')
+        arg_refs = ' '.join(infon.get('arg_refs', []))
+        return f"{rel_name} {arg_refs}".strip()
+    else:
+        # 兜底：尝试拼接所有文本字段
+        parts = []
+        for key in ['entity', 'attribute', 'temporal', 'spatial', 'relation_name', 'description']:
+            val = infon.get(key, '')
+            if val:
+                parts.append(str(val))
+        return ' '.join(parts).strip()
+
+
+def _build_evidence_pointer(infon: Dict) -> str:
+    """构建证据唯一标识"""
+    modality = infon.get('modality', infon.get('run_metadata', {}).get('modality', 'text'))
+    session_id = infon.get('session_id', '')
+    round_num = infon.get('round_num', 1)
+
+    # 根据模态构建 span_locator
+    span = infon.get('span', None)
+    if modality == 'image':
+        ocr_box_id = infon.get('ocr_box_id', 0)
+        span_locator = f"ocr_box_{ocr_box_id}"
+    elif modality == 'audio':
+        seg_id = infon.get('segment_id', 0)
+        span_locator = f"seg_{seg_id}"
+    else:
+        # text
+        if span and isinstance(span, (list, tuple)) and len(span) == 2:
+            span_locator = f"{span[0]}-{span[1]}"
+        else:
+            span_locator = "0-0"
+
+    return f"{modality}:{session_id}:{round_num}:{span_locator}"
+
+
+def _estimate_token_count(text: str) -> int:
+    """粗略估算 token 数量"""
+    # 中文约1字=1.5token，英文约1词=1.3token
+    chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    other_chars = len(text) - chinese_chars
+    return int(chinese_chars * 1.5 + other_chars * 0.3)
+
+
+# =============================================================================
+# 主记忆流管理器
+# =============================================================================
+
+class MemoryStreamManager:
+    """主记忆流管理器 - 整合存储、索引和检索"""
+
+    def __init__(self):
+        self.store: Optional[MemoryStore] = None
+        self.index: Optional[HNSWIndex] = None
+        self.detector = RiskTriggerDetector()
+        self._initialized = False
+
+    def initialize(self):
+        """初始化存储和索引"""
+        if self._initialized:
+            return
+
+        config = get_config()
+        data_dir = config['data_dir']
+        os.makedirs(data_dir, exist_ok=True)
+
+        db_path = os.path.join(data_dir, 'memory_stream.db')
+        self.store = MemoryStore(db_path)
+
+        # 加载嵌入模型获取维度
+        dim = get_embedding_dim()
+        self.index = HNSWIndex(dim=dim)
+
+        # 从存储中重建索引
+        self.index.rebuild_from_store(self.store)
+
+        self._initialized = True
+        logger.info(f"✓ 主记忆流初始化完成 (存储: {self.store.count()} 条)")
+
+    def _ensure_initialized(self):
+        if not self._initialized:
+            self.initialize()
+
+    def ingest(self, infons: List[Dict], session_id: str, round_num: int) -> Dict:
+        """
+        批量写入信息元到记忆流
+        同时完成关联绑定 (Module 2: Association Backtracking)
+
+        流程：
+        1. 对每个信息元计算语义向量
+        2. 在存入前先检索 Top-K 关联 (关联回溯)
+        3. 记录关联关系
+        4. 存入数据库并更新索引
+        """
+        self._ensure_initialized()
+
+        ingested = []
+        skipped = []
+
+        for infon in infons:
+            iid = infon.get('iid', '')
+            if not iid:
+                skipped.append({'reason': 'missing_iid'})
+                continue
+
+            # 构建嵌入文本
+            embed_text = _build_embedding_text(infon)
+            if not embed_text.strip():
+                skipped.append({'iid': iid, 'reason': 'empty_embedding_text'})
+                continue
+
+            # 计算语义向量
+            vector = compute_embedding(embed_text)
+
+            # === 关联回溯：写入前检索 Top-K 关联 ===
+            associations = []
+            if self.index.current_count > 0:
+                search_results = self.index.search(
+                    vector, k=ASSOCIATION_TOP_K,
+                    exclude_iids={iid}
+                )
+                for assoc_iid, similarity in search_results:
+                    associations.append({
+                        'iid': assoc_iid,
+                        'similarity': round(float(similarity), 4)
+                    })
+
+            # 构建证据指针
+            evidence_pointer = _build_evidence_pointer({
+                **infon,
+                'session_id': session_id,
+                'round_num': round_num,
+            })
+
+            # 获取模态标签
+            modality = infon.get('modality',
+                       infon.get('run_metadata', {}).get('modality', 'text'))
+
+            # 构建存储记录
+            record = {
+                'iid': iid,
+                'infon_type': infon.get('infon_type', 'DESC'),
+                'modality': modality,
+                'session_id': session_id,
+                'round_num': round_num,
+                'entity': infon.get('entity', ''),
+                'attribute': infon.get('attribute', ''),
+                'text_for_embedding': embed_text,
+                'vector': vector.tolist(),
+                'evidence_pointer': evidence_pointer,
+                'associations': associations,
+                'created_at': datetime.now().isoformat(),
+                'extra': {
+                    'confidence': infon.get('confidence'),
+                    'temporal': infon.get('temporal'),
+                    'spatial': infon.get('spatial'),
+                    'relation_name': infon.get('relation_name'),
+                    'arg_refs': infon.get('arg_refs'),
+                },
+            }
+
+            # 存入数据库
+            inserted = self.store.insert_infon(record)
+
+            if inserted:
+                # 更新 HNSW 索引 (在数据库写入之后)
+                self.index.add(iid, vector)
+                ingested.append({
+                    'iid': iid,
+                    'evidence_pointer': evidence_pointer,
+                    'associations': associations,
+                })
+            else:
+                skipped.append({'iid': iid, 'reason': 'duplicate'})
+
+        return {
+            'ingested_count': len(ingested),
+            'skipped_count': len(skipped),
+            'ingested': ingested,
+            'skipped': skipped,
+            'total_in_store': self.store.count(),
+        }
+
+    def trigger_check_and_retrieve(self, infons: List[Dict]) -> Dict:
+        """
+        风险触发检测 + 可控检索
+
+        三种触发条件：
+        1. 准标识符组合检测
+        2. 细化线索检测
+        3. 敏感域命中
+
+        默认不检索，仅在触发条件满足时执行
+        """
+        self._ensure_initialized()
+
+        # 逐项检查触发条件
+        triggers = []
+
+        # 1. 准标识符组合检测
+        qi_triggered, qi_info = self.detector.check_quasi_identifier_combination(infons)
+        if qi_triggered:
+            triggers.append(qi_info)
+
+        # 2. 细化线索检测
+        ref_triggered, ref_info = self.detector.check_refinement(infons, self.index)
+        if ref_triggered:
+            triggers.append(ref_info)
+
+        # 3. 敏感域命中
+        sd_triggered, sd_info = self.detector.check_sensitive_domain(infons)
+        if sd_triggered:
+            triggers.append(sd_info)
+
+        # 如果没有触发，不执行检索
+        if not triggers:
+            return {
+                'triggered': False,
+                'triggers': [],
+                'retrieved_infons': [],
+            }
+
+        # === 执行检索 ===
+        retrieved = self._execute_retrieval(infons)
+
+        return {
+            'triggered': True,
+            'triggers': triggers,
+            'retrieved_infons': retrieved,
+        }
+
+    def _execute_retrieval(self, query_infons: List[Dict]) -> List[Dict]:
+        """执行向量检索，返回最相关的历史信息元"""
+        if self.index.current_count == 0:
+            return []
+
+        # 收集所有当前信息元的 iid
+        current_iids = {inf.get('iid', '') for inf in query_infons}
+
+        # 对高危信息元计算向量进行检索
+        all_results = {}  # iid -> (infon_dict, max_similarity)
+
+        for infon in query_infons:
+            text = _build_embedding_text(infon)
+            if not text.strip():
+                continue
+
+            vec = compute_embedding(text)
+            results = self.index.search(vec, k=DEFAULT_TOP_K, exclude_iids=current_iids)
+
+            for result_iid, similarity in results:
+                if result_iid not in all_results or similarity > all_results[result_iid][1]:
+                    all_results[result_iid] = (result_iid, similarity)
+
+        if not all_results:
+            return []
+
+        # 按相似度排序
+        sorted_results = sorted(all_results.values(), key=lambda x: x[1], reverse=True)
+
+        # 硬性截断：最多 MAX_RETRIEVAL_INFONS 条
+        top_results = sorted_results[:MAX_RETRIEVAL_INFONS]
+
+        # 从存储中获取完整信息元
+        result_iids = [r[0] for r in top_results]
+        stored_infons = self.store.get_infons_by_iids(result_iids)
+
+        # 构建返回结果
+        retrieved = []
+        total_tokens = 0
+        iid_to_sim = {r[0]: r[1] for r in top_results}
+
+        for infon in stored_infons:
+            iid = infon['iid']
+            # token 截断
+            text = infon.get('text_for_embedding', '')
+            token_count = _estimate_token_count(text)
+            if total_tokens + token_count > MAX_RETRIEVAL_TOKENS:
+                break
+            total_tokens += token_count
+
+            # 移除 vector 字段减少传输量
+            result = {k: v for k, v in infon.items() if k != 'vector'}
+            result['retrieval_similarity'] = round(iid_to_sim.get(iid, 0.0), 4)
+            retrieved.append(result)
+
+        return retrieved
+
+    def search(self, query_text: str, k: int = DEFAULT_TOP_K) -> List[Dict]:
+        """直接向量搜索"""
+        self._ensure_initialized()
+
+        if self.index.current_count == 0:
+            return []
+
+        vec = compute_embedding(query_text)
+        results = self.index.search(vec, k=k)
+
+        result_iids = [r[0] for r in results]
+        stored_infons = self.store.get_infons_by_iids(result_iids)
+
+        iid_to_sim = {r[0]: r[1] for r in results}
+        output = []
+        for infon in stored_infons:
+            result = {k: v for k, v in infon.items() if k != 'vector'}
+            result['similarity'] = round(iid_to_sim.get(infon['iid'], 0.0), 4)
+            output.append(result)
+
+        output.sort(key=lambda x: x.get('similarity', 0), reverse=True)
+        return output
+
+    def backtrace(self, iid: str) -> Optional[Dict]:
+        """
+        关联回溯查询
+        给定 iid，返回证据指针 + 关联信息元列表
+        """
+        self._ensure_initialized()
+
+        infon = self.store.get_infon_by_iid(iid)
+        if not infon:
+            return None
+
+        # 解析证据指针
+        evidence_pointer = infon.get('evidence_pointer', '')
+        parsed_pointer = self._parse_evidence_pointer(evidence_pointer)
+
+        # 获取关联信息元的详细信息
+        associations = infon.get('associations', [])
+        assoc_iids = [a['iid'] for a in associations if 'iid' in a]
+        assoc_infons = self.store.get_infons_by_iids(assoc_iids)
+        assoc_map = {inf['iid']: inf for inf in assoc_infons}
+
+        enriched_associations = []
+        for assoc in associations:
+            assoc_iid = assoc.get('iid', '')
+            full_infon = assoc_map.get(assoc_iid, {})
+            enriched_associations.append({
+                'iid': assoc_iid,
+                'similarity': assoc.get('similarity', 0.0),
+                'infon_type': full_infon.get('infon_type', ''),
+                'entity': full_infon.get('entity', ''),
+                'attribute': full_infon.get('attribute', ''),
+                'modality': full_infon.get('modality', ''),
+                'session_id': full_infon.get('session_id', ''),
+                'round_num': full_infon.get('round_num', 0),
+                'evidence_pointer': full_infon.get('evidence_pointer', ''),
+            })
+
+        return {
+            'iid': iid,
+            'infon_type': infon.get('infon_type', ''),
+            'entity': infon.get('entity', ''),
+            'attribute': infon.get('attribute', ''),
+            'modality': infon.get('modality', ''),
+            'evidence_pointer': evidence_pointer,
+            'parsed_pointer': parsed_pointer,
+            'associations': enriched_associations,
+            'created_at': infon.get('created_at', ''),
+        }
+
+    def _parse_evidence_pointer(self, pointer: str) -> Dict:
+        """解析证据指针字符串"""
+        if not pointer:
+            return {}
+
+        parts = pointer.split(':')
+        if len(parts) < 4:
+            return {'raw': pointer}
+
+        result = {
+            'modality': parts[0],
+            'session_id': parts[1],
+            'round_num': int(parts[2]) if parts[2].isdigit() else 0,
+            'span_locator': parts[3],
+        }
+
+        # 进一步解析 span_locator
+        span = parts[3]
+        if span.startswith('ocr_box_'):
+            result['locator_type'] = 'ocr_box'
+            result['box_index'] = int(span.replace('ocr_box_', ''))
+        elif span.startswith('seg_'):
+            result['locator_type'] = 'segment'
+            result['segment_index'] = int(span.replace('seg_', ''))
+        elif '-' in span:
+            result['locator_type'] = 'char_range'
+            range_parts = span.split('-')
+            if len(range_parts) == 2:
+                result['char_start'] = int(range_parts[0])
+                result['char_end'] = int(range_parts[1])
+
+        return result
+
+    def get_stats(self) -> Dict:
+        """获取统计信息"""
+        self._ensure_initialized()
+
+        return {
+            'total_infons': self.store.count(),
+            'index_size': self.index.current_count,
+            'embedding_dim': self.index.dim,
+        }
+
+    def clear(self):
+        """一键清空"""
+        self._ensure_initialized()
+        self.store.clear_all()
+        self.index.clear()
+        logger.info("✓ 主记忆流已完全清空 (存储 + 索引)")
+
+
+# =============================================================================
+# 全局管理器实例
+# =============================================================================
+
+_manager: Optional[MemoryStreamManager] = None
+
+
+def get_manager() -> MemoryStreamManager:
+    """获取全局管理器实例"""
+    global _manager
+    if _manager is None:
+        _manager = MemoryStreamManager()
+    return _manager
+
+
+# =============================================================================
+# API 路由
+# =============================================================================
+
+@memory_bp.route('/health', methods=['GET'])
+def health_check():
+    """健康检查"""
+    try:
+        manager = get_manager()
+        manager._ensure_initialized()
+        stats = manager.get_stats()
+        return jsonify({
+            'status': 'ok',
+            'service': 'MemoryStream',
+            **stats,
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
+
+@memory_bp.route('/ingest', methods=['POST'])
+def ingest():
+    """
+    批量写入信息元 (含关联绑定)
+
+    请求体:
+    {
+        "infons": [...],          // 信息元列表
+        "session_id": "abc123",   // 会话标识
+        "round_num": 1            // 轮次编号
+    }
+    """
+    try:
+        data = request.get_json(force=True)
+        infons = data.get('infons', [])
+        session_id = data.get('session_id', '')
+        round_num = data.get('round_num', 1)
+
+        if not infons:
+            return jsonify({'error': '信息元列表为空'}), 400
+
+        manager = get_manager()
+        result = manager.ingest(infons, session_id, round_num)
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"信息元写入失败: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@memory_bp.route('/search', methods=['POST'])
+def search():
+    """
+    向量相似度检索
+
+    请求体:
+    {
+        "query": "查询文本",
+        "k": 5                    // 返回数量
+    }
+    """
+    try:
+        data = request.get_json(force=True)
+        query_text = data.get('query', '')
+        k = data.get('k', DEFAULT_TOP_K)
+
+        if not query_text:
+            return jsonify({'error': '查询文本为空'}), 400
+
+        manager = get_manager()
+        results = manager.search(query_text, k=k)
+
+        return jsonify({
+            'results': results,
+            'count': len(results),
+        })
+
+    except Exception as e:
+        logger.error(f"向量检索失败: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@memory_bp.route('/trigger-check', methods=['POST'])
+def trigger_check():
+    """
+    风险触发式可控检索
+
+    请求体:
+    {
+        "infons": [...]           // 当前消息的信息元列表
+    }
+    """
+    try:
+        data = request.get_json(force=True)
+        infons = data.get('infons', [])
+
+        if not infons:
+            return jsonify({
+                'triggered': False,
+                'triggers': [],
+                'retrieved_infons': [],
+            })
+
+        manager = get_manager()
+        result = manager.trigger_check_and_retrieve(infons)
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"触发检测失败: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@memory_bp.route('/backtrace/<iid>', methods=['GET'])
+def backtrace(iid: str):
+    """
+    关联回溯查询
+
+    返回指定信息元的证据指针和关联信息元列表
+    """
+    try:
+        manager = get_manager()
+        result = manager.backtrace(iid)
+
+        if result is None:
+            return jsonify({'error': f'信息元不存在: {iid}'}), 404
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"关联回溯查询失败: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@memory_bp.route('/clear', methods=['POST'])
+def clear():
+    """
+    一键清空所有信息元记录和向量索引
+    用于测试、调参和保证实验可复现性
+    """
+    try:
+        manager = get_manager()
+        manager.clear()
+
+        return jsonify({
+            'status': 'ok',
+            'message': '所有信息元记录和向量索引已清空',
+        })
+
+    except Exception as e:
+        logger.error(f"清空失败: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@memory_bp.route('/stats', methods=['GET'])
+def stats():
+    """获取记忆流统计信息"""
+    try:
+        manager = get_manager()
+        result = manager.get_stats()
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"获取统计信息失败: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# 模块初始化
+# =============================================================================
+
+def init_memory_stream_service(preload_model: bool = False):
+    """初始化主记忆流服务"""
+    logger.info("初始化主记忆流服务模块...")
+
+    config = get_config()
+    os.makedirs(config['data_dir'], exist_ok=True)
+
+    if preload_model:
+        try:
+            manager = get_manager()
+            manager.initialize()
+            logger.info("✓ 主记忆流服务预加载完成")
+        except Exception as e:
+            logger.warning(f"主记忆流服务预加载失败: {e}")
+

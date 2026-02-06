@@ -39,6 +39,7 @@ safetensors>=0.4.0
 # 数据库和向量检索
 # =============================================================================
 faiss-cpu>=1.7.0
+hnswlib>=0.7.0
 pymongo>=4.0.0
 sentence-transformers>=2.0.0
 scikit-learn>=1.0.0

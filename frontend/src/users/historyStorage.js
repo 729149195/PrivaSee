@@ -2,7 +2,7 @@
 // 为每个登录用户单独保存会话历史和信息元数据
 
 // 保存用户的所有会话数据
-export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, conversationModel, infonExtractionModel, infonPrivacyInferenceModel, imageParsingModel, protectionSuggestionModel, autoPrivacyInference) {
+export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, conversationModel, infonExtractionModel, infonPrivacyInferenceModel, imageParsingModel, protectionSuggestionModel, autoPrivacyInference, memoryStreamMeta) {
   if (!userId) return
   
   try {
@@ -22,6 +22,8 @@ export function saveUserSessions(userId, sessions, infonSessions, privacyInferen
       imageParsingModel: imageParsingModel || 'gemma3:12b',
       protectionSuggestionModel: protectionSuggestionModel || 'deepseek-chat',
       autoPrivacyInference: autoPrivacyInference ?? true, // 保存自动隐私保护开关
+      // 主记忆流元数据 (实际数据存储在后端 SQLite)
+      memoryStreamMeta: memoryStreamMeta || null,
       savedAt: Date.now()
     }
     
@@ -60,6 +62,8 @@ export function loadUserSessions(userId, defaultModelsConfig = {}) {
       imageParsingModel: parsed.imageParsingModel || defaultModelsConfig.imageParsingModel || 'gemma3:12b',
       protectionSuggestionModel: parsed.protectionSuggestionModel || defaultModelsConfig.protectionSuggestionModel || 'deepseek-chat',
       autoPrivacyInference: parsed.autoPrivacyInference ?? true, // 加载自动隐私保护开关
+      // 主记忆流元数据
+      memoryStreamMeta: parsed.memoryStreamMeta || null,
       savedAt: parsed.savedAt
     }
   } catch (error) {
@@ -142,7 +146,8 @@ export function importUserData(userId, file) {
           data.infonPrivacyInferenceModel,
           data.imageParsingModel,
           data.protectionSuggestionModel,
-          data.autoPrivacyInference
+          data.autoPrivacyInference,
+          data.memoryStreamMeta
         )
         resolve(data)
       } catch (error) {

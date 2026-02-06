@@ -67,3 +67,8 @@ export {
   cleanAndParseBuffer,
   parseSSELine
 } from './slices/privacyHelpers.js'
+
+// 主记忆流 Slice
+export {
+  createMemoryStreamSlice
+} from './slices/memoryStreamSlice.js'

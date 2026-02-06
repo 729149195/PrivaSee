@@ -162,6 +162,16 @@ async function handleInfonFinish({ get, sessionId, runId, existingInfons, nowISO
     const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
     const finalResult = { infons: deduplicated }
     get()._updateInfonRun(sessionId, runId, (r) => ({ ...r, status: 'done', progress: 100, resultJson: finalResult }))
+    
+    // === 主记忆流：将信息元写入向量索引库 (含 Top-K 关联绑定) ===
+    try {
+      const session = get().getCurrentSession()
+      const roundNum = Math.floor(((session?.messages || []).length) / 2) + 1
+      // 异步写入，不阻塞 UI
+      get().ingestInfonsToMemory?.(deduplicated, sessionId, roundNum)
+    } catch (memErr) {
+      console.warn('[MemoryStream] 信息元写入记忆流失败:', memErr)
+    }
   } else {
     get()._updateInfonRun(sessionId, runId, (r) => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
   }

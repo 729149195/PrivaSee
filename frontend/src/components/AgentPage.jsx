@@ -77,6 +77,10 @@ export default function AgentPage() {
     // 自动推理开关
     autoPrivacyInference,
     setSelectedLaw,
+    // 主记忆流
+    clearMemoryStream,
+    memoryStreamStatus,
+    fetchMemoryStreamStatus,
   } = useStore()
 
   // 用户状态：从用户 store 获取
@@ -796,6 +800,25 @@ export default function AgentPage() {
                 <UserAuth />
               </div>
             </div>
+          </div>
+          {/* 主记忆流管理 */}
+          <div style={{ marginTop: '8px', display: 'flex', gap: '6px' }}>
+            <Tooltip title="Clear all infon records and vector indexes in memory stream (for testing and reproducibility)">
+              <Button
+                size="small"
+                danger
+                onClick={async () => {
+                  const ok = await clearMemoryStream?.()
+                  if (ok) {
+                    // 刷新状态
+                    fetchMemoryStreamStatus?.()
+                  }
+                }}
+                style={{ fontSize: '11px', flex: 1 }}
+              >
+                Clear Memory Stream
+              </Button>
+            </Tooltip>
           </div>
         </div>
       </aside>

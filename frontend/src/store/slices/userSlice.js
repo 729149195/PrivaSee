@@ -28,7 +28,13 @@ export const createUserSlice = (set, get) => ({
       sessions: [emptySession], currentSessionId: emptySession.id,
       model: getDefaultModelsConfig().conversationModel, infonSessions: {},
       privacyInferences: {}, protectionSuggestions: {},
-      customPrivacyItems: [], selectedPrivacyItems: []
+      customPrivacyItems: [], selectedPrivacyItems: [],
+      // 清空主记忆流前端状态
+      memoryStreamLastIngest: null,
+      memoryRetrievedInfons: [],
+      memoryTriggerResult: null,
+      memoryBacktraceCache: {},
+      memoryStreamStatus: null,
     })
   },
 
@@ -76,12 +82,20 @@ export const createUserSlice = (set, get) => ({
         }
       })
       
+      // 构建主记忆流元数据 (轻量, 不含向量)
+      const memoryStreamMeta = state.memoryStreamLastIngest ? {
+        lastIngest: {
+          ingested_count: state.memoryStreamLastIngest.ingested_count,
+          total_in_store: state.memoryStreamLastIngest.total_in_store,
+        },
+      } : null
+      
       saveUserSessions(
         userId, state.sessions, state.infonSessions, serializableInferences,
         state.customPrivacyItems, state.selectedLawIdx, state.selectedPrivacyItems,
         state.model, state.infonExtractionModel,
         state.infonPrivacyInferenceModel, state.imageParsingModel, state.protectionSuggestionModel,
-        state.autoPrivacyInference
+        state.autoPrivacyInference, memoryStreamMeta
       )
     } catch (error) {
       console.error('[PrivaSee] 保存用户历史失败:', error)

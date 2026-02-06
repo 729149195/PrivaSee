@@ -242,12 +242,20 @@ function RiskCard({ risk, idx, infonMap }) {
                 return null
               }
               
+              const hasAssociations = Array.isArray(infon.associations) && infon.associations.length > 0
+              const hasEvidencePointer = !!infon.evidence_pointer
+              
               return (
                 <div
                   key={infon.iid || infonIdx}
+                  title={hasAssociations 
+                    ? `${keyword}\n\nAssociations (${infon.associations.length}):\n${infon.associations.map(a => `  ${a.iid} (sim: ${a.similarity})`).join('\n')}${hasEvidencePointer ? `\n\nEvidence: ${infon.evidence_pointer}` : ''}`
+                    : (hasEvidencePointer ? `${keyword}\nEvidence: ${infon.evidence_pointer}` : keyword)
+                  }
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
+                    gap: 2,
                     padding: '2px 5px',
                     borderRadius: isRelation ? 6 : 3,
                     background: isRelation ? 'rgba(255, 255, 255, 0.95)' : `${color}15`,
@@ -259,10 +267,33 @@ function RiskCard({ risk, idx, infonMap }) {
                     maxWidth: '100%',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
+                    whiteSpace: 'nowrap',
+                    cursor: hasAssociations ? 'help' : 'default',
                   }}
                 >
                   {keyword}
+                  {hasAssociations && (
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 12,
+                      height: 12,
+                      borderRadius: '50%',
+                      background: `${color}30`,
+                      fontSize: 7,
+                      fontWeight: 700,
+                      lineHeight: 1,
+                      flexShrink: 0,
+                    }}>
+                      {infon.associations.length}
+                    </span>
+                  )}
+                  {hasEvidencePointer && (
+                    <span style={{ fontSize: 7, opacity: 0.6, flexShrink: 0 }}>
+                      *
+                    </span>
+                  )}
                 </div>
               )
             })}

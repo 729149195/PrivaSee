@@ -273,6 +273,8 @@ export const createInfonSlice = (set, get) => ({
           if (parseSuccess && finalInfons.length) {
             const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
             get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'done', progress: 100, resultJson: { infons: deduplicated } }))
+            // === 主记忆流：写入向量索引库 ===
+            try { get().ingestInfonsToMemory?.(deduplicated, session.id, currentRound) } catch (_) {}
           } else {
             get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
           }
@@ -383,6 +385,8 @@ export const createInfonSlice = (set, get) => ({
           if (parseSuccess && finalInfons.length) {
             const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
             get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'done', progress: 100, resultJson: { infons: deduplicated } }))
+            // === 主记忆流：写入向量索引库 ===
+            try { get().ingestInfonsToMemory?.(deduplicated, session.id, currentRound) } catch (_) {}
           } else {
             get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
           }
@@ -488,6 +492,8 @@ export const createInfonSlice = (set, get) => ({
           if (parseSuccess && finalInfons.length) {
             const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
             get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'done', progress: 100, resultJson: { infons: deduplicated } }))
+            // === 主记忆流：写入向量索引库 ===
+            try { get().ingestInfonsToMemory?.(deduplicated, session.id, currentRound) } catch (_) {}
           } else {
             get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
           }

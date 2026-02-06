@@ -55,6 +55,15 @@ WHISPER_MODEL_SIZE = 'base'  # 可选: tiny, base, small, medium, large
 MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
 
 # =============================================================================
+# 主记忆流 (Memory Stream) 配置
+# =============================================================================
+MEMORY_STREAM_DATA_DIR = DATA_DIR / 'memory_stream'
+MEMORY_STREAM_EMBEDDING_MODEL = 'paraphrase-multilingual-MiniLM-L12-v2'
+
+# 确保目录存在
+os.makedirs(MEMORY_STREAM_DATA_DIR, exist_ok=True)
+
+# =============================================================================
 # 日志配置
 # =============================================================================
 LOG_LEVEL = 'INFO'

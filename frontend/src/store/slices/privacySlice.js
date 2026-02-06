@@ -21,6 +21,20 @@ export const createPrivacySlice = (set, get) => ({
     const allInfons = collectInfonsForInference(infonSessions, session.id)
     if (!allInfons.length) return
     
+    // === 主记忆流：风险触发检测 + 可控检索 ===
+    // 检索到的历史信息元仅用于隐私推理前置上下文，不混入模型生成上下文
+    let memoryRetrievedInfons = []
+    try {
+      memoryRetrievedInfons = await get().triggerCheckAndRetrieve?.(allInfons) || []
+    } catch (memErr) {
+      console.warn('[MemoryStream] 触发检测异常:', memErr)
+    }
+    
+    // 合并当前信息元与检索到的历史信息元 (仅用于隐私推理)
+    const infonsForInference = memoryRetrievedInfons.length > 0
+      ? [...memoryRetrievedInfons, ...allInfons]
+      : allInfons
+    
     const previousInference = get().privacyInferences?.[session.id]
     const previousRisks = previousInference?.status === 'done' ? (previousInference.risks || []) : []
     const abortController = new AbortController()
@@ -45,7 +59,7 @@ export const createPrivacySlice = (set, get) => ({
       const maxTokens = isOmni ? 2000 : 4096
       
       const { fillPromptTemplate } = await import('../../templates/inference.js')
-      const { prompt, lawIdMap, infonIdMap, isEmpty, emptyReason } = fillPromptTemplate(allInfons, selectedLaw.data)
+      const { prompt, lawIdMap, infonIdMap, isEmpty, emptyReason } = fillPromptTemplate(infonsForInference, selectedLaw.data)
       
       // 如果没有可用的隐私类别或信息元，提前返回
       if (isEmpty) {

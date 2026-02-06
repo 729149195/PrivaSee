@@ -1,0 +1,320 @@
+/**
+ * 主记忆流 Slice (MemoryStream + Association Backtracking)
+ * 
+ * 功能：
+ * 1. 信息元写入主记忆流 (含 Top-K 关联绑定)
+ * 2. 风险触发式可控检索 (准标识符组合 / 细化线索 / 敏感域命中)
+ * 3. 关联回溯查询 (证据指针 + 关联信息元列表)
+ * 4. 一键清空
+ * 
+ * 依赖后端 /api/memory/* 端点
+ */
+
+// 后端 Memory Stream 服务基础 URL
+const MEMORY_API_BASE = '/api/memory'
+
+/**
+ * 获取后端基础地址 (使用与 OCR/Whisper 相同的后端)
+ */
+function getBackendBase(get) {
+  // 默认使用本地 Flask 后端
+  return 'http://localhost:5000'
+}
+
+export const createMemoryStreamSlice = (set, get) => ({
+  // ==================== 状态 ====================
+  
+  // 记忆流健康/统计状态
+  memoryStreamStatus: null,  // { status, total_infons, index_size, embedding_dim }
+  
+  // 上次写入结果
+  memoryStreamLastIngest: null,  // { ingested_count, skipped_count, ingested, ... }
+  
+  // 检索到的历史信息元 (用于隐私推理前置上下文)
+  memoryRetrievedInfons: [],
+  
+  // 触发检测结果
+  memoryTriggerResult: null,  // { triggered, triggers, retrieved_infons }
+  
+  // 回溯查询结果缓存
+  memoryBacktraceCache: {},  // { [iid]: { evidence_pointer, associations, ... } }
+  
+  // 加载状态
+  memoryStreamLoading: false,
+  memoryStreamError: null,
+  
+  // ==================== 信息元写入 (含关联绑定) ====================
+  
+  /**
+   * 将信息元批量写入主记忆流
+   * 在 infonHelpers.js 的 handleInfonFinish 之后调用
+   * 
+   * @param {Array} infons - 信息元列表
+   * @param {string} sessionId - 会话标识
+   * @param {number} roundNum - 轮次编号
+   */
+  async ingestInfonsToMemory(infons, sessionId, roundNum) {
+    if (!Array.isArray(infons) || infons.length === 0) return
+    
+    const backendBase = getBackendBase(get)
+    
+    try {
+      const response = await fetch(`${backendBase}${MEMORY_API_BASE}/ingest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          infons,
+          session_id: sessionId,
+          round_num: roundNum,
+        }),
+      })
+      
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '')
+        console.warn('[MemoryStream] 写入失败:', errText)
+        return
+      }
+      
+      const result = await response.json()
+      
+      set({ memoryStreamLastIngest: result })
+      
+      // 将关联信息回写到 infon 对象 (更新前端状态)
+      if (result.ingested && result.ingested.length > 0) {
+        const infonSession = get().infonSessions?.[sessionId]
+        if (infonSession) {
+          const ingestedMap = new Map()
+          result.ingested.forEach(item => {
+            ingestedMap.set(item.iid, {
+              evidence_pointer: item.evidence_pointer,
+              associations: item.associations,
+            })
+          })
+          
+          // 更新 runs 中对应信息元的 associations 和 evidence_pointer
+          set(s => {
+            const box = s.infonSessions?.[sessionId]
+            if (!box) return {}
+            const updatedRuns = box.runs.map(run => {
+              if (!run.resultJson?.infons) return run
+              const updatedInfons = run.resultJson.infons.map(infon => {
+                const ingestData = ingestedMap.get(infon.iid)
+                if (ingestData) {
+                  return {
+                    ...infon,
+                    evidence_pointer: ingestData.evidence_pointer,
+                    associations: ingestData.associations,
+                  }
+                }
+                return infon
+              })
+              return {
+                ...run,
+                resultJson: { ...run.resultJson, infons: updatedInfons },
+              }
+            })
+            return {
+              infonSessions: {
+                ...s.infonSessions,
+                [sessionId]: { runs: updatedRuns },
+              },
+            }
+          })
+        }
+      }
+      
+      console.log(`[MemoryStream] 写入完成: ${result.ingested_count} 条, 跳过 ${result.skipped_count} 条`)
+    } catch (err) {
+      console.warn('[MemoryStream] 写入请求异常:', err.message)
+    }
+  },
+  
+  // ==================== 风险触发检索 ====================
+  
+  /**
+   * 风险触发检测 + 可控检索
+   * 在 privacySlice.js 的 startPrivacyInference 之前调用
+   * 
+   * @param {Array} infons - 当前消息的信息元列表
+   * @returns {Array} 检索到的历史信息元列表 (可能为空)
+   */
+  async triggerCheckAndRetrieve(infons) {
+    if (!Array.isArray(infons) || infons.length === 0) {
+      set({ memoryRetrievedInfons: [], memoryTriggerResult: null })
+      return []
+    }
+    
+    const backendBase = getBackendBase(get)
+    
+    try {
+      const response = await fetch(`${backendBase}${MEMORY_API_BASE}/trigger-check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ infons }),
+      })
+      
+      if (!response.ok) {
+        console.warn('[MemoryStream] 触发检测失败')
+        set({ memoryRetrievedInfons: [], memoryTriggerResult: null })
+        return []
+      }
+      
+      const result = await response.json()
+      
+      const retrievedInfons = result.retrieved_infons || []
+      set({
+        memoryRetrievedInfons: retrievedInfons,
+        memoryTriggerResult: result,
+      })
+      
+      if (result.triggered) {
+        console.log(
+          `[MemoryStream] 触发检索: ${result.triggers.map(t => t.trigger_type).join(', ')}, ` +
+          `检索到 ${retrievedInfons.length} 条历史信息元`
+        )
+      }
+      
+      return retrievedInfons
+    } catch (err) {
+      console.warn('[MemoryStream] 触发检测请求异常:', err.message)
+      set({ memoryRetrievedInfons: [], memoryTriggerResult: null })
+      return []
+    }
+  },
+  
+  // ==================== 向量搜索 ====================
+  
+  /**
+   * 直接向量相似度搜索
+   * 
+   * @param {string} queryText - 查询文本
+   * @param {number} k - 返回数量
+   * @returns {Array} 搜索结果
+   */
+  async searchMemoryStream(queryText, k = 5) {
+    const backendBase = getBackendBase(get)
+    
+    try {
+      set({ memoryStreamLoading: true, memoryStreamError: null })
+      
+      const response = await fetch(`${backendBase}${MEMORY_API_BASE}/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: queryText, k }),
+      })
+      
+      if (!response.ok) throw new Error('搜索失败')
+      
+      const result = await response.json()
+      set({ memoryStreamLoading: false })
+      return result.results || []
+    } catch (err) {
+      set({ memoryStreamLoading: false, memoryStreamError: err.message })
+      return []
+    }
+  },
+  
+  // ==================== 关联回溯 ====================
+  
+  /**
+   * 关联回溯查询
+   * 给定信息元 iid，获取证据指针和关联信息元列表
+   * 
+   * @param {string} iid - 信息元唯一标识
+   * @returns {Object|null} 回溯结果
+   */
+  async queryBacktrace(iid) {
+    if (!iid) return null
+    
+    // 检查缓存
+    const cached = get().memoryBacktraceCache?.[iid]
+    if (cached) return cached
+    
+    const backendBase = getBackendBase(get)
+    
+    try {
+      const response = await fetch(
+        `${backendBase}${MEMORY_API_BASE}/backtrace/${encodeURIComponent(iid)}`
+      )
+      
+      if (!response.ok) {
+        if (response.status === 404) return null
+        throw new Error('回溯查询失败')
+      }
+      
+      const result = await response.json()
+      
+      // 缓存结果
+      set(s => ({
+        memoryBacktraceCache: {
+          ...s.memoryBacktraceCache,
+          [iid]: result,
+        },
+      }))
+      
+      return result
+    } catch (err) {
+      console.warn('[MemoryStream] 回溯查询异常:', err.message)
+      return null
+    }
+  },
+  
+  // ==================== 健康检查 / 统计 ====================
+  
+  /**
+   * 获取记忆流状态
+   */
+  async fetchMemoryStreamStatus() {
+    const backendBase = getBackendBase(get)
+    
+    try {
+      const response = await fetch(`${backendBase}${MEMORY_API_BASE}/health`)
+      if (!response.ok) throw new Error('健康检查失败')
+      
+      const result = await response.json()
+      set({ memoryStreamStatus: result })
+      return result
+    } catch (err) {
+      set({ memoryStreamStatus: { status: 'error', error: err.message } })
+      return null
+    }
+  },
+  
+  // ==================== 一键清空 ====================
+  
+  /**
+   * 清空所有信息元记录和向量索引
+   * 用于测试、调参和保证实验可复现性
+   */
+  async clearMemoryStream() {
+    const backendBase = getBackendBase(get)
+    
+    try {
+      set({ memoryStreamLoading: true, memoryStreamError: null })
+      
+      const response = await fetch(`${backendBase}${MEMORY_API_BASE}/clear`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      
+      if (!response.ok) throw new Error('清空失败')
+      
+      set({
+        memoryStreamLoading: false,
+        memoryStreamLastIngest: null,
+        memoryRetrievedInfons: [],
+        memoryTriggerResult: null,
+        memoryBacktraceCache: {},
+        memoryStreamStatus: null,
+      })
+      
+      console.log('[MemoryStream] 所有数据已清空')
+      return true
+    } catch (err) {
+      set({ memoryStreamLoading: false, memoryStreamError: err.message })
+      console.error('[MemoryStream] 清空失败:', err)
+      return false
+    }
+  },
+})
+
