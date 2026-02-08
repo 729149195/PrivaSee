@@ -398,12 +398,12 @@ export default function LawTree() {
       }
     }
     
-    // 风险颜色映射（中文注释）
+    // 风险颜色映射（黄-橙-红三级）
     const getRiskColor = (level) => {
       switch (level) {
         case 'HIGH': return '#ef4444'
-        case 'MEDIUM': return '#f59e0b'
-        case 'LOW': return '#10b981'
+        case 'MEDIUM': return '#f97316'
+        case 'LOW': return '#eab308'
         default: return null
       }
     }
@@ -417,6 +417,19 @@ export default function LawTree() {
       .separation((a, b) => (a.parent === b.parent ? 1 : 1.2) / a.depth)
     
     treeLayout(root)
+
+    // 压缩内层径向距离，使内层两个层级更紧凑
+    const allNodesRaw = root.descendants()
+    const maxDepthRaw = d3.max(allNodesRaw, d => d.depth)
+    if (maxDepthRaw > 0) {
+      const maxR = radius * 0.92
+      allNodesRaw.forEach(d => {
+        if (d.depth > 0) {
+          const t = d.depth / maxDepthRaw
+          d.y = maxR * Math.pow(t, 1.4)
+        }
+      })
+    }
 
     // 径向坐标转换函数
     const radialPoint = (x, y) => {
@@ -572,8 +585,8 @@ export default function LawTree() {
     const rowHeight = 14
     const levelLegendData = [
       { color: '#ef4444', label: 'High Risk' },
-      { color: '#f59e0b', label: 'Medium' },
-      { color: '#10b981', label: 'Low' }
+      { color: '#f97316', label: 'Medium' },
+      { color: '#eab308', label: 'Low' }
     ]
     levelLegendData.forEach((item, i) => {
       const row = bottomLeft.append('g')
@@ -1472,8 +1485,8 @@ export default function LawTree() {
                 const getRiskColor = (level) => {
                   switch (level) {
                     case 'HIGH': return { bg: '#fef2f2', border: '#ef4444', dot: '#ef4444' }    // 红色
-                    case 'MEDIUM': return { bg: '#fffbeb', border: '#f59e0b', dot: '#f59e0b' }  // 橙色
-                    case 'LOW': return { bg: '#f0fdf4', border: '#10b981', dot: '#10b981' }     // 绿色
+                    case 'MEDIUM': return { bg: '#fff7ed', border: '#f97316', dot: '#f97316' }  // 橙色
+                    case 'LOW': return { bg: '#fefce8', border: '#eab308', dot: '#eab308' }     // 黄色
                     case 'UNKNOWN': return { bg: '#f1f5f9', border: '#94a3b8', dot: '#94a3b8' } // 灰色（部分数据）
                     default: return null
                   }

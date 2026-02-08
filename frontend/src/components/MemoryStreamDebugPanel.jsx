@@ -965,7 +965,10 @@ export default function MemoryStreamDebugPanel() {
           }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Memory Stream</span>
             <span style={{ fontSize: 10, color: C.textTer, marginLeft: 8 }}>
-              {currentUserId ? `👤 ${currentUserId}` : '👤 anonymous'}
+              {currentUserId
+                ? `👤 ${currentUserId}`
+                : `👤 anonymous (${useStore.getState()._getMemoryUserId?.().slice(-10) || '?'})`
+              }
             </span>
           </div>
 

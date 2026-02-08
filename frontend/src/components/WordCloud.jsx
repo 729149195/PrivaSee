@@ -224,6 +224,50 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
     }
     const fontSizeScale = d3.scaleSqrt().domain([1, maxCount]).range([minFontSize, maxFontSize])
 
+    // 长文本最大节点宽度（中文注释）：根据节点数量动态调整，避免英文长文本撑宽节点
+    const maxNodeWidth = nodeCount > 40 ? 80 : nodeCount > 25 ? 100 : nodeCount > 15 ? 120 : 140
+
+    // 文本自动换行工具（中文注释）：将长文本按自然断点拆成多行（空格/camelCase/snake_case/kebab-case）
+    const wrapTextToLines = (text, maxW, fSize, fWeight, tGroup) => {
+      const measureWidth = (str) => {
+        const t = tGroup.append('text').attr('font-size', fSize).attr('font-weight', fWeight).text(str)
+        const w = t.node().getBBox().width
+        t.remove()
+        return w
+      }
+      // 按自然断点分词（中文注释）：camelCase → camel Case，snake_case → snake case
+      const words = text
+        .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+        .replace(/[_\-]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length > 0)
+      if (words.length <= 1) {
+        // 无自然断点时按字符估算分割（中文注释）
+        const fullW = measureWidth(text)
+        if (fullW <= maxW) return [text]
+        const charsPerLine = Math.max(4, Math.floor(text.length * maxW / fullW))
+        const charLines = []
+        for (let i = 0; i < text.length; i += charsPerLine) {
+          charLines.push(text.slice(i, i + charsPerLine))
+        }
+        return charLines.length > 0 ? charLines : [text]
+      }
+      const lines = []
+      let currentLine = words[0]
+      for (let i = 1; i < words.length; i++) {
+        const testLine = currentLine + ' ' + words[i]
+        if (measureWidth(testLine) <= maxW) {
+          currentLine = testLine
+        } else {
+          lines.push(currentLine)
+          currentLine = words[i]
+        }
+      }
+      lines.push(currentLine)
+      return lines
+    }
+
     // 测量文本尺寸（中文注释）
     const tempGroup = mainGroup.append('g').style('visibility', 'hidden')
     
@@ -245,19 +289,40 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
         const baseFontSize = fontSizeScale(d.count)
         const fontSize = baseFontSize * (0.7 + d.confidence * 0.3)
         
-        let actualTextWidth, actualTextHeight
+        let actualTextWidth, actualTextHeight, textLines
         if (compactMode) {
           actualTextWidth = nodeRadius * 2
           actualTextHeight = nodeRadius * 2
+          textLines = [d.keyword]
         } else {
-          const tempText = tempGroup.append('text')
-            .attr('font-size', d.isRelation ? Math.max(8, fontSize * 0.85) : fontSize)
-            .attr('font-weight', d.isRelation ? 700 : 600)
-            .text(d.keyword)
-          const bbox = tempText.node().getBBox()
-          actualTextWidth = bbox.width
-          actualTextHeight = bbox.height
-          tempText.remove()
+          const nodeFontSize = d.isRelation ? Math.max(8, fontSize * 0.85) : fontSize
+          const nodeFontWeight = d.isRelation ? 700 : 600
+          // 测量完整文本宽度（中文注释）
+          const fullText = tempGroup.append('text')
+            .attr('font-size', nodeFontSize).attr('font-weight', nodeFontWeight).text(d.keyword)
+          const fullBBox = fullText.node().getBBox()
+          const singleLineHeight = fullBBox.height
+          fullText.remove()
+
+          if (fullBBox.width <= maxNodeWidth) {
+            // 无需换行（中文注释）
+            textLines = [d.keyword]
+            actualTextWidth = fullBBox.width
+            actualTextHeight = singleLineHeight
+          } else {
+            // 长文本自动换行（中文注释）
+            textLines = wrapTextToLines(d.keyword, maxNodeWidth, nodeFontSize, nodeFontWeight, tempGroup)
+            let maxLineWidth = 0
+            textLines.forEach(line => {
+              const t = tempGroup.append('text')
+                .attr('font-size', nodeFontSize).attr('font-weight', nodeFontWeight).text(line)
+              maxLineWidth = Math.max(maxLineWidth, t.node().getBBox().width)
+              t.remove()
+            })
+            actualTextWidth = maxLineWidth
+            const lineSpacing = singleLineHeight * 1.2
+            actualTextHeight = lineSpacing * (textLines.length - 1) + singleLineHeight
+          }
         }
         
         const nodeKey = `${d.keyword}-${d.type}`
@@ -285,7 +350,7 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
         }
         
         nodes.push({
-          ...d, fontSize, actualTextWidth, actualTextHeight,
+          ...d, fontSize, actualTextWidth, actualTextHeight, textLines,
           x: initX, y: initY, vx: 0, vy: 0,
           id: nodes.length, nodeKey, isNew: !savedPos,
           targetY: baseY // 用于力导向的目标 Y 位置
@@ -438,14 +503,27 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
         .attr('y', d => -(d.actualTextHeight + 10) / 2)
         .style('opacity', d => d.isExpiring ? 0.4 : 1)
 
-      wordGroups.append('text')
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'central')
-        .attr('fill', d => d.color)
-        .attr('font-size', d => d.isRelation ? Math.max(8, d.fontSize * 0.85) : d.fontSize)
-        .attr('font-weight', d => d.isRelation ? 700 : 600)
-        .attr('opacity', d => d.isExpiring ? 0.3 : (d.isRelation ? 1 : (0.7 + d.confidence * 0.3)))
-        .text(d => d.keyword)
+      // 文字渲染：支持多行 tspan 自动换行（中文注释）
+      wordGroups.each(function(d) {
+        const lines = d.textLines || [d.keyword]
+        const nodeFontSize = d.isRelation ? Math.max(8, d.fontSize * 0.85) : d.fontSize
+        const lineHeight = nodeFontSize * 1.2
+
+        const textEl = d3.select(this).append('text')
+          .attr('text-anchor', 'middle')
+          .attr('fill', d.color)
+          .attr('font-size', nodeFontSize)
+          .attr('font-weight', d.isRelation ? 700 : 600)
+          .attr('opacity', d.isExpiring ? 0.3 : (d.isRelation ? 1 : (0.7 + d.confidence * 0.3)))
+
+        lines.forEach((line, i) => {
+          textEl.append('tspan')
+            .attr('x', 0)
+            .attr('dy', i === 0 ? -(lines.length - 1) * lineHeight / 2 : lineHeight)
+            .attr('dominant-baseline', 'central')
+            .text(line)
+        })
+      })
 
       // 计数徽章（中文注释）
       wordGroups.filter(d => !d.isRelation && d.count > 1)
