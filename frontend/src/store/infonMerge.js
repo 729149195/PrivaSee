@@ -6,8 +6,8 @@
 /**
  * 增量更新逻辑：检测和处理重复/冲突的信息元
  * 策略：
- * 1. 每轮的信息元都保留（因为它们有独立的上下文和 iid）
- * 2. 只标记明确的语义冲突（如同一主体的不同属性值）
+ * 1. 先对同一批次内的完全重复信息元进行去重（同 entity+attribute / 同 temporal+spatial / 同 relation_name+arg_refs）
+ * 2. 再检测与已有信息元的语义冲突（如同一主体的不同属性值）
  * 3. 返回标记了冲突关系的新信息元，由上层决定如何展示
  * 
  * @param {Array} newInfons - 新的信息元列表
@@ -16,16 +16,20 @@
  */
 export function deduplicateAndMergeInfons(newInfons, existingInfons) {
   if (!Array.isArray(newInfons) || newInfons.length === 0) return newInfons
-  if (!Array.isArray(existingInfons) || existingInfons.length === 0) return newInfons
+  
+  // === 第一步：同批次内去重（同 entity+attribute 等完全重复的信息元只保留置信度最高的） ===
+  const deduped = deduplicateWithinBatch(newInfons)
+  
+  if (!Array.isArray(existingInfons) || existingInfons.length === 0) return deduped
   
   const result = []
   const conflictInfons = [] // 记录被新信息元替换的旧信息元
   
   // 合并新旧信息元列表用于查找引用
-  const allInfonsForLookup = [...existingInfons, ...newInfons]
+  const allInfonsForLookup = [...existingInfons, ...deduped]
   
-  // 处理每个新信息元
-  newInfons.forEach(newInfon => {
+  // === 第二步：跨批次冲突检测 ===
+  deduped.forEach(newInfon => {
     const conflicts = findConflictingInfons(newInfon, existingInfons, allInfonsForLookup)
     
     if (conflicts.length > 0) {
@@ -42,6 +46,86 @@ export function deduplicateAndMergeInfons(newInfons, existingInfons) {
   })
   
   return result
+}
+
+/**
+ * 同批次内去重：合并语义完全相同的信息元，保留置信度最高的
+ * 完全重复定义：
+ * - DESC: entity + attribute 完全相同（不区分大小写）
+ * - SCEN: temporal + spatial 完全相同
+ * - REL: relation_name + arg_refs 完全相同
+ */
+function deduplicateWithinBatch(infons) {
+  if (!Array.isArray(infons) || infons.length <= 1) return infons
+  
+  const seen = new Map() // fingerprint → { bestInfon, firstIndex }
+  const noFpIndices = new Set() // 无指纹的信息元的索引
+  
+  // 第一遍：找出每个指纹的最佳信息元
+  for (let i = 0; i < infons.length; i++) {
+    const infon = infons[i]
+    const fp = getInfonFingerprint(infon)
+    if (!fp) {
+      noFpIndices.add(i)
+      continue
+    }
+    
+    if (seen.has(fp)) {
+      const entry = seen.get(fp)
+      const newConf = Number(infon.confidence ?? 0)
+      const existConf = Number(entry.bestInfon.confidence ?? 0)
+      if (newConf > existConf) {
+        entry.bestInfon = infon
+        // 保留首次出现的位置不变，以维持原始顺序
+      }
+    } else {
+      seen.set(fp, { bestInfon: infon, firstIndex: i })
+    }
+  }
+  
+  // 第二遍：按原始顺序输出，只在首次出现位置输出最佳版本
+  const firstIndexSet = new Set(Array.from(seen.values()).map(e => e.firstIndex))
+  const fpByIndex = new Map(Array.from(seen.entries()).map(([fp, e]) => [e.firstIndex, fp]))
+  
+  const result = []
+  for (let i = 0; i < infons.length; i++) {
+    if (noFpIndices.has(i)) {
+      // 无指纹的信息元：直接保留
+      result.push(infons[i])
+    } else if (firstIndexSet.has(i)) {
+      // 该指纹首次出现的位置：输出最佳版本
+      const fp = fpByIndex.get(i)
+      result.push(seen.get(fp).bestInfon)
+    }
+    // 其他位置（重复的后续出现）：跳过
+  }
+  
+  return result
+}
+
+/**
+ * 计算信息元的语义指纹（用于判断完全重复）
+ */
+function getInfonFingerprint(infon) {
+  if (!infon) return null
+  const type = String(infon.infon_type || '').toUpperCase()
+  
+  if (type === 'DESC') {
+    const entity = String(infon.entity || '').trim().toLowerCase()
+    const attribute = String(infon.attribute || '').trim().toLowerCase()
+    return `DESC:${entity}:${attribute}`
+  }
+  if (type === 'SCEN') {
+    const temporal = String(infon.temporal || '').trim().toLowerCase()
+    const spatial = String(infon.spatial || '').trim().toLowerCase()
+    return `SCEN:${temporal}:${spatial}`
+  }
+  if (type === 'REL') {
+    const relName = String(infon.relation_name || '').trim().toLowerCase()
+    const argRefs = Array.isArray(infon.arg_refs) ? [...infon.arg_refs].sort().join('|') : ''
+    return `REL:${relName}:${argRefs}`
+  }
+  return null
 }
 
 /**

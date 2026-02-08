@@ -64,6 +64,7 @@ export default function AgentPage() {
     abortPendingInfons,
     startMessageInfons,
     clearAllPendingInfons,
+    cleanupZombieRuns,
     infonSessions,
     // 隐私推理
     privacyInferences,
@@ -212,6 +213,13 @@ export default function AgentPage() {
 
   // 初始化当前会话：确保存在 currentSessionId
   useEffect(() => { _ensureCurrentSession() }, [_ensureCurrentSession])
+
+  // 清理僵尸 runs：页面加载时和每 15 秒检查超过 60 秒仍在 running 的 run
+  useEffect(() => {
+    cleanupZombieRuns?.(60000)
+    const timer = setInterval(() => cleanupZombieRuns?.(60000), 15000)
+    return () => clearInterval(timer)
+  }, [cleanupZombieRuns])
 
   const [input, setInput] = useState('')
   const [landingInput, setLandingInput] = useState('')
@@ -378,12 +386,12 @@ export default function AgentPage() {
       return { locked: true, stage: 'analyzing', label: 'Privacy Analyzing...' }
     }
     
-    // 严格检查：只要存在任何 pending 信息元（无论状态），且没有完成推理，就锁定
-    const hasPendingInfons = runs.some(run => run.targetType === 'pending')
+    // 严格检查：只有活跃的 pending 信息元（running 或 done）才锁定，error/aborted 不锁定
+    const hasActivePendingInfons = runs.some(run => run.targetType === 'pending' && (run.status === 'running' || run.status === 'done'))
     const hasCompletedInference = currentInference?.status === 'done'
     
-    // 如果有 pending 信息元但推理未完成，保持锁定
-    if (hasPendingInfons && selectedLaw) {
+    // 如果有活跃的 pending 信息元但推理未完成，保持锁定
+    if (hasActivePendingInfons && selectedLaw) {
       if (!hasCompletedInference) {
         // 判断当前处于哪个等待阶段
         const hasDonePending = runs.some(run => run.targetType === 'pending' && run.status === 'done')

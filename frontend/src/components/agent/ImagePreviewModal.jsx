@@ -7,6 +7,26 @@ import styles from '../AgentPage.module.css'
  * @param {function} onClose - 关闭回调函数
  */
 const ImagePreviewModal = ({ previewImage, onClose }) => {
+  // 按 ESC 键关闭（hooks 必须在条件返回之前调用）
+  React.useEffect(() => {
+    if (!previewImage) return
+
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') {
+        onClose()
+      }
+    }
+    
+    document.addEventListener('keydown', handleEsc)
+    // 禁止页面滚动
+    document.body.style.overflow = 'hidden'
+    
+    return () => {
+      document.removeEventListener('keydown', handleEsc)
+      document.body.style.overflow = ''
+    }
+  }, [previewImage, onClose])
+
   if (!previewImage) return null
 
   // 点击遮罩层关闭
@@ -15,26 +35,6 @@ const ImagePreviewModal = ({ previewImage, onClose }) => {
       onClose()
     }
   }
-
-  // 按 ESC 键关闭
-  React.useEffect(() => {
-    const handleEsc = (e) => {
-      if (e.key === 'Escape') {
-        onClose()
-      }
-    }
-    
-    if (previewImage) {
-      document.addEventListener('keydown', handleEsc)
-      // 禁止页面滚动
-      document.body.style.overflow = 'hidden'
-    }
-    
-    return () => {
-      document.removeEventListener('keydown', handleEsc)
-      document.body.style.overflow = ''
-    }
-  }, [previewImage, onClose])
 
   return (
     <div className={styles.imagePreviewOverlay} onClick={handleBackdropClick}>

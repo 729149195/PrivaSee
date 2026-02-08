@@ -1,65 +1,83 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react'
+import React, { useMemo, useState, useEffect, useRef, memo } from 'react'
 import styles from './AgentPage.module.css'
 import { useStore } from '../store'
 
 /**
- * 打字机效果 Hook - 逐字显示文本
+ * 打字机效果 Hook - 分块显示文本，优化流式性能
+ * 流式期间直接显示文本（因为文本本身已经在流式到达）；
+ * 完成后如果之前未完全显示，则快速追赶到完整文本。
  */
 function useTypewriter(text, isComplete, speed = 15) {
   const [displayedText, setDisplayedText] = useState('')
-  const animationIdRef = useRef(null)
+  const rafRef = useRef(null)
+  const prevCompleteRef = useRef(false)
   
   useEffect(() => {
     const currentText = text || ''
     
-    // 如果文本已完整，直接显示全部
-    if (isComplete) {
+    // 流式期间（isComplete=false）：直接显示当前文本，无需逐字动画
+    // 因为文本本身已经在从 API 逐步到达
+    if (!isComplete) {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
       if (displayedText !== currentText) {
         setDisplayedText(currentText)
       }
+      prevCompleteRef.current = false
       return
     }
     
-    // 如果文本为空，清空显示
-    if (!currentText) {
-      if (displayedText !== '') {
-        setDisplayedText('')
+    // 刚完成时（从 streaming → complete 转换）：
+    // 如果文本差距太大，用快速动画追赶；否则直接显示
+    if (isComplete && !prevCompleteRef.current) {
+      prevCompleteRef.current = true
+      const remaining = currentText.length - displayedText.length
+      if (remaining > 50) {
+        // 大量剩余文本，快速分块追赶
+        let pos = displayedText.length
+        const CHUNK = Math.max(5, Math.ceil(remaining / 20)) // 约 20 帧内完成
+        const animate = () => {
+          pos = Math.min(pos + CHUNK, currentText.length)
+          setDisplayedText(currentText.slice(0, pos))
+          if (pos < currentText.length) {
+            rafRef.current = requestAnimationFrame(animate)
+          } else {
+            rafRef.current = null
+          }
+        }
+        rafRef.current = requestAnimationFrame(animate)
+        return () => {
+          if (rafRef.current) {
+            cancelAnimationFrame(rafRef.current)
+            rafRef.current = null
+          }
+        }
+      } else {
+        // 差距不大，直接设置
+        if (displayedText !== currentText) {
+          setDisplayedText(currentText)
+        }
+        return
       }
-      return
     }
     
-    // 取消之前的动画
-    if (animationIdRef.current) {
-      clearTimeout(animationIdRef.current)
-      animationIdRef.current = null
-    }
-    
-    // 如果显示的文本已经和当前文本一致，不做任何事
-    if (displayedText === currentText) {
-      return
-    }
-    
-    // 如果显示的文本比当前文本长（回退情况），直接更新
-    if (displayedText.length > currentText.length) {
+    // 已完成且之前也是完成状态（文本没变化），直接同步
+    if (displayedText !== currentText) {
       setDisplayedText(currentText)
-      return
-    }
-    
-    // 逐字显示剩余字符
-    const remainingText = currentText.slice(displayedText.length)
-    if (remainingText.length > 0) {
-      animationIdRef.current = setTimeout(() => {
-        setDisplayedText(currentText.slice(0, displayedText.length + 1))
-      }, speed)
-    }
-    
-    return () => {
-      if (animationIdRef.current) {
-        clearTimeout(animationIdRef.current)
-        animationIdRef.current = null
-      }
     }
   }, [text, isComplete, displayedText, speed])
+  
+  // cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+    }
+  }, [])
   
   return displayedText
 }
@@ -105,9 +123,9 @@ function parseInferenceChain(text) {
 }
 
 /**
- * 单个风险卡片组件 - 带打字机效果
+ * 单个风险卡片组件 - 带打字机效果（使用 React.memo 优化）
  */
-function RiskCard({ risk, idx, infonMap }) {
+const RiskCard = memo(function RiskCard({ risk, idx, infonMap }) {
   const isPartial = risk._isComplete === false
   const isComplete = risk._isComplete !== false
   const uniqueKey = risk._objIndex ?? idx
@@ -134,9 +152,15 @@ function RiskCard({ risk, idx, infonMap }) {
     [inferenceChain]
   )
   
-  // 获取关联的信息元
-  const usedIids = Array.isArray(usedInfons) ? usedInfons.map(x => (typeof x === 'string' ? x : x?.iid)).filter(Boolean) : []
-  const relatedInfons = usedIids.map(iid => infonMap.get(iid)).filter(Boolean)
+  // 获取关联的信息元（去重 iid，避免 React key 冲突）
+  const usedIids = useMemo(() => {
+    const raw = Array.isArray(usedInfons) ? usedInfons.map(x => (typeof x === 'string' ? x : x?.iid)).filter(Boolean) : []
+    return [...new Set(raw)]
+  }, [usedInfons])
+  const relatedInfons = useMemo(
+    () => usedIids.map(iid => infonMap.get(iid)).filter(Boolean),
+    [usedIids, infonMap]
+  )
   
   // 获取边框颜色
   const borderColor = riskLevel === 'HIGH' ? '#ef4444' : riskLevel === 'MEDIUM' ? '#f59e0b' : riskLevel === 'LOW' ? '#10b981' : '#94a3b8'
@@ -302,7 +326,7 @@ function RiskCard({ risk, idx, infonMap }) {
       )}
     </div>
   )
-}
+})
 
 // 信息元类型颜色映射（中文注释）
 const getInfonColor = (infonType) => {

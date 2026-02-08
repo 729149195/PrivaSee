@@ -98,26 +98,35 @@ export function createStreamHandler({ get, set, sessionId, runId, existingInfons
 
   return async ({ content, finish }) => {
     if (typeof content === 'string' && content.length) {
-      const currentRun = get().infonSessions?.[sessionId]?.runs.find(x => x.id === runId)
-      const buffer = (currentRun?.buffer || '') + content
-      get()._updateInfonRun(sessionId, runId, (r) => ({ ...r, buffer }))
-      
-      const now = Date.now()
-      const timeSinceLastParse = now - lastParseTime
-      
-      if (parseTimer) clearTimeout(parseTimer)
-      
-      const hasCompleteLine = buffer.includes('\n')
-      if (hasCompleteLine || timeSinceLastParse >= PARSE_DEBOUNCE_MS) {
-        await performParsing()
-      } else {
-        parseTimer = setTimeout(performParsing, PARSE_DEBOUNCE_MS)
+      try {
+        const currentRun = get().infonSessions?.[sessionId]?.runs.find(x => x.id === runId)
+        const buffer = (currentRun?.buffer || '') + content
+        get()._updateInfonRun(sessionId, runId, (r) => ({ ...r, buffer }))
+        
+        const now = Date.now()
+        const timeSinceLastParse = now - lastParseTime
+        
+        if (parseTimer) clearTimeout(parseTimer)
+        
+        const hasCompleteLine = buffer.includes('\n')
+        if (hasCompleteLine || timeSinceLastParse >= PARSE_DEBOUNCE_MS) {
+          await performParsing()
+        } else {
+          parseTimer = setTimeout(performParsing, PARSE_DEBOUNCE_MS)
+        }
+      } catch (contentErr) {
+        console.error('[InfonHelpers] content handler error:', contentErr)
       }
     }
     
     if (finish) {
       if (parseTimer) clearTimeout(parseTimer)
-      await handleInfonFinish({ get, sessionId, runId, existingInfons, nowISO, modality })
+      try {
+        await handleInfonFinish({ get, sessionId, runId, existingInfons, nowISO, modality })
+      } catch (finishErr) {
+        console.error('[InfonHelpers] finish handler error:', finishErr)
+        get()._updateInfonRun(sessionId, runId, (r) => ({ ...r, status: 'error', error: String(finishErr?.message || 'Finish handler error') }))
+      }
     }
   }
 }

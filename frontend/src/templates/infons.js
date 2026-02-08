@@ -85,7 +85,11 @@ Extract for each person/object:
 SCEN: Use bbox for positions.
 REL: Spatial relations (near, holding, wearing).
 
-Minimum 15 DESC, 5 REL for images.
+**Critical**: Do NOT create duplicate DESC lines with same entity+attribute.
+- If multiple objects share a trait (e.g. 10 plates all from same region), extract it ONCE.
+- Each unique entity-attribute pair appears only once; use count/note if needed.
+- For multiple similar objects (e.g. license plates), extract each plate number as separate DESC, but shared attributes (region, color, type) only once.
+- Target: 8-20 DESC, 2-8 REL. Quality over quantity.
 `;
 
 export const AUDIO_EXTRACTION = String.raw`**Audio Extraction**:
@@ -99,7 +103,8 @@ export const SELF_CHECKLIST = String.raw`**Checklist**:
 - One attribute per DESC line
 - Use exact text from input
 - SCEN rare (0-2 max)
-- Total 5-12 lines
+- NO duplicate entity+attribute pairs
+- Text: 5-12 lines total; Image: 8-20 lines total
 `;
 
 // ============================================================================

@@ -9,6 +9,9 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
   const session = getCurrentSession()
   const runs = useMemo(() => (session ? (infonSessions?.[session.id]?.runs || []) : []), [session, infonSessions])
   
+  // 是否有正在运行的 run（用于判断是否处于流式状态）
+  const isStreaming = useMemo(() => runs.some(r => r?.status === 'running'), [runs])
+  
   // Tooltip 状态（中文注释）
   const [tooltip, setTooltip] = useState({ visible: false, infon: null, x: 0, y: 0 })
   
@@ -24,6 +27,7 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
   // 保存节点位置（中文注释）
   const nodePositionsRef = useRef(new Map())
   const lineKeysRef = useRef(new Set())
+  const simulationRef = useRef(null)
 
   // 信息元类型配置（中文注释）
   const typeConfig = {
@@ -172,8 +176,45 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
     return wordData.length > 30
   }, [displayMode, wordData.length])
 
+  // D3 渲染节流 refs
+  const d3RenderTimerRef = useRef(null)
+  const lastD3RenderTimeRef = useRef(0)
+  
   // D3 分区布局渲染（中文注释）
   useEffect(() => {
+    if (!svgRef.current || !wordData.length) return
+    
+    // 停止旧的 simulation
+    if (simulationRef.current) {
+      simulationRef.current.stop()
+      simulationRef.current = null
+    }
+    
+    // 流式期间节流：最多 500ms 重绘一次
+    const THROTTLE_MS = isStreaming ? 500 : 0
+    const now = Date.now()
+    const elapsed = now - lastD3RenderTimeRef.current
+    
+    if (isStreaming && elapsed < THROTTLE_MS) {
+      if (d3RenderTimerRef.current) clearTimeout(d3RenderTimerRef.current)
+      d3RenderTimerRef.current = setTimeout(() => {
+        d3RenderTimerRef.current = null
+        lastD3RenderTimeRef.current = Date.now()
+        doRender()
+      }, THROTTLE_MS - elapsed)
+      return () => {
+        if (d3RenderTimerRef.current) {
+          clearTimeout(d3RenderTimerRef.current)
+          d3RenderTimerRef.current = null
+        }
+      }
+    }
+    
+    lastD3RenderTimeRef.current = now
+    doRender()
+    
+    // === 实际 D3 渲染逻辑（内联在 effect 中，避免闭包过时问题） ===
+    function doRender() {
     if (!svgRef.current || !wordData.length) return
     
     const svg = d3.select(svgRef.current)
@@ -777,8 +818,21 @@ export default function WordCloud({ selectedTime = null, filterIids = null, comp
         setTooltip({ visible: false, infon: null, x: 0, y: 0 })
       })
 
-    return () => simulation.stop()
-  }, [wordData, relations, containerWidth, containerHeight, compact, useCompactNodes])
+    // 保存 simulation 引用以便后续清理
+    simulationRef.current = simulation
+    } // end doRender()
+    
+    return () => {
+      if (d3RenderTimerRef.current) {
+        clearTimeout(d3RenderTimerRef.current)
+        d3RenderTimerRef.current = null
+      }
+      if (simulationRef.current) {
+        simulationRef.current.stop()
+        simulationRef.current = null
+      }
+    }
+  }, [wordData, relations, containerWidth, containerHeight, compact, useCompactNodes, isStreaming])
 
   // 格式化 infon 详情（中文注释）
   const formatInfonDetails = (infon) => {
