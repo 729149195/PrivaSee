@@ -998,7 +998,9 @@ export default function AgentPage() {
                     suggestions={suggestions}
                     onApplySuggestion={handleApplySuggestion}
                     onGenerateSuggestions={handleGenerateSuggestions}
-                    hasInference={inference?.status === 'done'}
+                    hasInference={inference?.status === 'done' && inference?.risks?.length > 0}
+                    inferenceStatus={inference?.status}
+                    hasRisks={inference?.risks?.length > 0}
                     hasEditingText={
                       editingMessageId !== null 
                         ? (editingContent || '').trim().length > 0

@@ -243,7 +243,9 @@ export default function PrivacyProtectionSuggestions({
   onApplySuggestion,
   onGenerateSuggestions,
   hasInference,
-  hasEditingText
+  hasEditingText,
+  inferenceStatus,
+  hasRisks,
 }) {
 
   // 获取级别图标和颜色
@@ -280,7 +282,23 @@ export default function PrivacyProtectionSuggestions({
     }
   }
 
-  // 如果没有完成隐私推理，显示提示
+  // 推理完成但无风险 → 不需要修改建议
+  if (inferenceStatus === 'done' && !hasRisks) {
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 8 }}>
+          Privacy Protection Suggestions
+        </div>
+        <div className={styles.wordCloudRoot}>
+          <div className={styles.infonEmpty} style={{ padding: 12, textAlign: 'center', fontSize: 11, color: '#10b981' }}>
+            ✓ No privacy risks detected — no modifications needed
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // 推理未完成，显示提示
   if (!hasInference) {
     return (
       <div style={{ marginBottom: 16 }}>

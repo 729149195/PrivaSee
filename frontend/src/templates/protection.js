@@ -1,739 +1,204 @@
-// Privacy Protection Suggestions Prompt Template
-// 隐私保护修改建议提示词模板
+// Privacy Protection Suggestions — optimized for 4B models
 
-export const PROTECTION_SUGGESTIONS_PROMPT = `
-您是一位隐私保护专家，专门为用户提供文本修改建议，帮助在隐私保护和模型效用之间找到平衡。
-
-## 任务
-基于以下输入，提供3种不同级别的隐私保护修改建议：
-1. **高隐私保护（低效用）**：最大程度保护隐私，可能显著降低模型理解和响应质量
-2. **平衡方案（中等效用）**：在隐私保护和模型效用之间取得平衡
-3. **低隐私保护（高效用）**：最小程度修改，保持模型效用，仅移除最敏感信息
-
-## 输入数据
-
-### 1. 原始文本
-{{ORIGINAL_TEXT}}
-
-### 2. 检测到的隐私风险
-{{PRIVACY_RISKS}}
-
-### 3. 检测到的信息元
-{{INFONS}}
-
-## 修改原则
-
-### 高隐私保护策略
-- 移除或替换所有可识别个人的信息
-- 泛化所有具体细节（时间、地点、数字等）
-- 使用抽象描述替代具体内容
-- 优先考虑匿名性，即使损失信息完整性
-
-### 平衡策略
-- 保留必要的上下文信息
-- 对敏感信息进行适度泛化
-- 保持查询的核心意图
-- 在隐私和可用性间权衡
-
-### 低隐私保护策略
-- 仅移除最敏感的个人信息（如身份证号、真实姓名等）
-- 保留大部分上下文细节
-- 最小化修改，保持原意
-- 优先保证模型理解准确性
-
-## 输出格式
-
-**流式渲染优化 & 紧凑格式**: 使用紧凑格式输出，加快token生成速度：
-
-**格式语法**（无表头，直接输出数据）:
-\`\`\`
-value1,value2,value3,value4,value5
-value1,value2,value3,value4,value5
-\`\`\`
-
-**关键换行规则**: 每个建议**必须**单独成行。完成一个建议后按回车键换行。
-
-**字段顺序**（必须严格按此顺序，每行5个字段）:
-1. level - high_privacy | balanced | low_privacy
-2. label - 中文标签
-3. modified_text - 修改后的完整文本
-4. changes_summary - 修改说明
-5. removed_risks - 移除的风险（用|分隔）
-
-**转义规则**:
-- 文本中的逗号 → \\,
-- 字段内的换行 → \\n （不要使用实际换行）
-- 反斜杠 → \\\\
-- 数组元素 → 使用 | 分隔（如 风险1|风险2|风险3）
-- 建议之间 → 使用实际换行（每个建议后按回车）
-
-**示例输出**（无表头，直接输出数据）:
-\`\`\`
-high_privacy,高隐私保护,我想咨询健康饮食建议,移除了所有个人身份信息和具体健康状况\\,使用通用表达,姓名|身份证号|详细地址|糖尿病
-balanced,平衡方案,我住在北京\\,想咨询糖尿病饮食建议,保留健康状况但移除身份信息\\,在隐私和效用间平衡,姓名|身份证号|详细地址
-low_privacy,低隐私保护,我叫张某\\,住在北京市\\,想咨询糖尿病饮食建议,仅移除身份证号和详细地址\\,最小化修改,身份证号|详细地址
-\`\`\`
-
-## 关键要求
-1. **仅输出紧凑格式** - 无表头，不要输出JSON，不要使用markdown代码块，不要添加任何解释文字
-2. **每个建议单独成行** - 关键：每个建议必须在单独的行上，完成一个建议后按回车换行。不要把所有建议连成一行。
-3. **保持语言一致** - 如果输入是中文，修改后的文本也必须是中文；英文同理
-4. **修改要具体** - modified_text必须是完整的、可直接使用的文本
-5. **说明要清晰** - changes_summary要简洁说明修改了什么，为什么
-6. **按顺序输出** - 必须按high_privacy → balanced → low_privacy顺序，且字段顺序为level, label, modified_text, changes_summary, removed_risks
-7. **保持完整性** - 即使高隐私保护方案也要确保文本可读、有意义
-8. **正确转义** - 记得转义文本中的逗号(\\,)、换行(\\n)、反斜杠(\\\\)
-
-## 示例
-
-输入：
-"我叫张三，身份证号123456789012345678，住在北京市朝阳区某小区，想咨询一下我的糖尿病饮食建议"
-
-输出（无表头，直接输出数据）：
-\`\`\`
-high_privacy,高隐私保护,我想咨询健康饮食建议,移除所有个人识别信息和具体健康状况\\,最大程度保护隐私,姓名|身份证号|详细地址|糖尿病
-balanced,平衡方案,我住在北京\\,想咨询糖尿病饮食建议,保留健康问题但移除身份信息\\,在隐私和效用间平衡,姓名|身份证号|详细小区地址
-low_privacy,低隐私保护,我叫张某\\,住在北京市朝阳区\\,想咨询糖尿病饮食建议,仅移除最敏感的身份证号\\,保持最大效用,身份证号
-\`\`\`
-
-现在请分析输入并输出完整的紧凑格式建议。
-`
-
-/**
- * 填充保护建议提示词模板
- * @param {string} originalText - 原始文本
- * @param {Array} privacyRisks - 隐私风险列表
- * @param {Array} infons - 信息元列表
- * @returns {string} 填充后的提示词
- */
+// fillProtectionPrompt generates the full prompt (no separate template needed)
 export function fillProtectionPrompt(originalText, privacyRisks, infons) {
-  // 格式化隐私风险
-  let risksText = '未检测到隐私风险'
+  // Format detected risks
+  let risksText = 'No privacy risks detected'
   if (Array.isArray(privacyRisks) && privacyRisks.length > 0) {
     risksText = privacyRisks.map((risk, idx) => {
-      const level = risk.risk_level || 'UNKNOWN'
-      const lawNode = risk.law_node_name || '未知'
-      const exposure = risk.privacy_exposure || '未知'
-      return `${idx + 1}. [${level}] ${lawNode}: ${exposure}`
+      const level = risk.risk_level || '?'
+      const name = risk.law_node_name || '?'
+      const desc = risk.inference_chain || risk.reason || risk.privacy_exposure || ''
+      return `${idx + 1}. [${level}] ${name}${desc ? ' — ' + desc : ''}`
     }).join('\n')
   }
 
-  // 格式化信息元
-  let infonsText = '未检测到信息元'
+  // Format infons as context
+  let infonsSection = ''
   if (Array.isArray(infons) && infons.length > 0) {
-    infonsText = infons.map((infon, idx) => {
-      const type = String(infon.infon_type || '').toUpperCase()
-      const iid = infon.iid || `infon_${idx}`
-      
-      let detail = ''
-      if (type === 'DESC') {
-        const entity = infon.entity || ''
-        const attribute = infon.attribute || ''
-        detail = `${entity}: ${attribute}`
-      } else if (type === 'SCEN') {
-        const temporal = infon.temporal || ''
-        const spatial = infon.spatial || ''
-        detail = `${temporal} @ ${spatial}`
-      } else if (type === 'REL') {
-        detail = infon.relation_name || '关系'
-      } else if (type === 'SIT') {
-        detail = infon.description || '情境'
-      }
-      
-      return `- [${iid}] ${type}: ${detail}`
-    }).join('\n')
+    const items = infons.map(inf => {
+      const t = String(inf.infon_type || '').toUpperCase()
+      if (t === 'DESC') return `${inf.entity || ''}:${inf.attribute || ''}`
+      if (t === 'SCEN') return `${inf.temporal || ''}@${inf.spatial || ''}`
+      if (t === 'REL') return inf.relation_name || ''
+      return null
+    }).filter(Boolean)
+    if (items.length) infonsSection = `\nExtracted data points: ${items.join(', ')}`
   }
 
-  // 填充模板
-  const prompt = PROTECTION_SUGGESTIONS_PROMPT
-    .replace('{{ORIGINAL_TEXT}}', originalText || '')
-    .replace('{{PRIVACY_RISKS}}', risksText)
-    .replace('{{INFONS}}', infonsText)
+  return `Rewrite the user's text to protect privacy. Provide 3 versions with different protection levels.
 
-  return prompt
+## Original Text
+${originalText || ''}
+
+## Detected Privacy Risks
+${risksText}${infonsSection}
+
+## Output: exactly 3 lines, one per level
+Format per line: level,label,modified_text,changes_summary,removed_risks
+
+Fields:
+- level: high_privacy | balanced | low_privacy
+- label: short label in the SAME LANGUAGE as original text
+- modified_text: full rewritten text (escape commas as \\,)
+- changes_summary: brief description of what changed (same language as original)
+- removed_risks: items removed, separated by |
+
+## Protection strategies
+- high_privacy: remove ALL identifiable info, generalize everything, maximize anonymity
+- balanced: keep core intent, remove direct identifiers, moderate generalization
+- low_privacy: minimal changes, only remove the most sensitive items (ID numbers, full addresses)
+
+## Rules
+- Keep the SAME LANGUAGE as the original text
+- Each version must be a complete, usable text (not a template)
+- Output exactly 3 lines, no headers, no markdown, no explanation
+- high_privacy first, then balanced, then low_privacy
+
+Output:`
 }
 
 // ============================================================================
-// COMPACT FORMAT PARSERS FOR PROTECTION SUGGESTIONS
+// COMPACT FORMAT PARSERS
 // ============================================================================
 
-/**
- * Unescape special characters in compact format field values
- */
 function unescapeValue(value) {
   if (typeof value !== 'string') return value
-  return value
-    .replace(/\\,/g, ',')
-    .replace(/\\n/g, '\n')
-    .replace(/\\\\/g, '\\')
+  return value.replace(/\\,/g, ',').replace(/\\n/g, '\n').replace(/\\\\/g, '\\')
 }
 
-/**
- * Split array field by | separator
- */
 function splitArrayField(value) {
   if (!value || typeof value !== 'string') return []
-  const parts = value.split(/(?<!\\)\|/)
-  return parts.map(p => p.trim()).filter(Boolean)
+  return value.split(/(?<!\\)\|/).map(p => p.trim()).filter(Boolean)
 }
 
-/**
- * Parse a single compact format line into a suggestion object
- * Fields: level, label, modified_text, changes_summary, removed_risks
- */
-function parseCompactSuggestionLine(line, fields) {
-  if (!line || !line.trim()) return null
-  
-  // Split by comma, but respect escaped commas
+const VALID_LEVELS = new Set(['high_privacy', 'balanced', 'low_privacy'])
+const SUGGESTION_FIELDS = ['level', 'label', 'modified_text', 'changes_summary', 'removed_risks']
+
+// 按逗号分割（尊重转义）
+function splitEscapedComma(line) {
   const values = []
-  let currentValue = ''
-  let escaped = false
-  
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    
-    if (escaped) {
-      currentValue += ch
-      escaped = false
-      continue
-    }
-    
-    if (ch === '\\') {
-      currentValue += ch
-      escaped = true
-      continue
-    }
-    
-    if (ch === ',') {
-      values.push(currentValue)
-      currentValue = ''
-      continue
-    }
-    
-    currentValue += ch
+  let cur = '', escaped = false
+  for (const ch of line) {
+    if (escaped) { cur += ch; escaped = false; continue }
+    if (ch === '\\') { cur += ch; escaped = true; continue }
+    if (ch === ',') { values.push(cur); cur = ''; continue }
+    cur += ch
   }
-  
-  // Push the last value
-  if (currentValue || values.length > 0) {
-    values.push(currentValue)
-  }
-  
-  // Field names in order (5 fields total)
-  const fieldNames = ['level', 'label', 'modified_text', 'changes_summary', 'removed_risks']
-  
-  // Build the suggestion object
-  const suggestion = {}
-  for (let i = 0; i < fieldNames.length && i < values.length; i++) {
-    const fieldName = fieldNames[i]
-    let value = values[i].trim()
-    
-    // Handle array field
-    if (fieldName === 'removed_risks') {
-      suggestion[fieldName] = splitArrayField(value)
-    } else {
-      suggestion[fieldName] = unescapeValue(value)
-    }
-  }
-  
-  return Object.keys(suggestion).length > 0 ? suggestion : null
+  if (cur || values.length > 0) values.push(cur)
+  return values
 }
 
-/**
- * Parse complete compact format text into an array of suggestion objects
- * Supports both headerless format (new) and header format (old, for compatibility)
- */
+// 解析一行紧凑格式为建议对象
+function parseCompactSuggestionLine(line) {
+  if (!line?.trim()) return null
+  const trimmed = line.trim()
+  // 必须以有效 level 开头
+  if (!VALID_LEVELS.has(trimmed.split(',')[0]?.trim())) return null
+
+  const values = splitEscapedComma(trimmed)
+  const suggestion = {}
+  for (let i = 0; i < SUGGESTION_FIELDS.length && i < values.length; i++) {
+    const field = SUGGESTION_FIELDS[i]
+    const val = values[i].trim()
+    suggestion[field] = field === 'removed_risks' ? splitArrayField(val) : unescapeValue(val)
+  }
+  return suggestion.level ? suggestion : null
+}
+
+// 完整解析紧凑格式文本
 export function parseCompactProtectionFormat(text) {
   if (!text || typeof text !== 'string') return null
-  
-  // Fixed field order: level, label, modified_text, changes_summary, removed_risks
-  const defaultFields = ['level', 'label', 'modified_text', 'changes_summary', 'removed_risks']
-  
-  // 移除代码块标记
-  let cleanText = text.replace(/```[\w]*\n?/g, '').replace(/\n?```$/g, '').trim()
-  
-  // Try to match optional header: suggestions[N]{field1,field2,...}:
-  const headerMatch = cleanText.match(/suggestions\[(\d+)\]\{([^}]+)\}:/)
-  
-  let fields = defaultFields
-  let dataText = cleanText
-  
-  if (headerMatch) {
-    // Header found (old format), extract fields from header
-    const fieldsStr = headerMatch[2]
-    fields = fieldsStr.split(',').map(f => f.trim())
-    const headerEnd = headerMatch.index + headerMatch[0].length
-    dataText = cleanText.slice(headerEnd)
-  }
-  // If no header, treat entire text as data (new format)
-  
-  const lines = dataText.split('\n')
+  const clean = text.replace(/```[\w]*\n?/g, '').replace(/\n?```$/g, '').trim()
   const suggestions = []
-  
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('```') || trimmed === '---') continue
-    
-    const suggestion = parseCompactSuggestionLine(trimmed, fields)
-    if (suggestion && suggestion.level) {
-      suggestions.push(suggestion)
-    }
+  for (const line of clean.split('\n')) {
+    const s = parseCompactSuggestionLine(line.trim())
+    if (s) suggestions.push(s)
   }
-  
   return suggestions.length > 0 ? suggestions : null
 }
 
-/**
- * 解析保护建议响应（支持紧凑格式和JSON格式）
- * @param {string} responseText - API响应文本
- * @returns {Object|null} 解析后的建议对象
- */
+// 解析保护建议响应（紧凑格式优先，JSON 后备）
 export function parseProtectionResponse(responseText) {
-  // Try compact format first
-  const compactResult = parseCompactProtectionFormat(responseText)
-  if (compactResult) return compactResult
-  
-  // Fallback to JSON format
+  const compact = parseCompactProtectionFormat(responseText)
+  if (compact) return compact
   try {
     const parsed = JSON.parse(responseText)
-    if (parsed && parsed.suggestions && Array.isArray(parsed.suggestions)) {
-      return parsed
-    }
-  } catch (e) {
-    // 如果直接解析失败，尝试提取JSON对象
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[0])
-        if (parsed && parsed.suggestions && Array.isArray(parsed.suggestions)) {
-          return parsed
-        }
-      } catch (e2) {
-        console.warn('[Protection] 无法解析响应', e2)
-      }
-    }
+    if (parsed?.suggestions && Array.isArray(parsed.suggestions)) return parsed
+  } catch (_) {
+    const m = responseText.match(/\{[\s\S]*\}/)
+    if (m) try { const p = JSON.parse(m[0]); if (p?.suggestions) return p } catch (_) {}
   }
-  
   return null
 }
 
-/**
- * 验证建议数据的完整性
- * @param {Object} suggestion - 单个建议对象
- * @returns {boolean} 是否有效
- */
+// 验证建议数据完整性
 export function validateSuggestion(suggestion) {
   if (!suggestion || typeof suggestion !== 'object') return false
-  
-  const required = ['level', 'label', 'modified_text']
-  return required.every(field => suggestion[field] !== undefined && suggestion[field] !== null)
+  return ['level', 'label', 'modified_text'].every(f => suggestion[f])
 }
 
-/**
- * 部分解析紧凑格式行（支持流式渲染）
- * 在行未完成时提取已有字段
- */
-function parsePartialCompactLine(line, fields) {
-  if (!line || !line.trim()) return null
-  
-  // Split by comma, but respect escaped commas
-  const values = []
-  let currentValue = ''
-  let escaped = false
-  
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    
-    if (escaped) {
-      currentValue += ch
-      escaped = false
-      continue
-    }
-    
-    if (ch === '\\') {
-      currentValue += ch
-      escaped = true
-      continue
-    }
-    
-    if (ch === ',') {
-      values.push(currentValue)
-      currentValue = ''
-      continue
-    }
-    
-    currentValue += ch
-  }
-  
-  // Push the last (possibly incomplete) value
-  if (currentValue || values.length > 0) {
-    values.push(currentValue)
-  }
-  
-  // Field names in order (5 fields total)
-  const fieldNames = fields || ['level', 'label', 'modified_text', 'changes_summary', 'removed_risks']
-  
-  // Build the partial suggestion object
-  const suggestion = {}
-  for (let i = 0; i < fieldNames.length && i < values.length; i++) {
-    const fieldName = fieldNames[i]
-    let value = values[i]
-    
-    // Only trim for non-last values (last value might be incomplete)
-    if (i < values.length - 1) {
-      value = value.trim()
-    }
-    
-    // Handle array field
-    if (fieldName === 'removed_risks') {
-      suggestion[fieldName] = splitArrayField(value)
-    } else {
-      suggestion[fieldName] = unescapeValue(value)
-    }
-  }
-  
-  return Object.keys(suggestion).length > 0 ? suggestion : null
-}
+// 流式增量解析保护建议
+export function incrementalExtractSuggestions(streamText, parser) {
+  const text = String(streamText || '').replace(/```[\w]*\n?/g, '').replace(/\n?```$/g, '')
 
-/**
- * 流式增量解析保护建议（紧凑格式）
- * 支持无表头格式（新）和带表头格式（旧，兼容）
- * 支持流式渲染：对未完成的行也进行部分解析
- */
-function incrementalExtractSuggestionsCompact(streamText, parser) {
-  // Fixed field order: level, label, modified_text, changes_summary, removed_risks
-  const defaultFields = ['level', 'label', 'modified_text', 'changes_summary', 'removed_risks']
-  
-  const state = parser || {
-    foundHeader: false,
-    fields: defaultFields,
-    count: 0,
-    scanPos: 0,
+  const state = {
     parsedLines: 0,
     suggestionIndex: 0,
-    partialStates: new Map(), // 存储部分解析的状态
-    lastPartialHash: null // 上次部分解析的哈希
+    lastPartialHash: null,
+    formatDetected: true,
+    ...(parser || {})
   }
-  
+
   const yielded = []
-  let text = String(streamText || '')
-  
-  // 移除代码块标记 ``` 
-  text = text.replace(/```[\w]*\n?/g, '').replace(/\n?```$/g, '')
-  
-  // Step 1: Check for optional header
-  if (!state.foundHeader) {
-    const headerMatch = text.match(/suggestions\[(\d+)\]\{([^}]+)\}:/)
-    if (headerMatch) {
-      // Header found (old format)
-      state.foundHeader = true
-      state.count = parseInt(headerMatch[1], 10)
-      state.fields = headerMatch[2].split(',').map(f => f.trim())
-      state.scanPos = headerMatch.index + headerMatch[0].length
-    } else {
-      // No header (new format), treat as headerless
-      state.foundHeader = true
-      state.fields = defaultFields
-      state.scanPos = 0
-    }
-  }
-  
-  // Step 2: Parse data lines incrementally
-  const dataText = text.slice(state.scanPos)
-  const lines = dataText.split('\n')
-  
-  // Process each line after the already parsed ones
+  const lines = text.split('\n')
+
+  // parsedLines 防溢出（<think> 移除后 buffer 可能变短）
+  if (state.parsedLines > lines.length) state.parsedLines = 0
+
   for (let i = state.parsedLines; i < lines.length; i++) {
-    const line = lines[i]
-    const trimmed = line.trim()
-    const isLastLine = i === lines.length - 1
-    const isIncomplete = isLastLine && !dataText.endsWith('\n')
-    
-    // Skip empty lines
-    if (!trimmed) {
-      if (!isIncomplete) state.parsedLines++
+    const trimmed = lines[i].trim()
+    const isLast = i === lines.length - 1
+    const isStreaming = isLast && !text.endsWith('\n')
+
+    if (!trimmed || trimmed.startsWith('```') || trimmed === '---') {
+      if (!isStreaming) state.parsedLines++
       continue
     }
-    
-    // 跳过非数据行（如空行、代码块标记等）
-    if (trimmed.startsWith('```') || trimmed === '---') {
-      if (!isIncomplete) state.parsedLines++
-      continue
-    }
-    
-    if (isIncomplete) {
-      // 最后一行可能不完整，进行部分解析
-      const currentHash = computeHashId(trimmed)
-      
-      // 只有当内容变化时才重新解析
-      if (currentHash !== state.lastPartialHash) {
-        state.lastPartialHash = currentHash
-        const partialSuggestion = parsePartialCompactLine(trimmed, state.fields)
-        
-        if (partialSuggestion && partialSuggestion.level) {
-          partialSuggestion._objIndex = state.suggestionIndex
-          partialSuggestion._isComplete = false // 标记为未完成
-          yielded.push(partialSuggestion)
+
+    if (isStreaming) {
+      // 部分解析：内容变化时才更新
+      const hash = simpleHash(trimmed)
+      if (hash !== state.lastPartialHash) {
+        state.lastPartialHash = hash
+        const partial = parseCompactSuggestionLine(trimmed)
+        if (partial) {
+          partial._objIndex = state.suggestionIndex
+          partial._isComplete = false
+          yielded.push(partial)
         }
       }
     } else {
-      // 完整行，进行完整解析
-      const suggestion = parseCompactSuggestionLine(trimmed, state.fields)
-      if (suggestion && suggestion.level) {
-        suggestion._objIndex = state.suggestionIndex++
-        suggestion._isComplete = true
-        yielded.push(suggestion)
-        
-        // 重置部分解析状态
+      // 完整行解析
+      const s = parseCompactSuggestionLine(trimmed)
+      if (s) {
+        s._objIndex = state.suggestionIndex++
+        s._isComplete = true
+        yielded.push(s)
         state.lastPartialHash = null
       }
-      
       state.parsedLines++
     }
   }
-  
+
   return { state, yielded }
 }
 
-/**
- * 流式增量解析保护建议（JSON格式）
- */
-function incrementalExtractSuggestionsJSON(streamText, parser) {
-  const state = parser || {
-    foundArray: false,
-    arrayStart: -1,
-    scanPos: 0,
-    inString: false,
-    escape: false,
-    objStart: -1,
-    braceDepth: 0,
-    closed: false,
-    objectStates: new Map(),
-    currentObjIndex: 0,
-    formatDetected: true,
-    isCompact: false
-  }
-  const yielded = []
-  const text = String(streamText || '')
-
-  // 查找 "suggestions" 数组
-  if (!state.foundArray) {
-    const m = /"suggestions"\s*:\s*\[/.exec(text)
-    if (!m) {
-      state.scanPos = text.length
-      return { state, yielded }
-    }
-    state.foundArray = true
-    state.arrayStart = m.index + m[0].lastIndexOf('[')
-    state.scanPos = state.arrayStart + 1
-  }
-
-  let i = state.scanPos
-  let inString = state.inString
-  let escape = state.escape
-  let objStart = state.objStart
-  let braceDepth = state.braceDepth
-
-  if (state.closed) return { state, yielded }
-
-  for (; i < text.length; i++) {
-    const ch = text[i]
-    if (inString) {
-      if (escape) { escape = false; continue }
-      if (ch === '\\') { escape = true; continue }
-      if (ch === '"') { inString = false; continue }
-      continue
-    }
-    if (ch === '"') { inString = true; continue }
-    if (ch === '{') {
-      if (objStart < 0) {
-        objStart = i
-        braceDepth = 1
-        if (!state.objectStates.has(state.currentObjIndex)) {
-          state.objectStates.set(state.currentObjIndex, { lastParsedHash: null, data: {} })
-        }
-      } else {
-        braceDepth++
-      }
-      continue
-    }
-    if (ch === '}') {
-      if (objStart >= 0) {
-        braceDepth--
-        if (braceDepth === 0) {
-          let objText = text.slice(objStart, i + 1).trim()
-          if (!objText.endsWith('}')) {
-            const lastBrace = objText.lastIndexOf('}')
-            if (lastBrace >= 0) {
-              objText = objText.slice(0, lastBrace + 1)
-            }
-          }
-          
-          try {
-            const value = JSON.parse(objText)
-            const objState = state.objectStates.get(state.currentObjIndex)
-            if (objState) {
-              yielded.push({ ...value, _objIndex: state.currentObjIndex, _isComplete: true })
-              objState.data = value
-              objState.lastParsedHash = computeHashId(objText)
-            }
-          } catch (err) {
-            const objState = state.objectStates.get(state.currentObjIndex)
-            if (objState && Object.keys(objState.data).length > 0) {
-              yielded.push({ ...objState.data, _objIndex: state.currentObjIndex, _isComplete: true })
-              objState.lastParsedHash = computeHashId(objText)
-            }
-          }
-          objStart = -1
-          state.currentObjIndex++
-        }
-      }
-      continue
-    }
-    if (ch === ']') {
-      if (objStart < 0) { state.closed = true; i++; break }
-    }
-    
-    // 部分解析
-    if (objStart >= 0 && braceDepth > 0) {
-      const objText = text.slice(objStart, i + 1)
-      if ((ch === ',' || ch === '\n') && (i - objStart) > 20) {
-        const objState = state.objectStates.get(state.currentObjIndex)
-        const currentHash = computeHashId(objText)
-        
-        if (objState && objState.lastParsedHash !== currentHash) {
-          const partialData = parsePartialSuggestion(objText)
-          if (partialData && Object.keys(partialData).length > 0) {
-            const hasNewData = Object.keys(partialData).some(
-              key => partialData[key] !== objState.data[key]
-            )
-            
-            if (hasNewData) {
-              objState.data = { ...objState.data, ...partialData }
-              objState.lastParsedHash = currentHash
-              yielded.push({ ...objState.data, _objIndex: state.currentObjIndex, _isComplete: false })
-            }
-          }
-        }
-      }
-    }
-  }
-
-  state.inString = inString
-  state.escape = escape
-  state.objStart = objStart
-  state.braceDepth = braceDepth
-  state.scanPos = i
-  return { state, yielded }
-}
-
-/**
- * 解析部分建议对象
- */
-function parsePartialSuggestion(objText) {
-  const result = {}
-  const criticalFields = ['level', 'label']
-  const otherFields = ['modified_text', 'changes_summary', 'removed_risks']
-  
-  for (const field of [...criticalFields, ...otherFields]) {
-    const value = extractFieldValue(objText, field)
-    if (value !== null) {
-      result[field] = value
-    }
-  }
-  
-  return result
-}
-
-/**
- * 提取字段值
- */
-function extractFieldValue(text, fieldName) {
-  const patterns = [
-    new RegExp(`"${fieldName}"\\s*:\\s*"([^"]*(?:\\\\.[^"]*)*)"`, 's'),
-    new RegExp(`"${fieldName}"\\s*:\\s*(\\d+\\.?\\d*)`, 's'),
-    new RegExp(`"${fieldName}"\\s*:\\s*(\\[[^\\]]*\\])`, 's'),
-    new RegExp(`"${fieldName}"\\s*:\\s*(\\{[^}]*\\})`, 's')
-  ]
-  
-  for (const pattern of patterns) {
-    const match = text.match(pattern)
-    if (match) {
-      try {
-        if (pattern.source.includes('"([^"]*')) {
-          return match[1].replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\\\/g, '\\')
-        }
-        return JSON.parse(match[1])
-      } catch (err) {
-        continue
-      }
-    }
-  }
-  
-  return null
-}
-
-/**
- * 计算简单哈希ID
- */
-function computeHashId(str) {
-  let hash = 0
+function simpleHash(str) {
+  let h = 0
   for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
-    hash = hash & hash
+    h = ((h << 5) - h) + str.charCodeAt(i)
+    h = h & h
   }
-  return hash.toString(36)
+  return h.toString(36)
 }
-
-/**
- * 流式增量解析保护建议（自动检测格式）
- * @param {string} streamText - 流式接收的文本
- * @param {object} parser - 解析器状态
- * @returns {object} { state, yielded }
- */
-export function incrementalExtractSuggestions(streamText, parser) {
-  const text = String(streamText || '')
-  
-  // Auto-detect format on first call
-  if (!parser || !parser.formatDetected) {
-    // Look for compact format header
-    const compactMatch = text.match(/suggestions\[(\d+)\]\{([^}]+)\}:/)
-    // Look for JSON format
-    const jsonMatch = text.match(/"suggestions"\s*:\s*\[/)
-    
-    // Determine format based on which appears first
-    let useCompact = false
-    if (compactMatch && jsonMatch) {
-      useCompact = compactMatch.index < jsonMatch.index
-    } else if (compactMatch) {
-      useCompact = true
-    } else if (jsonMatch) {
-      useCompact = false
-    } else {
-      // No format detected yet, keep old state if exists
-      if (parser) return { state: parser, yielded: [] }
-      
-      // Initialize with default (try compact first)
-      useCompact = true
-    }
-    
-    // Initialize parser state with format info
-    if (!parser) {
-      parser = {
-        formatDetected: true,
-        isCompact: useCompact
-      }
-    } else {
-      parser.formatDetected = true
-      parser.isCompact = useCompact
-    }
-  }
-  
-  // Route to appropriate parser
-  if (parser.isCompact) {
-    return incrementalExtractSuggestionsCompact(text, parser)
-  } else {
-    return incrementalExtractSuggestionsJSON(text, parser)
-  }
-}
-
