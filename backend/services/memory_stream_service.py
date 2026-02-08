@@ -145,6 +145,10 @@ _embedding_model = None
 _embedding_lock = threading.Lock()
 _db_lock = threading.Lock()
 
+# 用户隔离：每个用户独立的管理器实例
+_managers: Dict[str, 'MemoryStreamManager'] = {}
+_managers_lock = threading.Lock()
+
 
 # =============================================================================
 # Embedding 模型管理
@@ -170,14 +174,14 @@ def load_embedding_model():
 def compute_embedding(text: str) -> np.ndarray:
     """计算文本的语义向量"""
     model = load_embedding_model()
-    embedding = model.encode(text, normalize_embeddings=True)
+    embedding = model.encode(text, normalize_embeddings=True, show_progress_bar=False)
     return embedding.astype(np.float32)
 
 
 def compute_embeddings_batch(texts: List[str]) -> np.ndarray:
     """批量计算语义向量"""
     model = load_embedding_model()
-    embeddings = model.encode(texts, normalize_embeddings=True, batch_size=32)
+    embeddings = model.encode(texts, normalize_embeddings=True, batch_size=32, show_progress_bar=False)
     return embeddings.astype(np.float32)
 
 
@@ -307,6 +311,31 @@ class MemoryStore:
                 f"SELECT * FROM infon_memory WHERE iid IN ({placeholders})", iids
             ).fetchall()
         return [self._row_to_dict(r) for r in rows]
+
+    def get_all_infons_for_viz(self) -> List[Dict]:
+        """获取所有信息元的元数据 + 向量（用于可视化降维）"""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT iid, infon_type, modality, session_id, round_num, "
+                "entity, attribute, text_for_embedding, vector, "
+                "evidence_pointer, associations, created_at "
+                "FROM infon_memory ORDER BY id"
+            ).fetchall()
+
+        results = []
+        for r in rows:
+            d = dict(r)
+            # 解析 vector
+            if isinstance(d['vector'], bytes):
+                d['vector'] = np.frombuffer(d['vector'], dtype=np.float32).tolist()
+            # 解析 associations
+            if isinstance(d.get('associations'), str):
+                try:
+                    d['associations'] = json.loads(d['associations'])
+                except json.JSONDecodeError:
+                    d['associations'] = []
+            results.append(d)
+        return results
 
     def count(self) -> int:
         """获取信息元总数"""
@@ -651,16 +680,17 @@ def _estimate_token_count(text: str) -> int:
 # =============================================================================
 
 class MemoryStreamManager:
-    """主记忆流管理器 - 整合存储、索引和检索"""
+    """主记忆流管理器 - 整合存储、索引和检索 (按用户隔离)"""
 
-    def __init__(self):
+    def __init__(self, user_id: str = 'default'):
+        self.user_id = user_id
         self.store: Optional[MemoryStore] = None
         self.index: Optional[HNSWIndex] = None
         self.detector = RiskTriggerDetector()
         self._initialized = False
 
     def initialize(self):
-        """初始化存储和索引"""
+        """初始化存储和索引 (每个用户独立的数据库和索引)"""
         if self._initialized:
             return
 
@@ -668,7 +698,10 @@ class MemoryStreamManager:
         data_dir = config['data_dir']
         os.makedirs(data_dir, exist_ok=True)
 
-        db_path = os.path.join(data_dir, 'memory_stream.db')
+        # 按用户隔离：每个用户一个独立的 SQLite 数据库
+        safe_uid = self.user_id.replace('/', '_').replace('\\', '_').replace('..', '_')
+        db_filename = f'memory_stream_{safe_uid}.db' if safe_uid != 'default' else 'memory_stream.db'
+        db_path = os.path.join(data_dir, db_filename)
         self.store = MemoryStore(db_path)
 
         # 加载嵌入模型获取维度
@@ -679,7 +712,7 @@ class MemoryStreamManager:
         self.index.rebuild_from_store(self.store)
 
         self._initialized = True
-        logger.info(f"✓ 主记忆流初始化完成 (存储: {self.store.count()} 条)")
+        logger.info(f"✓ 主记忆流初始化完成 (用户: {self.user_id}, 存储: {self.store.count()} 条)")
 
     def _ensure_initialized(self):
         if not self._initialized:
@@ -995,6 +1028,224 @@ class MemoryStreamManager:
 
         return result
 
+    # 可视化结果缓存 (数据不变时避免重复降维)
+    _viz_cache_hash: Optional[str] = None
+    _viz_cache_result: Optional[Dict] = None
+
+    @staticmethod
+    def _auto_perplexity(n: int) -> int:
+        """
+        根据数据规模自动计算最优 perplexity
+
+        经验公式：perplexity ≈ min(30, sqrt(n))
+        - n < 10   → 使用 PCA (t-SNE 无意义)
+        - n 10-100 → perplexity = max(5, n//3)
+        - n 100-1000 → perplexity = 30
+        - n > 1000 → perplexity = 50
+        """
+        if n <= 10:
+            return max(2, n - 1)
+        elif n <= 100:
+            return max(5, min(n // 3, 30))
+        elif n <= 1000:
+            return 30
+        else:
+            return 50
+
+    # 大数据采样阈值
+    VIZ_SAMPLE_THRESHOLD = 2000   # 超过此数量进行采样
+    VIZ_SAMPLE_SIZE = 1500        # 采样数量
+    VIZ_TSNE_LIMIT = 5000         # 超过此数量强制 PCA (t-SNE 太慢)
+
+    def get_visualization_data(self, method: str = 'auto') -> Dict:
+        """
+        获取可视化数据：对所有信息元向量进行降维，返回 2D 坐标 + 元数据 + 关联边
+
+        策略：
+        - method='auto' (默认): 根据数据量自动选择最优降维方法和参数
+          · n ≤ 3       → PCA
+          · 4 ≤ n ≤ 5000 → t-SNE (perplexity 全自动)
+          · n > 5000    → PCA (t-SNE O(n²) 太慢)
+        - method='tsne' : 强制 t-SNE
+        - method='pca'  : 强制 PCA
+
+        大数据优化：
+        - n > 2000 时进行随机采样，保证交互响应速度
+        - 缓存降维结果，数据不变时直接返回
+
+        Args:
+            method: 'auto' (默认), 'tsne' 或 'pca'
+
+        Returns:
+            {
+                points: [{iid, x, y, infon_type, entity, attribute, ...}],
+                edges: [{source, target, similarity}],
+                total: int,            # 总信息元数
+                displayed: int,        # 实际显示的点数 (采样后)
+                sampled: bool,         # 是否进行了采样
+                method: str,           # 实际使用的降维方法
+                perplexity: int|null,  # 实际 perplexity (仅 t-SNE)
+                stats: {...},          # 统计摘要
+            }
+        """
+        self._ensure_initialized()
+
+        all_infons = self.store.get_all_infons_for_viz()
+        if not all_infons:
+            return {
+                'points': [], 'edges': [], 'total': 0, 'displayed': 0,
+                'sampled': False, 'method': method, 'perplexity': None,
+                'stats': {},
+            }
+
+        n_total = len(all_infons)
+
+        # ---- 缓存检查 ----
+        cache_key = f"{n_total}_{method}"
+        if self._viz_cache_hash == cache_key and self._viz_cache_result:
+            logger.info(f"可视化缓存命中 (n={n_total}, method={method})")
+            return self._viz_cache_result
+
+        import time as _time
+        t0 = _time.time()
+
+        # ---- 大数据采样 ----
+        sampled = False
+        if n_total > self.VIZ_SAMPLE_THRESHOLD:
+            rng = np.random.RandomState(42)
+            sample_idx = rng.choice(n_total, size=min(self.VIZ_SAMPLE_SIZE, n_total), replace=False)
+            sample_idx.sort()
+            all_infons = [all_infons[i] for i in sample_idx]
+            sampled = True
+            logger.info(f"可视化采样: {n_total} → {len(all_infons)}")
+
+        n = len(all_infons)
+        vectors = np.array([inf['vector'] for inf in all_infons], dtype=np.float32)
+
+        # ---- 自动选择降维方法 ----
+        actual_method = method
+        actual_perplexity = None
+
+        if method == 'auto':
+            if n <= 3:
+                actual_method = 'pca'
+            elif n > self.VIZ_TSNE_LIMIT:
+                actual_method = 'pca'
+                logger.info(f"数据量过大 (n={n}), 自动切换到 PCA")
+            else:
+                actual_method = 'tsne'
+
+        # ---- 降维 ----
+        if n == 1:
+            coords_2d = np.array([[0.5, 0.5]])
+        elif actual_method == 'pca' or n <= 3:
+            actual_method = 'pca'
+            from sklearn.decomposition import PCA
+            n_comp = min(2, n, vectors.shape[1])
+            pca = PCA(n_components=n_comp)
+            coords_2d = pca.fit_transform(vectors)
+            if n_comp == 1:
+                coords_2d = np.column_stack([coords_2d, np.zeros(n)])
+        else:
+            actual_method = 'tsne'
+            from sklearn.manifold import TSNE
+            actual_perplexity = self._auto_perplexity(n)
+            # 确保 perplexity < n
+            actual_perplexity = min(actual_perplexity, max(2, n - 1))
+            tsne = TSNE(
+                n_components=2,
+                perplexity=actual_perplexity,
+                random_state=42,
+                init='pca',
+                learning_rate='auto',
+                max_iter=1000,
+            )
+            coords_2d = tsne.fit_transform(vectors)
+
+        # ---- 归一化到 [0, 1] (加 5% padding) ----
+        for dim in range(2):
+            col = coords_2d[:, dim]
+            vmin, vmax = col.min(), col.max()
+            spread = vmax - vmin if vmax > vmin else 1.0
+            coords_2d[:, dim] = (col - vmin) / spread
+
+        # ---- 构建点数据 + 统计 ----
+        points = []
+        edges = []
+        seen_edges = set()
+        type_counts = {}
+        modality_counts = {}
+        session_set = set()
+
+        iid_set_in_points = set()
+        for inf in all_infons:
+            iid_set_in_points.add(inf['iid'])
+
+        for i, inf in enumerate(all_infons):
+            associations = inf.get('associations', [])
+            infon_type = inf.get('infon_type', '')
+            modality = inf.get('modality', 'text')
+            session_id = inf.get('session_id', '')
+
+            type_counts[infon_type] = type_counts.get(infon_type, 0) + 1
+            modality_counts[modality] = modality_counts.get(modality, 0) + 1
+            session_set.add(session_id)
+
+            points.append({
+                'iid': inf['iid'],
+                'x': round(float(coords_2d[i, 0]), 4),
+                'y': round(float(coords_2d[i, 1]), 4),
+                'infon_type': infon_type,
+                'entity': inf.get('entity', ''),
+                'attribute': inf.get('attribute', ''),
+                'modality': modality,
+                'session_id': session_id,
+                'round_num': inf.get('round_num', 1),
+                'created_at': inf.get('created_at', ''),
+                'text_for_embedding': inf.get('text_for_embedding', ''),
+                'associations': associations,
+            })
+
+            # 关联边 (只保留两端都在当前点集中的边)
+            for assoc in associations:
+                assoc_iid = assoc.get('iid', '')
+                if assoc_iid and assoc_iid in iid_set_in_points:
+                    edge_key = tuple(sorted([inf['iid'], assoc_iid]))
+                    if edge_key not in seen_edges:
+                        seen_edges.add(edge_key)
+                        edges.append({
+                            'source': inf['iid'],
+                            'target': assoc_iid,
+                            'similarity': assoc.get('similarity', 0),
+                        })
+
+        elapsed = round(_time.time() - t0, 2)
+
+        result = {
+            'points': points,
+            'edges': edges,
+            'total': n_total,
+            'displayed': n,
+            'sampled': sampled,
+            'method': actual_method,
+            'perplexity': actual_perplexity,
+            'stats': {
+                'type_counts': type_counts,
+                'modality_counts': modality_counts,
+                'sessions': len(session_set),
+                'edges': len(edges),
+                'compute_time': elapsed,
+            },
+        }
+
+        # 缓存
+        self._viz_cache_hash = cache_key
+        self._viz_cache_result = result
+        logger.info(f"可视化计算完成: method={actual_method}, n={n}, perp={actual_perplexity}, "
+                     f"edges={len(edges)}, time={elapsed}s")
+
+        return result
+
     def get_stats(self) -> Dict:
         """获取统计信息"""
         self._ensure_initialized()
@@ -1010,22 +1261,48 @@ class MemoryStreamManager:
         self._ensure_initialized()
         self.store.clear_all()
         self.index.clear()
+        self._viz_cache_hash = None
+        self._viz_cache_result = None
         logger.info("✓ 主记忆流已完全清空 (存储 + 索引)")
 
 
 # =============================================================================
-# 全局管理器实例
+# 全局管理器实例 (按用户隔离)
 # =============================================================================
 
-_manager: Optional[MemoryStreamManager] = None
+def get_manager(user_id: str = 'default') -> MemoryStreamManager:
+    """获取指定用户的管理器实例 (懒加载, 线程安全)"""
+    uid = user_id or 'default'
+    if uid not in _managers:
+        with _managers_lock:
+            if uid not in _managers:
+                _managers[uid] = MemoryStreamManager(user_id=uid)
+                logger.info(f"创建用户 [{uid}] 的 MemoryStreamManager 实例")
+    return _managers[uid]
 
 
-def get_manager() -> MemoryStreamManager:
-    """获取全局管理器实例"""
-    global _manager
-    if _manager is None:
-        _manager = MemoryStreamManager()
-    return _manager
+def _extract_user_id_from_request() -> str:
+    """从请求中提取 user_id (优先级: JSON body > query param > header)"""
+    # 1. 从 JSON body 中提取
+    if request.is_json:
+        try:
+            data = request.get_json(silent=True)
+            if data and data.get('user_id'):
+                return str(data['user_id'])
+        except Exception:
+            pass
+
+    # 2. 从 query param 中提取
+    uid = request.args.get('user_id', '')
+    if uid:
+        return str(uid)
+
+    # 3. 从 header 中提取
+    uid = request.headers.get('X-User-Id', '')
+    if uid:
+        return str(uid)
+
+    return 'default'
 
 
 # =============================================================================
@@ -1034,14 +1311,16 @@ def get_manager() -> MemoryStreamManager:
 
 @memory_bp.route('/health', methods=['GET'])
 def health_check():
-    """健康检查"""
+    """健康检查 (按用户隔离)"""
     try:
-        manager = get_manager()
+        user_id = _extract_user_id_from_request()
+        manager = get_manager(user_id)
         manager._ensure_initialized()
         stats = manager.get_stats()
         return jsonify({
             'status': 'ok',
             'service': 'MemoryStream',
+            'user_id': user_id,
             **stats,
         })
     except Exception as e:
@@ -1054,10 +1333,11 @@ def health_check():
 @memory_bp.route('/ingest', methods=['POST'])
 def ingest():
     """
-    批量写入信息元 (含关联绑定)
+    批量写入信息元 (含关联绑定, 按用户隔离)
 
     请求体:
     {
+        "user_id": "user123",     // 用户标识 (必填)
         "infons": [...],          // 信息元列表
         "session_id": "abc123",   // 会话标识
         "round_num": 1            // 轮次编号
@@ -1065,6 +1345,7 @@ def ingest():
     """
     try:
         data = request.get_json(force=True)
+        user_id = data.get('user_id', '') or _extract_user_id_from_request()
         infons = data.get('infons', [])
         session_id = data.get('session_id', '')
         round_num = data.get('round_num', 1)
@@ -1072,7 +1353,7 @@ def ingest():
         if not infons:
             return jsonify({'error': '信息元列表为空'}), 400
 
-        manager = get_manager()
+        manager = get_manager(user_id)
         result = manager.ingest(infons, session_id, round_num)
 
         return jsonify(result)
@@ -1085,23 +1366,25 @@ def ingest():
 @memory_bp.route('/search', methods=['POST'])
 def search():
     """
-    向量相似度检索
+    向量相似度检索 (按用户隔离)
 
     请求体:
     {
+        "user_id": "user123",     // 用户标识
         "query": "查询文本",
         "k": 5                    // 返回数量
     }
     """
     try:
         data = request.get_json(force=True)
+        user_id = data.get('user_id', '') or _extract_user_id_from_request()
         query_text = data.get('query', '')
         k = data.get('k', DEFAULT_TOP_K)
 
         if not query_text:
             return jsonify({'error': '查询文本为空'}), 400
 
-        manager = get_manager()
+        manager = get_manager(user_id)
         results = manager.search(query_text, k=k)
 
         return jsonify({
@@ -1117,15 +1400,17 @@ def search():
 @memory_bp.route('/trigger-check', methods=['POST'])
 def trigger_check():
     """
-    风险触发式可控检索
+    风险触发式可控检索 (按用户隔离)
 
     请求体:
     {
+        "user_id": "user123",     // 用户标识
         "infons": [...]           // 当前消息的信息元列表
     }
     """
     try:
         data = request.get_json(force=True)
+        user_id = data.get('user_id', '') or _extract_user_id_from_request()
         infons = data.get('infons', [])
 
         if not infons:
@@ -1135,7 +1420,7 @@ def trigger_check():
                 'retrieved_infons': [],
             })
 
-        manager = get_manager()
+        manager = get_manager(user_id)
         result = manager.trigger_check_and_retrieve(infons)
 
         return jsonify(result)
@@ -1148,12 +1433,14 @@ def trigger_check():
 @memory_bp.route('/backtrace/<iid>', methods=['GET'])
 def backtrace(iid: str):
     """
-    关联回溯查询
+    关联回溯查询 (按用户隔离)
 
     返回指定信息元的证据指针和关联信息元列表
+    Query param: user_id
     """
     try:
-        manager = get_manager()
+        user_id = _extract_user_id_from_request()
+        manager = get_manager(user_id)
         result = manager.backtrace(iid)
 
         if result is None:
@@ -1169,16 +1456,29 @@ def backtrace(iid: str):
 @memory_bp.route('/clear', methods=['POST'])
 def clear():
     """
-    一键清空所有信息元记录和向量索引
+    清空指定用户的所有信息元记录和向量索引 (按用户隔离)
     用于测试、调参和保证实验可复现性
+
+    请求体:
+    {
+        "user_id": "user123"      // 用户标识 (仅清空该用户的数据)
+    }
     """
     try:
-        manager = get_manager()
+        user_id = 'default'
+        if request.is_json:
+            data = request.get_json(silent=True) or {}
+            user_id = data.get('user_id', '') or _extract_user_id_from_request()
+        else:
+            user_id = _extract_user_id_from_request()
+
+        manager = get_manager(user_id)
         manager.clear()
 
         return jsonify({
             'status': 'ok',
-            'message': '所有信息元记录和向量索引已清空',
+            'user_id': user_id,
+            'message': f'用户 [{user_id}] 的所有信息元记录和向量索引已清空',
         })
 
     except Exception as e:
@@ -1188,10 +1488,12 @@ def clear():
 
 @memory_bp.route('/stats', methods=['GET'])
 def stats():
-    """获取记忆流统计信息"""
+    """获取记忆流统计信息 (按用户隔离)"""
     try:
-        manager = get_manager()
+        user_id = _extract_user_id_from_request()
+        manager = get_manager(user_id)
         result = manager.get_stats()
+        result['user_id'] = user_id
         return jsonify(result)
 
     except Exception as e:
@@ -1199,22 +1501,86 @@ def stats():
         return jsonify({'error': str(e)}), 500
 
 
+@memory_bp.route('/visualization', methods=['GET'])
+def visualization():
+    """
+    获取信息元可视化数据 (自动降维到 2D, 按用户隔离)
+
+    Query params:
+        user_id: 用户标识
+        method: 'auto' (默认, 自动选择), 'tsne' 或 'pca'
+
+    返回:
+        {
+            points: [{iid, x, y, infon_type, entity, attribute, ...}],
+            edges: [{source, target, similarity}],
+            total: int,       // 总信息元数
+            displayed: int,   // 实际显示的点数
+            sampled: bool,    // 是否进行了采样
+            method: str,      // 实际使用的方法
+            perplexity: int,  // 自动 perplexity (仅 t-SNE)
+            stats: {...},     // 统计摘要
+        }
+    """
+    try:
+        user_id = _extract_user_id_from_request()
+        method = request.args.get('method', 'auto')
+
+        manager = get_manager(user_id)
+        result = manager.get_visualization_data(method=method)
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"获取可视化数据失败: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 # =============================================================================
 # 模块初始化
 # =============================================================================
 
+def _cleanup_anonymous_dbs():
+    """清理匿名用户的过期临时数据库文件 (以 memory_stream__anon_ 开头的文件)"""
+    try:
+        config = get_config()
+        data_dir = config['data_dir']
+        count = 0
+        for f in os.listdir(data_dir):
+            if f.startswith('memory_stream__anon_') and f.endswith('.db'):
+                fpath = os.path.join(data_dir, f)
+                try:
+                    os.remove(fpath)
+                    count += 1
+                except OSError:
+                    pass
+                # 同时清理 WAL 和 SHM 文件
+                for suffix in ['-wal', '-shm']:
+                    try:
+                        os.remove(fpath + suffix)
+                    except OSError:
+                        pass
+        if count > 0:
+            logger.info(f"✓ 清理了 {count} 个匿名用户临时数据库")
+    except Exception as e:
+        logger.warning(f"清理匿名数据库失败: {e}")
+
+
 def init_memory_stream_service(preload_model: bool = False):
-    """初始化主记忆流服务"""
-    logger.info("初始化主记忆流服务模块...")
+    """初始化主记忆流服务 (按用户隔离模式)"""
+    logger.info("初始化主记忆流服务模块 (用户隔离模式)...")
 
     config = get_config()
     os.makedirs(config['data_dir'], exist_ok=True)
 
+    # 启动时清理上次残留的匿名临时数据库
+    _cleanup_anonymous_dbs()
+
     if preload_model:
         try:
-            manager = get_manager()
-            manager.initialize()
-            logger.info("✓ 主记忆流服务预加载完成")
+            # 预加载嵌入模型 (所有用户共享同一个嵌入模型)
+            load_embedding_model()
+            logger.info("✓ 主记忆流嵌入模型预加载完成")
         except Exception as e:
             logger.warning(f"主记忆流服务预加载失败: {e}")
 

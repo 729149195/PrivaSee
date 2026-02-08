@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Select, Button, Modal, Input, message } from 'antd'
 import { SettingOutlined, FileTextOutlined, PictureOutlined, SoundOutlined, ThunderboltOutlined, KeyOutlined } from '@ant-design/icons'
 import styles from '../AgentPage.module.css'
-import { isModelMultimodal, getModelModalities, supportsChainOfThought } from '../../utils/modelUtils'
+import { isModelMultimodal, getModelModalities, supportsChainOfThought, prettifyModelName } from '../../utils/modelUtils'
 import ModelConfigPanel from './ModelConfigPanel'
 
 /**
@@ -71,7 +71,7 @@ const ModelPickerToolbar = ({
                           {isApiModel && (
                             <KeyOutlined style={{ fontSize: 12, color: '#8b5cf6' }} title="API Key 模型" />
                           )}
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }} title={v}>{prettifyModelName(v)}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                           {modalities.text && (

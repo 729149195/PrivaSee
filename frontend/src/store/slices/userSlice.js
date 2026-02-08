@@ -7,7 +7,16 @@ export const createUserSlice = (set, get) => ({
   currentUserId: null,
 
   setCurrentUser: (userId) => {
-    set({ currentUserId: userId })
+    // 切换用户前清空记忆流前端缓存 (防止用户间数据串扰)
+    set({
+      currentUserId: userId,
+      memoryStreamLastIngest: null,
+      memoryRetrievedInfons: [],
+      memoryTriggerResult: null,
+      memoryBacktraceCache: {},
+      memoryStreamStatus: null,
+      memoryVisualizationData: null,
+    })
     if (userId) get()._loadUserHistory(userId)
   },
   
@@ -18,11 +27,21 @@ export const createUserSlice = (set, get) => ({
     set({
       currentUserId: null, sessions: [emptySession], currentSessionId: emptySession.id,
       model: getDefaultModelsConfig().conversationModel, infonSessions: {},
-      privacyInferences: {}
+      privacyInferences: {},
+      // 切换用户时清空记忆流前端状态 (后端数据按用户隔离，不受影响)
+      memoryStreamLastIngest: null,
+      memoryRetrievedInfons: [],
+      memoryTriggerResult: null,
+      memoryBacktraceCache: {},
+      memoryStreamStatus: null,
+      memoryVisualizationData: null,
     })
   },
   
   clearAllData: () => {
+    // 清空当前用户的后端记忆流数据 (按用户隔离)
+    try { get().clearMemoryStream?.() } catch (_) {}
+    
     const emptySession = createEmptySession()
     set({
       sessions: [emptySession], currentSessionId: emptySession.id,
@@ -35,6 +54,7 @@ export const createUserSlice = (set, get) => ({
       memoryTriggerResult: null,
       memoryBacktraceCache: {},
       memoryStreamStatus: null,
+      memoryVisualizationData: null,
     })
   },
 

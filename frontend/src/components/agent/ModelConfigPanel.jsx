@@ -3,7 +3,7 @@ import { Modal, Select, Divider, Button, message, Popconfirm, Input, Space, Uplo
 import { DeleteOutlined, FileTextOutlined, PictureOutlined, SoundOutlined, ThunderboltOutlined, PlusOutlined, DownloadOutlined, UploadOutlined, KeyOutlined, UndoOutlined } from '@ant-design/icons'
 import { useStore } from '../../store'
 import { useUserStore } from '../../users/userStore'
-import { getModelModalities, supportsChainOfThought } from '../../utils/modelUtils'
+import { getModelModalities, supportsChainOfThought, prettifyModelName } from '../../utils/modelUtils'
 import styles from './ModelConfigPanel.module.css'
 
 /**
@@ -208,7 +208,7 @@ const ModelConfigPanel = ({ visible, onClose }) => {
             {isApiModel && (
               <KeyOutlined style={{ fontSize: 12, color: '#8b5cf6' }} title="API Key 模型" />
             )}
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{id}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }} title={id}>{prettifyModelName(id)}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {modalities.text && (

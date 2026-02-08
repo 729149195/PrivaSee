@@ -38,6 +38,13 @@ export default defineConfig({
         secure: false,
         rewrite: (path) => path.replace(/^\/whisper-api/, '/api/whisper')
       },
+      // Memory Stream 服务: /memory-api -> /api/memory
+      '/memory-api': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/memory-api/, '/api/memory')
+      },
       // Whisper 直接访问（兼容旧路径）
       '/whisper': {
         target: 'http://127.0.0.1:5000',

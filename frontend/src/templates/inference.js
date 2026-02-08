@@ -1,50 +1,6 @@
-// Privacy Inference Prompt Template
-// 针对4B小参数模型优化：使用编号映射提高精确度，限制推理深度
-export const PRIVACY_INFERENCE_PROMPT = `
-You are a privacy risk analyzer. Match information elements to legal categories using ID references.
+// Privacy Inference Prompt Template — 针对4B小参数模型优化
 
-## Input
-1. Information Elements (use IDs like I1, I2...):
-{{INFONS}}
-
-2. Legal Categories (use IDs like L1, L2...):
-{{LAW_TREE}}
-
-## Task
-For each information element, determine if it exposes privacy risk matching a legal category.
-
-## Output Format (one risk per line, 4 fields)
-law_id,risk_level,reason,infon_ids
-
-Fields:
-1. law_id: Category ID (e.g., L1, L2)
-2. risk_level: HIGH | MEDIUM | LOW
-3. reason: Brief explanation (use \\, for commas)
-4. infon_ids: Information element IDs separated by | (e.g., I1|I2)
-
-## Risk Level
-- HIGH: Direct personal data (name, ID number, exact address)
-- MEDIUM: Partial data (city, age range)
-- LOW: Indirect indicator
-
-## Rules
-- Use ONLY IDs from the lists above
-- Only report risks with DIRECT evidence
-- No speculation beyond the data
-- No header, no markdown
-- HIGH risks first
-
-## Example
-If: I1=姓名:张三, I2=城市:北京, L1=姓名, L2=位置信息
-Output:
-L1,HIGH,明确提及姓名,I1
-L2,MEDIUM,提及城市名,I2
-
-Output risks now:
-`
-
-// Extract information elements summary with ID mapping (for filling template)
-// Returns { summary: string, idMap: Map<string, infon> }
+// Extract information elements summary with ID mapping
 export function extractInfonsSummary(infons) {
   if (!Array.isArray(infons) || infons.length === 0) {
     return { summary: 'No information elements', idMap: new Map() }
@@ -156,8 +112,8 @@ export function fillPromptTemplate(infons, lawData) {
     }
   }
   
-  // 构建精简版提示词，使用编号映射
-  const simplePrompt = `Identify TOP 6 privacy risks from information elements.
+  // 构建精简版提示词，使用编号映射，严格控制误报
+  const simplePrompt = `Check if information elements reveal the USER's own personal privacy.
 
 ## Information Elements
 ${infonSummary}
@@ -166,23 +122,30 @@ ${infonSummary}
 ${lawSummary}
 
 ## Task
-Find the 6 MOST SIGNIFICANT privacy risks where infons DIRECTLY match categories.
+Check each infon: does it CONCRETELY reveal the user's own personal data matching a category?
 
 ## Output Format (one risk per line)
 law_id,level,reason,infon_ids
 
-## Rules
-- Output MAXIMUM 6 risks, ranked by severity (HIGH first)
-- ONLY output if infon DIRECTLY matches category (e.g., "张三" matches "姓名")
-- SKIP categories with no matching infons - do NOT mention them
-- Each line must have: law_id (L1/L2...), level (HIGH/MEDIUM/LOW), reason (Chinese), infon_ids (I1|I2...)
-- HIGH: exact personal data | MEDIUM: partial match | LOW: indirect hint
+## Strict Rules
+- ONLY report when an infon contains CONCRETE personal data about the user (e.g., real name, real ID number, real address)
+- Do NOT speculate or infer risks from greetings, common words, or vague context
+- Do NOT force output — if no infon matches any category, output exactly: NONE
+- Output format per line: law_id (L1/L2...), level (HIGH/MEDIUM/LOW), reason (Chinese, ≤15 chars), infon_ids (I1|I2...)
+- HIGH: infon contains user's exact personal identifier (full name, ID number, phone number, bank account)
+- MEDIUM: infon contains user's partial but identifiable data (city + age, partial address)
+- LOW: infon contains weak personal indicator that alone cannot identify user
+- Maximum 6 lines, HIGH first. Most inputs should yield 0-2 risks.
 
-Example:
-L1,HIGH,用户姓名明确提及,I1
-L3,MEDIUM,提及城市位置,I2|I5
+## Examples
+If infons are just greetings like "你好", output:
+NONE
 
-Output top risks:`
+If I1=姓名:张三, I2=城市:北京:
+L1,HIGH,明确提及用户真实姓名,I1
+L2,MEDIUM,提及用户所在城市,I2
+
+Output:`
   
   return { prompt: simplePrompt, lawIdMap, infonIdMap, isEmpty: false }
 }
@@ -446,32 +409,10 @@ function computeHashId(str) {
   return hash.toString(36)
 }
 
-// Parse streaming response (legacy, for backward compatibility)
-export function parseStreamingResponse(text) {
-  try {
-    return JSON.parse(text)
-  } catch {
-    const match = text.match(/\{[\s\S]*\}/)
-    if (match) {
-      try {
-        return JSON.parse(match[0])
-      } catch {
-        return null
-      }
-    }
-    return null
-  }
-}
-
 // ============================================================================
-// COMPACT FORMAT PARSERS (New)
+// COMPACT FORMAT PARSERS
 // ============================================================================
 
-/**
- * Unescape special characters in compact format field values
- * @param {string} value - Escaped value
- * @returns {string} Unescaped value
- */
 function unescapeValue(value) {
   if (typeof value !== 'string') return value
   return value
@@ -480,11 +421,7 @@ function unescapeValue(value) {
     .replace(/\\\\/g, '\\')
 }
 
-/**
- * Split array field by | separator (for used_infons and similar fields)
- * @param {string} value - Value containing | separators
- * @returns {Array<string>} Array of split values
- */
+// Split array field by | separator
 function splitArrayField(value) {
   if (!value || typeof value !== 'string') return []
   // Split by | but not by escaped \|
@@ -492,14 +429,16 @@ function splitArrayField(value) {
   return parts.map(p => p.trim()).filter(Boolean)
 }
 
-/**
- * Parse a single compact format line into a risk object
- * @param {string} line - Data line (e.g., "医疗健康,HIGH,User likely has...")
- * @param {Array<string>} fields - Field names from header
- * @returns {Object|null} Parsed risk object or null if parsing fails
- */
+// Parse a single compact format line into a risk object
 function parseCompactLine(line, fields) {
   if (!line || !line.trim()) return null
+  
+  // Skip "NONE" or non-risk lines (model outputs NONE when no risk found)
+  const upper = line.trim().toUpperCase()
+  if (upper === 'NONE' || upper === 'N/A' || upper === 'NO RISKS' || upper === 'NO RISK') return null
+  
+  // Must start with a valid law_id pattern (L followed by number) to be a risk line
+  if (!/^L\d+\s*,/.test(line.trim())) return null
   
   // Split by comma, but respect escaped commas
   const values = []
@@ -561,13 +500,7 @@ function parseCompactLine(line, fields) {
   return Object.keys(risk).length > 0 ? risk : null
 }
 
-/**
- * Resolve risk IDs to actual names using the ID maps
- * @param {Object} risk - Parsed risk object with IDs (law_id, infon_ids)
- * @param {Map} lawIdMap - Map from L1/L2... to law node info
- * @param {Map} infonIdMap - Map from I1/I2... to infon info
- * @returns {Object} Risk object with resolved names
- */
+// Resolve L1/I1 IDs to actual names using the ID maps
 export function resolveRiskIds(risk, lawIdMap, infonIdMap) {
   const resolved = { ...risk }
   
@@ -611,12 +544,7 @@ export function resolveRiskIds(risk, lawIdMap, infonIdMap) {
   return resolved
 }
 
-/**
- * Parse complete compact format text into an array of risk objects
- * Supports both headerless format (new) and header format (old, for compatibility)
- * @param {string} text - Complete compact format text
- * @returns {Object|null} Parsed object with risks array, or null if parsing fails
- */
+// Parse complete compact format text into risk objects array
 export function parseCompactFormat(text) {
   if (!text || typeof text !== 'string') return null
   
@@ -655,14 +583,7 @@ export function parseCompactFormat(text) {
   return { risks }
 }
 
-/**
- * Incremental compact format parser for streaming
- * Parses compact format line by line as data arrives
- * Supports both headerless format (new) and header format (old)
- * @param {string} streamText - Accumulated stream text
- * @param {Object} parser - Parser state object
- * @returns {Object} { state, yielded } - Updated state and newly parsed risks
- */
+// Incremental compact format parser for streaming
 export function incrementalExtractRisksCompact(streamText, parser) {
   // New 4-field format: law_id, risk_level, reason, infon_ids
   const defaultFields = ['law_id', 'risk_level', 'reason', 'infon_ids']
@@ -705,6 +626,11 @@ export function incrementalExtractRisksCompact(streamText, parser) {
   // Step 2: Parse data lines incrementally
   const dataText = text.slice(state.scanPos)
   const lines = dataText.split('\n')
+  
+  // Guard: if buffer shrank (e.g. <think> block removed), reset parsedLines
+  if (state.parsedLines > lines.length) {
+    state.parsedLines = 0
+  }
   
   // Process each line after the already parsed ones
   for (let i = state.parsedLines; i < lines.length; i++) {

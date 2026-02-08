@@ -11,15 +11,13 @@
  */
 
 // 后端 Memory Stream 服务基础 URL
-const MEMORY_API_BASE = '/api/memory'
+// 使用 Vite 代理路径: /memory-api -> http://127.0.0.1:5000/api/memory
+// 与 OCR (/ocr-api) 和 Whisper (/whisper-api) 保持一致的代理模式
+const MEMORY_API_BASE = import.meta.env.VITE_MEMORY_URL || '/memory-api'
 
-/**
- * 获取后端基础地址 (使用与 OCR/Whisper 相同的后端)
- */
-function getBackendBase(get) {
-  // 默认使用本地 Flask 后端
-  return 'http://localhost:5000'
-}
+// 匿名临时 ID：仅存在于内存中，刷新浏览器即消失
+// 未登录用户的记忆流功能照常工作，但数据不会跨页面会话保留
+const _anonymousMemoryId = `_anon_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
 export const createMemoryStreamSlice = (set, get) => ({
   // ==================== 状态 ====================
@@ -53,16 +51,24 @@ export const createMemoryStreamSlice = (set, get) => ({
    * @param {string} sessionId - 会话标识
    * @param {number} roundNum - 轮次编号
    */
+  /**
+   * 获取当前记忆流用户标识
+   * - 已登录: 使用 currentUserId (数据持久化)
+   * - 未登录: 使用 _anonymousMemoryId (刷新浏览器即消失)
+   */
+  _getMemoryUserId() {
+    return get().currentUserId || _anonymousMemoryId
+  },
+
   async ingestInfonsToMemory(infons, sessionId, roundNum) {
     if (!Array.isArray(infons) || infons.length === 0) return
     
-    const backendBase = getBackendBase(get)
-    
     try {
-      const response = await fetch(`${backendBase}${MEMORY_API_BASE}/ingest`, {
+      const response = await fetch(`${MEMORY_API_BASE}/ingest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          user_id: get()._getMemoryUserId(),
           infons,
           session_id: sessionId,
           round_num: roundNum,
@@ -144,13 +150,11 @@ export const createMemoryStreamSlice = (set, get) => ({
       return []
     }
     
-    const backendBase = getBackendBase(get)
-    
     try {
-      const response = await fetch(`${backendBase}${MEMORY_API_BASE}/trigger-check`, {
+      const response = await fetch(`${MEMORY_API_BASE}/trigger-check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ infons }),
+        body: JSON.stringify({ user_id: get()._getMemoryUserId(), infons }),
       })
       
       if (!response.ok) {
@@ -192,15 +196,13 @@ export const createMemoryStreamSlice = (set, get) => ({
    * @returns {Array} 搜索结果
    */
   async searchMemoryStream(queryText, k = 5) {
-    const backendBase = getBackendBase(get)
-    
     try {
       set({ memoryStreamLoading: true, memoryStreamError: null })
       
-      const response = await fetch(`${backendBase}${MEMORY_API_BASE}/search`, {
+      const response = await fetch(`${MEMORY_API_BASE}/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: queryText, k }),
+        body: JSON.stringify({ user_id: get()._getMemoryUserId(), query: queryText, k }),
       })
       
       if (!response.ok) throw new Error('搜索失败')
@@ -230,11 +232,10 @@ export const createMemoryStreamSlice = (set, get) => ({
     const cached = get().memoryBacktraceCache?.[iid]
     if (cached) return cached
     
-    const backendBase = getBackendBase(get)
-    
     try {
+      const params = new URLSearchParams({ user_id: get()._getMemoryUserId() })
       const response = await fetch(
-        `${backendBase}${MEMORY_API_BASE}/backtrace/${encodeURIComponent(iid)}`
+        `${MEMORY_API_BASE}/backtrace/${encodeURIComponent(iid)}?${params}`
       )
       
       if (!response.ok) {
@@ -265,10 +266,9 @@ export const createMemoryStreamSlice = (set, get) => ({
    * 获取记忆流状态
    */
   async fetchMemoryStreamStatus() {
-    const backendBase = getBackendBase(get)
-    
     try {
-      const response = await fetch(`${backendBase}${MEMORY_API_BASE}/health`)
+      const params = new URLSearchParams({ user_id: get()._getMemoryUserId() })
+      const response = await fetch(`${MEMORY_API_BASE}/health?${params}`)
       if (!response.ok) throw new Error('健康检查失败')
       
       const result = await response.json()
@@ -280,6 +280,37 @@ export const createMemoryStreamSlice = (set, get) => ({
     }
   },
   
+  // ==================== 可视化数据 ====================
+  
+  // 可视化数据缓存
+  memoryVisualizationData: null,  // { points, edges, total, method }
+  memoryVisualizationLoading: false,
+  
+  /**
+   * 获取信息元可视化数据 (自动降维到 2D)
+   * 
+   * @param {string} method - 降维方法: 'auto' (默认), 'tsne' 或 'pca'
+   * @returns {Object|null} 可视化数据
+   */
+  async fetchVisualizationData(method = 'auto') {
+    try {
+      set({ memoryVisualizationLoading: true, memoryStreamError: null })
+      
+      const params = new URLSearchParams({ method, user_id: get()._getMemoryUserId() })
+      const response = await fetch(`${MEMORY_API_BASE}/visualization?${params}`)
+      
+      if (!response.ok) throw new Error('获取可视化数据失败')
+      
+      const result = await response.json()
+      set({ memoryVisualizationData: result, memoryVisualizationLoading: false })
+      return result
+    } catch (err) {
+      set({ memoryVisualizationLoading: false, memoryStreamError: err.message })
+      console.warn('[MemoryStream] 可视化数据获取失败:', err.message)
+      return null
+    }
+  },
+  
   // ==================== 一键清空 ====================
   
   /**
@@ -287,14 +318,13 @@ export const createMemoryStreamSlice = (set, get) => ({
    * 用于测试、调参和保证实验可复现性
    */
   async clearMemoryStream() {
-    const backendBase = getBackendBase(get)
-    
     try {
       set({ memoryStreamLoading: true, memoryStreamError: null })
       
-      const response = await fetch(`${backendBase}${MEMORY_API_BASE}/clear`, {
+      const response = await fetch(`${MEMORY_API_BASE}/clear`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: get()._getMemoryUserId() }),
       })
       
       if (!response.ok) throw new Error('清空失败')
@@ -306,6 +336,7 @@ export const createMemoryStreamSlice = (set, get) => ({
         memoryTriggerResult: null,
         memoryBacktraceCache: {},
         memoryStreamStatus: null,
+        memoryVisualizationData: null,
       })
       
       console.log('[MemoryStream] 所有数据已清空')

@@ -35,6 +35,7 @@ import { useAutoScroll } from '../hooks/useAutoScroll'
 import { useModelContext } from '../hooks/useModelContext'
 import { usePendingDebounce } from '../hooks/usePendingDebounce'
 import { useUnifiedSend } from '../hooks/useUnifiedSend'
+import MemoryStreamDebugPanel from './MemoryStreamDebugPanel'
 
 
 export default function AgentPage() {
@@ -77,10 +78,6 @@ export default function AgentPage() {
     // 自动推理开关
     autoPrivacyInference,
     setSelectedLaw,
-    // 主记忆流
-    clearMemoryStream,
-    memoryStreamStatus,
-    fetchMemoryStreamStatus,
   } = useStore()
 
   // 用户状态：从用户 store 获取
@@ -283,18 +280,6 @@ export default function AgentPage() {
   usePrivacyAutoInference({
     currentSession,
     selectedLaw,
-    input,
-    landingInput,
-    selectedAudios,
-    selectedImages,
-    editingMessageId,
-    editingContent,
-    editingAudios,
-    editingImages,
-    originalEditingContent,
-    originalEditingAudios,
-    originalEditingImages,
-    isAdoptingPendingRef,
     lastInferenceRunCountRef,
   })
 
@@ -801,25 +786,6 @@ export default function AgentPage() {
               </div>
             </div>
           </div>
-          {/* 主记忆流管理 */}
-          <div style={{ marginTop: '8px', display: 'flex', gap: '6px' }}>
-            <Tooltip title="Clear all infon records and vector indexes in memory stream (for testing and reproducibility)">
-              <Button
-                size="small"
-                danger
-                onClick={async () => {
-                  const ok = await clearMemoryStream?.()
-                  if (ok) {
-                    // 刷新状态
-                    fetchMemoryStreamStatus?.()
-                  }
-                }}
-                style={{ fontSize: '11px', flex: 1 }}
-              >
-                Clear Memory Stream
-              </Button>
-            </Tooltip>
-          </div>
         </div>
       </aside>
 
@@ -1053,6 +1019,9 @@ export default function AgentPage() {
 
       {/* 图片预览 Modal */}
       <ImagePreviewModal previewImage={previewImage} onClose={() => setPreviewImage(null)} />
+
+      {/* 主记忆流调试面板（浮动，不影响布局，删除此行即可移除） */}
+      <MemoryStreamDebugPanel />
     </div>
   )
 }

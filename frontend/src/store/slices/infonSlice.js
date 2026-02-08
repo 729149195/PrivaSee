@@ -274,7 +274,8 @@ export const createInfonSlice = (set, get) => ({
             const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
             get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'done', progress: 100, resultJson: { infons: deduplicated } }))
             // === 主记忆流：写入向量索引库 ===
-            try { get().ingestInfonsToMemory?.(deduplicated, session.id, currentRound) } catch (_) {}
+            console.log('[MemoryStream] text ingest hook:', deduplicated.length, 'infons, session:', session.id, 'round:', currentRound)
+            try { await get().ingestInfonsToMemory?.(deduplicated, session.id, currentRound) } catch (e) { console.error('[MemoryStream] text ingest error:', e) }
           } else {
             get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
           }
@@ -386,7 +387,8 @@ export const createInfonSlice = (set, get) => ({
             const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
             get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'done', progress: 100, resultJson: { infons: deduplicated } }))
             // === 主记忆流：写入向量索引库 ===
-            try { get().ingestInfonsToMemory?.(deduplicated, session.id, currentRound) } catch (_) {}
+            console.log('[MemoryStream] image ingest hook:', deduplicated.length, 'infons')
+            try { await get().ingestInfonsToMemory?.(deduplicated, session.id, currentRound) } catch (e) { console.error('[MemoryStream] image ingest error:', e) }
           } else {
             get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
           }
@@ -493,7 +495,8 @@ export const createInfonSlice = (set, get) => ({
             const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
             get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'done', progress: 100, resultJson: { infons: deduplicated } }))
             // === 主记忆流：写入向量索引库 ===
-            try { get().ingestInfonsToMemory?.(deduplicated, session.id, currentRound) } catch (_) {}
+            console.log('[MemoryStream] audio ingest hook:', deduplicated.length, 'infons')
+            try { await get().ingestInfonsToMemory?.(deduplicated, session.id, currentRound) } catch (e) { console.error('[MemoryStream] audio ingest error:', e) }
           } else {
             get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
           }
