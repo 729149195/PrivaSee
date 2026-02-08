@@ -439,7 +439,8 @@ export const createInfonSlice = (set, get) => ({
             }
 
             if (parseTimer) clearTimeout(parseTimer)
-            if (buffer.includes('\n') || Date.now() - lastParseTime >= PARSE_DEBOUNCE_MS) await performParsing()
+            // 优化：仅当当前 token 包含换行符（可能完成了一行）或距上次解析超过去抖间隔时触发
+            if (content.includes('\n') || Date.now() - lastParseTime >= PARSE_DEBOUNCE_MS) await performParsing()
             else parseTimer = setTimeout(performParsing, PARSE_DEBOUNCE_MS)
           } catch (contentErr) {
             console.error('[InfonSlice] image content handler error:', contentErr)

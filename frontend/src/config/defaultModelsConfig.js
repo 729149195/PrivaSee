@@ -18,7 +18,7 @@ export const DEFAULT_MODELS_CONFIG = {
 
   // 共用模型的默认配置
   shared: {
-    imageParsingModel: 'qwen2.5vl:7b', // 图片解析模型（共用）- Qwen 2.5 VL 7B，适配4070(12GB显存)，仅占约6GB
+    imageParsingModel: 'gemma3:12b', // 图片解析模型（共用）- Qwen 2.5 VL 7B，适配4070(12GB显存)，仅占约6GB
     protectionSuggestionModel: 'niels32167/qwen3-4b-instruct:latest', // Privacy Protection Suggestions模型（共用）
   },
 }

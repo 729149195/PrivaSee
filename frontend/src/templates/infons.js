@@ -317,11 +317,22 @@ export function incrementalExtractInfonsCompact(streamText, parser) {
   const dataText = text.slice(state.scanPos)
   // 移除末尾的 ``` 如果有的话
   const cleanedText = dataText.replace(/```\s*$/, '')
+  const endsWithNewline = cleanedText.endsWith('\n')
   const lines = cleanedText.split('\n')
   
+  // 关键修复：移除尾部换行符产生的空字符串元素
+  // 否则 parsedLines 会被空元素递增，导致后续新行永远不会被解析到
+  if (endsWithNewline && lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop()
+  }
+  
   for (let i = state.parsedLines; i < lines.length; i++) {
-    // 对于最后一行，如果没有换行符且长度较短，可能不完整，跳过
-    if (i === lines.length - 1 && !cleanedText.endsWith('\n') && lines[i].length < 20) break
+    // 对于最后一行，如果原文不以换行符结尾，说明该行可能不完整
+    const isLastLine = (i === lines.length - 1)
+    if (isLastLine && !endsWithNewline) {
+      // 行太短则跳过等待更多数据；不递增 parsedLines 以便下次重新解析
+      if (lines[i].length < 20) break
+    }
     
     let trimmed = lines[i].trim()
     
@@ -335,6 +346,8 @@ export function incrementalExtractInfonsCompact(streamText, parser) {
     // 匹配 desc:, DESC:, - desc:, * desc:, 1. desc: 等
     const match = trimmed.match(/^[-*\d.)\s]*(desc|scen|rel):/i)
     if (!match) {
+      // 对于未完成的最后一行，不递增 parsedLines，等待更多数据
+      if (isLastLine && !endsWithNewline) break
       state.parsedLines++
       continue
     }
@@ -348,7 +361,7 @@ export function incrementalExtractInfonsCompact(streamText, parser) {
     const infon = parseCompactInfonLine(trimmed, { recordTime: state.recordTime })
     if (infon && infon.iid) {
       infon._objIndex = state.infonCount
-      infon._isComplete = true
+      infon._isComplete = !isLastLine || endsWithNewline
       yielded.push(infon)
       state.infonCount++
     }
