@@ -80,7 +80,11 @@ export const createInfonSlice = (set, get) => ({
     if (!session) return
     try {
       const runs = (get().infonSessions?.[session.id]?.runs) || []
+      const pendingRunIds = runs.filter(r => r.targetType === 'pending').map(r => r.id).filter(Boolean)
       runs.forEach(r => { if (r.targetType === 'pending' && r.status === 'running') try { r.controller?.abort?.() } catch (_) {} })
+      if (pendingRunIds.length > 0) {
+        get().removeMemoryInfonsByRunIds?.(session.id, pendingRunIds, 'pending')
+      }
     } catch (_) {}
     set(s => {
       const box = s.infonSessions?.[session.id] || { runs: [] }
@@ -102,6 +106,9 @@ export const createInfonSlice = (set, get) => ({
       })
       return { infonSessions: { ...s.infonSessions, [session.id]: { runs } }, lastPendingTextHash: null, lastPendingImageHashes: [] }
     })
+    if (adoptedRunIds.length > 0) {
+      get().promotePendingMemoryInfons?.(session.id, adoptedRunIds, messageId)
+    }
     return { adopted, runIds: adoptedRunIds }
   },
 
@@ -138,6 +145,10 @@ export const createInfonSlice = (set, get) => ({
     const textHash = text?.trim() ? computeHashId(text.trim()) : null
     const lastTextHash = get().lastPendingTextHash
     if (textHash && textHash !== lastTextHash) {
+      const removedPendingTextRunIds = runs
+        .filter(r => r.targetType === 'pending' && r.modality === 'text')
+        .map(r => r.id)
+        .filter(Boolean)
       // 先中止并移除旧的 pending 文本 runs
       runs.filter(r => r.targetType === 'pending' && r.modality === 'text').forEach(r => {
         if (r.status === 'running' && r.controller) try { r.controller.abort() } catch (_) {}
@@ -149,6 +160,9 @@ export const createInfonSlice = (set, get) => ({
           lastPendingTextHash: textHash
         }
       })
+      if (removedPendingTextRunIds.length > 0) {
+        get().removeMemoryInfonsByRunIds?.(session.id, removedPendingTextRunIds, 'pending')
+      }
       get()._startTextInfonRun({ targetType: 'pending', targetKey: 'pending', text: text.trim() })
     }
 
@@ -162,6 +176,10 @@ export const createInfonSlice = (set, get) => ({
     // 移除已删除的图片对应的 runs
     const removedImages = lastImageHashes.filter(h => !imageHashes.includes(h))
     if (removedImages.length > 0) {
+      const removedPendingImageRunIds = runs
+        .filter(r => r.targetType === 'pending' && r.modality === 'image' && removedImages.includes(r._hash))
+        .map(r => r.id)
+        .filter(Boolean)
       runs.filter(r => r.targetType === 'pending' && r.modality === 'image' && removedImages.includes(r._hash)).forEach(r => {
         if (r.status === 'running' && r.controller) try { r.controller.abort() } catch (_) {}
       })
@@ -169,6 +187,9 @@ export const createInfonSlice = (set, get) => ({
         const box = s.infonSessions?.[session.id] || { runs: [] }
         return { infonSessions: { ...s.infonSessions, [session.id]: { runs: box.runs.filter(r => !(r.targetType === 'pending' && r.modality === 'image' && removedImages.includes(r._hash))) } } }
       })
+      if (removedPendingImageRunIds.length > 0) {
+        get().removeMemoryInfonsByRunIds?.(session.id, removedPendingImageRunIds, 'pending')
+      }
     }
     if (newImages.length > 0) {
       set({ lastPendingImageHashes: imageHashes })
@@ -308,8 +329,15 @@ export const createInfonSlice = (set, get) => ({
               const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
               get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'done', progress: 100, resultJson: { infons: deduplicated } }))
               // === 主记忆流：写入向量索引库 ===
+              const infonsForMemory = deduplicated.map(inf => ({
+                ...inf,
+                _memory_target_type: targetType,
+                _memory_target_key: targetKey,
+                _memory_run_id: runId,
+                _memory_modality: 'text',
+              }))
               console.log('[MemoryStream] text ingest hook:', deduplicated.length, 'infons, session:', session.id, 'round:', currentRound)
-              try { await get().ingestInfonsToMemory?.(deduplicated, session.id, currentRound) } catch (e) { console.error('[MemoryStream] text ingest error:', e) }
+              try { await get().ingestInfonsToMemory?.(infonsForMemory, session.id, currentRound) } catch (e) { console.error('[MemoryStream] text ingest error:', e) }
             } else {
               get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
             }
@@ -477,8 +505,15 @@ export const createInfonSlice = (set, get) => ({
               const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
               get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'done', progress: 100, resultJson: { infons: deduplicated } }))
               // === 主记忆流：写入向量索引库 ===
+              const infonsForMemory = deduplicated.map(inf => ({
+                ...inf,
+                _memory_target_type: targetType,
+                _memory_target_key: targetKey,
+                _memory_run_id: runId,
+                _memory_modality: 'image',
+              }))
               console.log('[MemoryStream] image ingest hook:', deduplicated.length, 'infons')
-              try { await get().ingestInfonsToMemory?.(deduplicated, session.id, currentRound) } catch (e) { console.error('[MemoryStream] image ingest error:', e) }
+              try { await get().ingestInfonsToMemory?.(infonsForMemory, session.id, currentRound) } catch (e) { console.error('[MemoryStream] image ingest error:', e) }
             } else {
               console.error('[InfonSlice] image extraction failed: Invalid JSON output. Raw:\n%s', raw.slice(0, 1000))
               get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
@@ -603,8 +638,15 @@ export const createInfonSlice = (set, get) => ({
               const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
               get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'done', progress: 100, resultJson: { infons: deduplicated } }))
               // === 主记忆流：写入向量索引库 ===
+              const infonsForMemory = deduplicated.map(inf => ({
+                ...inf,
+                _memory_target_type: targetType,
+                _memory_target_key: targetKey,
+                _memory_run_id: runId,
+                _memory_modality: 'audio',
+              }))
               console.log('[MemoryStream] audio ingest hook:', deduplicated.length, 'infons')
-              try { await get().ingestInfonsToMemory?.(deduplicated, session.id, currentRound) } catch (e) { console.error('[MemoryStream] audio ingest error:', e) }
+              try { await get().ingestInfonsToMemory?.(infonsForMemory, session.id, currentRound) } catch (e) { console.error('[MemoryStream] audio ingest error:', e) }
             } else {
               get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'error', error: 'Invalid JSON output' }))
             }

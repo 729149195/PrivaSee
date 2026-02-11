@@ -19,6 +19,54 @@ const MEMORY_API_BASE = import.meta.env.VITE_MEMORY_URL || '/memory-api'
 // 未登录用户的记忆流功能照常工作，但数据不会跨页面会话保留
 const _anonymousMemoryId = `_anon_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
+function _sanitizeIdPart(value, fallback = 'x') {
+  const text = String(value ?? '').trim()
+  if (!text) return fallback
+  const normalized = text.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '')
+  return normalized || fallback
+}
+
+function _scopeInfonsForSession(infons, userId, sessionId, roundNum) {
+  if (!Array.isArray(infons) || infons.length === 0) return []
+  const safeUser = _sanitizeIdPart(userId, 'user')
+  const safeSession = _sanitizeIdPart(sessionId, 'session')
+  const safeRound = Number.isFinite(Number(roundNum)) ? Number(roundNum) : 1
+  const scope = `u${safeUser}_s${safeSession}_r${safeRound}`
+
+  const iidMap = new Map()
+  const used = new Set()
+  const pickUnique = (base) => {
+    let candidate = `${base}__${scope}`
+    let idx = 1
+    while (used.has(candidate)) {
+      candidate = `${base}__${scope}_${idx}`
+      idx += 1
+    }
+    used.add(candidate)
+    return candidate
+  }
+
+  infons.forEach((infon, index) => {
+    const src = String(infon?.iid || '').trim() || `auto_${index + 1}`
+    const scoped = pickUnique(_sanitizeIdPart(src, `auto_${index + 1}`))
+    iidMap.set(src, scoped)
+  })
+
+  return infons.map((infon, index) => {
+    const src = String(infon?.iid || '').trim() || `auto_${index + 1}`
+    const scopedIid = iidMap.get(src) || pickUnique(_sanitizeIdPart(src, `auto_${index + 1}`))
+    const nextArgRefs = Array.isArray(infon?.arg_refs)
+      ? infon.arg_refs.map(ref => iidMap.get(ref) || ref)
+      : infon?.arg_refs
+    return {
+      ...infon,
+      _source_iid: src,
+      iid: scopedIid,
+      arg_refs: nextArgRefs,
+    }
+  })
+}
+
 export const createMemoryStreamSlice = (set, get) => ({
   // ==================== 状态 ====================
   
@@ -64,12 +112,14 @@ export const createMemoryStreamSlice = (set, get) => ({
     if (!Array.isArray(infons) || infons.length === 0) return
     
     try {
+      const userId = get()._getMemoryUserId()
+      const scopedInfons = _scopeInfonsForSession(infons, userId, sessionId, roundNum)
       const response = await fetch(`${MEMORY_API_BASE}/ingest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: get()._getMemoryUserId(),
-          infons,
+          user_id: userId,
+          infons: scopedInfons,
           session_id: sessionId,
           round_num: roundNum,
         }),
@@ -90,11 +140,18 @@ export const createMemoryStreamSlice = (set, get) => ({
         const infonSession = get().infonSessions?.[sessionId]
         if (infonSession) {
           const ingestedMap = new Map()
+          const iidRemap = new Map()
           result.ingested.forEach(item => {
-            ingestedMap.set(item.iid, {
+            const sourceIid = item.source_iid || item.iid
+            const resolvedIid = item.iid || sourceIid
+            ingestedMap.set(sourceIid, {
+              iid: resolvedIid,
               evidence_pointer: item.evidence_pointer,
               associations: item.associations,
             })
+            if (sourceIid && resolvedIid && sourceIid !== resolvedIid) {
+              iidRemap.set(sourceIid, resolvedIid)
+            }
           })
           
           // 更新 runs 中对应信息元的 associations 和 evidence_pointer
@@ -104,12 +161,27 @@ export const createMemoryStreamSlice = (set, get) => ({
             const updatedRuns = box.runs.map(run => {
               if (!run.resultJson?.infons) return run
               const updatedInfons = run.resultJson.infons.map(infon => {
-                const ingestData = ingestedMap.get(infon.iid)
+                const sourceIid = infon.iid
+                const ingestData = ingestedMap.get(sourceIid)
+                const nextIid = ingestData?.iid || sourceIid
+                const nextArgRefs = Array.isArray(infon.arg_refs)
+                  ? infon.arg_refs.map(ref => iidRemap.get(ref) || ref)
+                  : infon.arg_refs
+
                 if (ingestData) {
                   return {
                     ...infon,
+                    iid: nextIid,
+                    arg_refs: nextArgRefs,
                     evidence_pointer: ingestData.evidence_pointer,
                     associations: ingestData.associations,
+                  }
+                }
+                if (nextIid !== sourceIid || nextArgRefs !== infon.arg_refs) {
+                  return {
+                    ...infon,
+                    iid: nextIid,
+                    arg_refs: nextArgRefs,
                   }
                 }
                 return infon
@@ -132,6 +204,73 @@ export const createMemoryStreamSlice = (set, get) => ({
       console.log(`[MemoryStream] 写入完成: ${result.ingested_count} 条, 跳过 ${result.skipped_count} 条`)
     } catch (err) {
       console.warn('[MemoryStream] 写入请求异常:', err.message)
+    }
+  },
+
+  /**
+   * 删除指定会话下已失效的生命周期信息元（主要用于 pending 更新/撤销）
+   */
+  async removeMemoryInfonsByRunIds(sessionId, runIds = [], targetType = 'pending') {
+    if (!sessionId || !Array.isArray(runIds) || runIds.length === 0) return null
+    try {
+      const response = await fetch(`${MEMORY_API_BASE}/remove`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: get()._getMemoryUserId(),
+          session_id: sessionId,
+          target_type: targetType,
+          run_ids: runIds,
+        }),
+      })
+      if (!response.ok) return null
+      return await response.json()
+    } catch (_) {
+      return null
+    }
+  },
+
+  /**
+   * 删除一个会话窗口下的所有信息元（会话被删除时调用）
+   */
+  async removeMemoryBySession(sessionId) {
+    if (!sessionId) return null
+    try {
+      const response = await fetch(`${MEMORY_API_BASE}/remove`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: get()._getMemoryUserId(),
+          session_id: sessionId,
+        }),
+      })
+      if (!response.ok) return null
+      return await response.json()
+    } catch (_) {
+      return null
+    }
+  },
+
+  /**
+   * 发送成功后：将 pending 信息元升级为 message 信息元
+   */
+  async promotePendingMemoryInfons(sessionId, runIds = [], messageId = '') {
+    if (!sessionId || !Array.isArray(runIds) || runIds.length === 0) return null
+    try {
+      const response = await fetch(`${MEMORY_API_BASE}/promote-pending`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: get()._getMemoryUserId(),
+          session_id: sessionId,
+          run_ids: runIds,
+          message_id: messageId,
+        }),
+      })
+      if (!response.ok) return null
+      return await response.json()
+    } catch (_) {
+      return null
     }
   },
   

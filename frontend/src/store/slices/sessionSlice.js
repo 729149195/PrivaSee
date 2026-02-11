@@ -34,6 +34,8 @@ export const createSessionSlice = (set, get) => ({
   switchSession(id) { set({ currentSessionId: id }) },
 
   deleteSession(id) {
+    // 删除会话时同步清理主记忆库中该会话窗口的全部信息元
+    try { get().removeMemoryBySession?.(id) } catch (_) {}
     set(s => {
       const nextSessions = s.sessions.filter(x => x.id !== id)
       if (nextSessions.length === 0) {

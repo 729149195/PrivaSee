@@ -18,6 +18,7 @@ Memory Stream Service - 主记忆流与关联回溯服务模块
 import os
 import json
 import time
+import hashlib
 import logging
 import threading
 import sqlite3
@@ -272,6 +273,14 @@ class MemoryStore:
             logger.error(f"插入信息元失败: {e}")
             return False
 
+    def exists_iid(self, iid: str) -> bool:
+        """检查 iid 是否已存在"""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM infon_memory WHERE iid = ? LIMIT 1", (iid,)
+            ).fetchone()
+        return row is not None
+
     def get_all_vectors(self) -> Tuple[List[str], np.ndarray]:
         """获取所有信息元的 iid 和向量"""
         with self._get_conn() as conn:
@@ -350,6 +359,65 @@ class MemoryStore:
                 conn.execute("DELETE FROM infon_memory")
                 conn.commit()
         logger.info("✓ 所有信息元记录已清空")
+
+    def get_meta_by_session(self, session_id: str) -> List[Dict]:
+        """获取指定会话下的信息元元数据（用于按生命周期管理）"""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT iid, extra_json FROM infon_memory WHERE session_id = ?",
+                (session_id,)
+            ).fetchall()
+        result = []
+        for r in rows:
+            extra = {}
+            if isinstance(r['extra_json'], str):
+                try:
+                    extra = json.loads(r['extra_json'])
+                except json.JSONDecodeError:
+                    extra = {}
+            result.append({'iid': r['iid'], 'extra_json': extra})
+        return result
+
+    def delete_infons_by_iids(self, iids: List[str]) -> int:
+        """按 iid 批量删除信息元"""
+        if not iids:
+            return 0
+        placeholders = ','.join('?' * len(iids))
+        with _db_lock:
+            with self._get_conn() as conn:
+                cur = conn.execute(
+                    f"DELETE FROM infon_memory WHERE iid IN ({placeholders})", iids
+                )
+                conn.commit()
+                return int(cur.rowcount or 0)
+
+    def patch_extra_by_iids(self, iids: List[str], patch: Dict[str, Any]) -> int:
+        """按 iid 批量更新 extra_json 字段"""
+        if not iids or not patch:
+            return 0
+        updated = 0
+        with _db_lock:
+            with self._get_conn() as conn:
+                placeholders = ','.join('?' * len(iids))
+                rows = conn.execute(
+                    f"SELECT iid, extra_json FROM infon_memory WHERE iid IN ({placeholders})",
+                    iids
+                ).fetchall()
+                for row in rows:
+                    extra = {}
+                    if isinstance(row['extra_json'], str):
+                        try:
+                            extra = json.loads(row['extra_json'])
+                        except json.JSONDecodeError:
+                            extra = {}
+                    extra.update(patch)
+                    conn.execute(
+                        "UPDATE infon_memory SET extra_json = ? WHERE iid = ?",
+                        (json.dumps(extra, ensure_ascii=False), row['iid'])
+                    )
+                    updated += 1
+                conn.commit()
+        return updated
 
     def _row_to_dict(self, row: sqlite3.Row) -> Dict:
         """将数据库行转为字典"""
@@ -675,6 +743,23 @@ def _estimate_token_count(text: str) -> int:
     return int(chinese_chars * 1.5 + other_chars * 0.3)
 
 
+def _sanitize_iid_component(value: str, fallback: str = 'x') -> str:
+    """将任意字符串规范化为可拼接到 iid 的安全片段"""
+    if value is None:
+        return fallback
+    text = str(value).strip()
+    if not text:
+        return fallback
+    out = []
+    for ch in text:
+        if ch.isalnum() or ch in ['_', '-']:
+            out.append(ch)
+        else:
+            out.append('_')
+    normalized = ''.join(out).strip('_')
+    return normalized or fallback
+
+
 # =============================================================================
 # 主记忆流管理器
 # =============================================================================
@@ -688,6 +773,9 @@ class MemoryStreamManager:
         self.index: Optional[HNSWIndex] = None
         self.detector = RiskTriggerDetector()
         self._initialized = False
+        # 可视化结果缓存 (实例级，避免不同用户/管理器串缓存)
+        self._viz_cache_hash: Optional[str] = None
+        self._viz_cache_result: Optional[Dict] = None
 
     def initialize(self):
         """初始化存储和索引 (每个用户独立的数据库和索引)"""
@@ -718,6 +806,34 @@ class MemoryStreamManager:
         if not self._initialized:
             self.initialize()
 
+    def _resolve_unique_iid(self, source_iid: str, modality: str,
+                            session_id: str, round_num: int,
+                            reserved_iids: set) -> str:
+        """
+        为写入库生成唯一 iid。
+        强制带作用域后缀：user/session/round，避免跨窗口与跨轮次混淆。
+        """
+        base = str(source_iid or '').strip() or f"desc:r{round_num}_auto"
+        safe_user = _sanitize_iid_component(self.user_id, 'user')
+        safe_modality = _sanitize_iid_component(modality or 'text', 'text')
+        safe_session = _sanitize_iid_component(session_id, 'session')
+        suffix_seed = f"u{safe_user}_s{safe_session}_r{int(round_num)}_{safe_modality}"
+        scoped_base = f"{base}__{suffix_seed}"
+
+        # 优先使用稳定作用域 IID，便于排查与回溯
+        if scoped_base not in reserved_iids and not self.store.exists_iid(scoped_base):
+            reserved_iids.add(scoped_base)
+            return scoped_base
+
+        # 同一作用域下再次冲突时再追加序号
+        idx = 1
+        while True:
+            candidate = f"{scoped_base}_{idx}"
+            if candidate not in reserved_iids and not self.store.exists_iid(candidate):
+                reserved_iids.add(candidate)
+                return candidate
+            idx += 1
+
     def ingest(self, infons: List[Dict], session_id: str, round_num: int) -> Dict:
         """
         批量写入信息元到记忆流
@@ -734,16 +850,18 @@ class MemoryStreamManager:
         ingested = []
         skipped = []
 
+        reserved_iids = set()
+
         for infon in infons:
-            iid = infon.get('iid', '')
-            if not iid:
+            source_iid = infon.get('_source_iid', infon.get('iid', ''))
+            if not source_iid:
                 skipped.append({'reason': 'missing_iid'})
                 continue
 
             # 构建嵌入文本
             embed_text = _build_embedding_text(infon)
             if not embed_text.strip():
-                skipped.append({'iid': iid, 'reason': 'empty_embedding_text'})
+                skipped.append({'iid': source_iid, 'reason': 'empty_embedding_text'})
                 continue
 
             # 计算语义向量
@@ -754,7 +872,7 @@ class MemoryStreamManager:
             if self.index.current_count > 0:
                 search_results = self.index.search(
                     vector, k=ASSOCIATION_TOP_K,
-                    exclude_iids={iid}
+                    exclude_iids={source_iid}
                 )
                 for assoc_iid, similarity in search_results:
                     associations.append({
@@ -772,10 +890,17 @@ class MemoryStreamManager:
             # 获取模态标签
             modality = infon.get('modality',
                        infon.get('run_metadata', {}).get('modality', 'text'))
+            resolved_iid = self._resolve_unique_iid(
+                source_iid=source_iid,
+                modality=modality,
+                session_id=session_id,
+                round_num=round_num,
+                reserved_iids=reserved_iids
+            )
 
             # 构建存储记录
             record = {
-                'iid': iid,
+                'iid': resolved_iid,
                 'infon_type': infon.get('infon_type', 'DESC'),
                 'modality': modality,
                 'session_id': session_id,
@@ -793,6 +918,11 @@ class MemoryStreamManager:
                     'spatial': infon.get('spatial'),
                     'relation_name': infon.get('relation_name'),
                     'arg_refs': infon.get('arg_refs'),
+                    # 生命周期元数据：支持 pending 先入库、未发送撤销、发送后转正式记录
+                    'memory_target_type': infon.get('_memory_target_type', 'message'),
+                    'memory_target_key': infon.get('_memory_target_key', ''),
+                    'memory_run_id': infon.get('_memory_run_id', ''),
+                    'memory_modality': infon.get('_memory_modality', modality),
                 },
             }
 
@@ -801,20 +931,75 @@ class MemoryStreamManager:
 
             if inserted:
                 # 更新 HNSW 索引 (在数据库写入之后)
-                self.index.add(iid, vector)
+                self.index.add(resolved_iid, vector)
                 ingested.append({
-                    'iid': iid,
+                    'source_iid': source_iid,
+                    'iid': resolved_iid,
                     'evidence_pointer': evidence_pointer,
                     'associations': associations,
                 })
             else:
-                skipped.append({'iid': iid, 'reason': 'duplicate'})
+                skipped.append({'iid': source_iid, 'reason': 'duplicate'})
 
         return {
             'ingested_count': len(ingested),
             'skipped_count': len(skipped),
             'ingested': ingested,
             'skipped': skipped,
+            'total_in_store': self.store.count(),
+        }
+
+    def remove_infons_by_lifecycle(self, session_id: str,
+                                   target_type: Optional[str] = None,
+                                   run_ids: Optional[List[str]] = None) -> Dict:
+        """按生命周期元数据移除信息元（用于 pending 更新/撤销）"""
+        self._ensure_initialized()
+        run_id_set = set(run_ids or [])
+
+        candidates = self.store.get_meta_by_session(session_id)
+        remove_iids = []
+        for row in candidates:
+            extra = row.get('extra_json') or {}
+            if target_type and extra.get('memory_target_type') != target_type:
+                continue
+            if run_id_set and extra.get('memory_run_id') not in run_id_set:
+                continue
+            remove_iids.append(row['iid'])
+
+        removed = self.store.delete_infons_by_iids(remove_iids)
+        if removed > 0:
+            self.index.rebuild_from_store(self.store)
+
+        return {
+            'removed_count': removed,
+            'requested_count': len(remove_iids),
+            'total_in_store': self.store.count(),
+        }
+
+    def promote_pending_infons(self, session_id: str, run_ids: List[str], message_id: str) -> Dict:
+        """将 pending 信息元标记为 message（发送成功后调用）"""
+        self._ensure_initialized()
+        run_id_set = set(run_ids or [])
+        if not run_id_set:
+            return {'updated_count': 0, 'total_in_store': self.store.count()}
+
+        candidates = self.store.get_meta_by_session(session_id)
+        target_iids = []
+        for row in candidates:
+            extra = row.get('extra_json') or {}
+            if extra.get('memory_target_type') != 'pending':
+                continue
+            if extra.get('memory_run_id') not in run_id_set:
+                continue
+            target_iids.append(row['iid'])
+
+        updated = self.store.patch_extra_by_iids(target_iids, {
+            'memory_target_type': 'message',
+            'memory_target_key': message_id or '',
+        })
+        return {
+            'updated_count': updated,
+            'requested_count': len(target_iids),
             'total_in_store': self.store.count(),
         }
 
@@ -1028,10 +1213,6 @@ class MemoryStreamManager:
 
         return result
 
-    # 可视化结果缓存 (数据不变时避免重复降维)
-    _viz_cache_hash: Optional[str] = None
-    _viz_cache_result: Optional[Dict] = None
-
     @staticmethod
     def _auto_perplexity(n: int) -> int:
         """
@@ -1101,7 +1282,10 @@ class MemoryStreamManager:
         n_total = len(all_infons)
 
         # ---- 缓存检查 ----
-        cache_key = f"{n_total}_{method}"
+        # 基于完整数据指纹缓存，避免“数量相同但内容不同”时误命中
+        fp_src = '|'.join(f"{x.get('iid', '')}@{x.get('created_at', '')}" for x in all_infons)
+        fp_hash = hashlib.sha1(fp_src.encode('utf-8')).hexdigest()
+        cache_key = f"{method}_{fp_hash}"
         if self._viz_cache_hash == cache_key and self._viz_cache_result:
             logger.info(f"可视化缓存命中 (n={n_total}, method={method})")
             return self._viz_cache_result
@@ -1498,6 +1682,78 @@ def stats():
 
     except Exception as e:
         logger.error(f"获取统计信息失败: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@memory_bp.route('/remove', methods=['POST'])
+def remove_infons():
+    """
+    按生命周期元数据删除信息元（例如删除已失效 pending）
+
+    请求体:
+    {
+        "user_id": "user123",
+        "session_id": "session_xxx",
+        "target_type": "pending",   // 可选
+        "run_ids": ["run_a", ...]   // 可选
+    }
+    """
+    try:
+        data = request.get_json(force=True)
+        user_id = data.get('user_id', '') or _extract_user_id_from_request()
+        session_id = data.get('session_id', '')
+        target_type = data.get('target_type', None)
+        run_ids = data.get('run_ids', None)
+
+        if not session_id:
+            return jsonify({'error': 'session_id 不能为空'}), 400
+
+        manager = get_manager(user_id)
+        result = manager.remove_infons_by_lifecycle(
+            session_id=session_id,
+            target_type=target_type,
+            run_ids=run_ids if isinstance(run_ids, list) else None
+        )
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"删除信息元失败: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@memory_bp.route('/promote-pending', methods=['POST'])
+def promote_pending():
+    """
+    将 pending 信息元转为 message 信息元
+
+    请求体:
+    {
+        "user_id": "user123",
+        "session_id": "session_xxx",
+        "run_ids": ["run_a", ...],
+        "message_id": "msg_xxx"
+    }
+    """
+    try:
+        data = request.get_json(force=True)
+        user_id = data.get('user_id', '') or _extract_user_id_from_request()
+        session_id = data.get('session_id', '')
+        run_ids = data.get('run_ids', [])
+        message_id = data.get('message_id', '')
+
+        if not session_id:
+            return jsonify({'error': 'session_id 不能为空'}), 400
+        if not isinstance(run_ids, list) or len(run_ids) == 0:
+            return jsonify({'error': 'run_ids 不能为空'}), 400
+
+        manager = get_manager(user_id)
+        result = manager.promote_pending_infons(
+            session_id=session_id,
+            run_ids=run_ids,
+            message_id=message_id
+        )
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"升级 pending 信息元失败: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
