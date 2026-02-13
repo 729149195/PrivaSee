@@ -36,7 +36,7 @@ const PRIVACY_ITEMS = [
   { id: 'purchases', label: 'Purchase History', category: 'Behavioral' },
 ]
 
-export default function LawTree() {
+export default function PrivacyExposureTree() {
   const [lawData, setLawData] = useState([null, null, null, null])
   const [newItemInput, setNewItemInput] = useState('') // 新隐私项输入框
   const [holdingLawIdx, setHoldingLawIdx] = useState(null) // 正在长按的法律索引
@@ -53,6 +53,16 @@ export default function LawTree() {
   
   // 鱼眼效果：鼠标位置（相对于SVG中心）
   const [mousePos, setMousePos] = useState(null)
+
+  // 仅用于展示：提取路径字符串中的最后一段，避免显示完整路径
+  const getLeafDisplayName = (name) => {
+    if (!name) return ''
+    return name
+      .split(/[>\/／]/)
+      .map(part => part.trim())
+      .filter(Boolean)
+      .pop() || name
+  }
   
   // 从 store 获取推理结果和相关方法（中文注释）
   const { 
@@ -1013,7 +1023,7 @@ export default function LawTree() {
         
         // 更新左上角：显示当前节点信息
         const risk = riskMap.get(d.data.name)
-        topLeftText.text(d.data.name)
+        topLeftText.text(getLeafDisplayName(d.data.name))
         if (risk && !risk.inherited) {
           topLeftText.attr('fill', getRiskColor(risk.level))
           topLeftSub.text(`Your data may be exposed here`)
@@ -1599,7 +1609,7 @@ export default function LawTree() {
   return (
     <div style={{ marginBottom: 12 }}>
       <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 6, paddingLeft: 4 }}>
-        Law Tree
+        Privacy Exposure Tree
       </div>
       <div
         ref={containerRef}
