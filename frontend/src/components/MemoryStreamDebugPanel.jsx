@@ -42,20 +42,18 @@ const fabStyle = {
   bottom: 16,
   right: 16,
   zIndex: 99999,
-  width: 36,
-  height: 36,
-  borderRadius: '50%',
-  background: C.accent,
-  color: '#fff',
-  border: 'none',
+  width: 40,
+  height: 40,
+  borderRadius: 10,
+  background: C.bg,
+  color: C.textSec,
+  border: `1px solid ${C.borderMed}`,
   cursor: 'pointer',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  fontSize: 16,
-  fontWeight: 700,
-  boxShadow: '0 2px 8px rgba(14,165,233,0.35)',
-  transition: 'transform 0.2s, background 0.2s',
+  boxShadow: '0 2px 8px rgba(15,23,42,0.10)',
+  transition: 'all 0.16s ease',
 }
 
 const panelStyle = {
@@ -187,6 +185,15 @@ function InputRow({ value, onChange, onSubmit, placeholder, buttonText, loading,
         {loading ? '...' : buttonText}
       </button>
     </div>
+  )
+}
+
+function PanelToggleIcon({ open }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+      <rect x="2.25" y="3" width="10.5" height="8.5" rx="1.8" stroke={open ? C.accent : C.textSec} strokeWidth="1.6" />
+      <rect x="5.25" y="6" width="10.5" height="8.5" rx="1.8" stroke={open ? C.accent : C.textSec} strokeWidth="1.6" opacity="0.9" />
+    </svg>
   )
 }
 
@@ -412,10 +419,10 @@ function SearchTab() {
 // ======================== Tab: Map (向量可视化 - Canvas 高性能渲染) ========================
 
 const TYPE_COLORS = {
-  DESC: { fill: '#3b82f6', stroke: '#2563eb', label: 'DESC' },
-  SCEN: { fill: '#16a34a', stroke: '#15803d', label: 'SCEN' },
-  REL:  { fill: '#8b5cf6', stroke: '#7c3aed', label: 'REL' },
-  _default: { fill: '#94a3b8', stroke: '#64748b', label: '?' },
+  DESC: { fill: '#dbeafe', stroke: '#2563eb', text: '#1d4ed8', label: 'DESC' },
+  SCEN: { fill: '#dcfce7', stroke: '#15803d', text: '#166534', label: 'SCEN' },
+  REL:  { fill: '#ede9fe', stroke: '#7c3aed', text: '#6d28d9', label: 'REL' },
+  _default: { fill: '#e2e8f0', stroke: '#64748b', text: '#334155', label: '?' },
 }
 
 /** Canvas 绘制引擎 — 万级节点无压力 */
@@ -506,7 +513,22 @@ function drawCanvas(ctx, data, pointMap, transform, dimensions, showEdges, showD
     }
   }
 
-  for (const p of data.points) {
+  const drawRoundedRect = (x, y, w, h, r) => {
+    const rr = Math.max(0, Math.min(r, w / 2, h / 2))
+    ctx.beginPath()
+    ctx.moveTo(x + rr, y)
+    ctx.lineTo(x + w - rr, y)
+    ctx.quadraticCurveTo(x + w, y, x + w, y + rr)
+    ctx.lineTo(x + w, y + h - rr)
+    ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h)
+    ctx.lineTo(x + rr, y + h)
+    ctx.quadraticCurveTo(x, y + h, x, y + h - rr)
+    ctx.lineTo(x, y + rr)
+    ctx.quadraticCurveTo(x, y, x + rr, y)
+    ctx.closePath()
+  }
+
+  const drawNode = (p) => {
     const tc = TYPE_COLORS[String(p.infon_type).toUpperCase()] || TYPE_COLORS._default
     const px = xScale(p.x)
     const py = yScale(p.y)
@@ -514,20 +536,28 @@ function drawCanvas(ctx, data, pointMap, transform, dimensions, showEdges, showD
     const isAssoc = selectedAssocIids.has(p.iid)
     const isHov = p.iid === hoveredIid
 
-    let r = isSel ? 8 : isAssoc ? 6 : isHov ? 6 : 4
-    // 数据量大时缩小点
-    if (data.points.length > 500) r = Math.max(2, r - 1)
-    if (data.points.length > 2000) r = Math.max(1.5, r - 1)
+    const showNodeLabel = isSel || isAssoc || isHov
+    let label = ''
+    let w = showNodeLabel ? (isSel ? 54 : 46) : 8
+    let h = showNodeLabel ? (isSel ? 20 : 18) : 8
+    const radius = showNodeLabel ? 5 : 2.5
+    let fontSize = isSel ? 10 : 9
 
-    ctx.globalAlpha = isSel || isAssoc || isHov ? 1.0 : 0.75
+    if (showNodeLabel) {
+      label = String(p.entity || p.attribute || p.iid || '')
+      label = label.length > 10 ? `${label.slice(0, 9)}…` : label
+      ctx.font = `${isSel ? 'bold ' : ''}${fontSize}px -apple-system, sans-serif`
+      const tw = Math.min(120, ctx.measureText(label).width)
+      w = Math.max(w, tw + 12)
+      h = isSel ? 20 : 18
+    }
 
-    const modality = p.modality || 'text'
+    ctx.globalAlpha = showNodeLabel ? 1.0 : 0.75
 
     // 选中的光晕
     if (isSel) {
-      ctx.fillStyle = tc.fill + '20'
-      ctx.beginPath()
-      ctx.arc(px, py, r + 6, 0, Math.PI * 2)
+      ctx.fillStyle = 'rgba(14,165,233,0.16)'
+      drawRoundedRect(px - w / 2 - 4, py - h / 2 - 4, w + 8, h + 8, 8)
       ctx.fill()
     }
 
@@ -535,43 +565,41 @@ function drawCanvas(ctx, data, pointMap, transform, dimensions, showEdges, showD
     ctx.strokeStyle = isSel ? '#0f172a' : isAssoc ? '#f59e0b' : tc.stroke
     ctx.lineWidth = isSel ? 2.5 : isAssoc ? 2 : 1
 
-    if (modality === 'image') {
-      // 菱形
-      ctx.beginPath()
-      ctx.moveTo(px, py - r)
-      ctx.lineTo(px + r, py)
-      ctx.lineTo(px, py + r)
-      ctx.lineTo(px - r, py)
-      ctx.closePath()
-      ctx.fill()
-      ctx.stroke()
-    } else if (modality === 'audio') {
-      // 三角
-      ctx.beginPath()
-      ctx.moveTo(px, py - r)
-      ctx.lineTo(px + r, py + r * 0.7)
-      ctx.lineTo(px - r, py + r * 0.7)
-      ctx.closePath()
-      ctx.fill()
-      ctx.stroke()
-    } else {
-      // 圆
-      ctx.beginPath()
-      ctx.arc(px, py, r, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.stroke()
+    // 数据量大时，未高亮节点进一步缩小
+    if (!showNodeLabel && data.points.length > 500) {
+      w = 6
+      h = 6
+    }
+    if (!showNodeLabel && data.points.length > 2000) {
+      w = 5
+      h = 5
     }
 
-    // 选中 / 关联 / hover 时显示标签
-    if (isSel || isAssoc || isHov) {
+    drawRoundedRect(px - w / 2, py - h / 2, w, h, radius)
+    ctx.fill()
+    ctx.stroke()
+
+    // 选中 / 关联 / hover 时显示内嵌标签（文字标在节点内部）
+    if (showNodeLabel) {
       ctx.globalAlpha = 1
-      const label = p.entity || p.iid
-      ctx.font = `${isSel ? 'bold ' : ''}${isSel ? 10 : 9}px -apple-system, sans-serif`
-      ctx.fillStyle = '#0f172a'
+      ctx.font = `${isSel ? 'bold ' : ''}${fontSize}px -apple-system, sans-serif`
+      ctx.fillStyle = tc.text || '#0f172a'
       ctx.textAlign = 'center'
-      ctx.fillText(label, px, py - r - 4, 120)
+      ctx.textBaseline = 'middle'
+      ctx.fillText(label, px, py, w - 10)
     }
   }
+
+  // 先画普通节点，再画高亮节点，避免被小节点遮挡
+  const normalNodes = []
+  const focusNodes = []
+  for (const p of data.points) {
+    const isFocus = p.iid === selected || selectedAssocIids.has(p.iid) || p.iid === hoveredIid
+    if (isFocus) focusNodes.push(p)
+    else normalNodes.push(p)
+  }
+  normalNodes.forEach(drawNode)
+  focusNodes.forEach(drawNode)
 
   ctx.globalAlpha = 1
   ctx.restore()
@@ -799,12 +827,24 @@ function MapTab() {
       }}>
         {Object.entries(TYPE_COLORS).filter(([k]) => k !== '_default').map(([key, val]) => (
           <span key={key} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: val.fill, border: `1px solid ${val.stroke}`, display: 'inline-block' }} />
+            <span style={{ width: 10, height: 7, borderRadius: 2, background: val.fill, border: `1px solid ${val.stroke}`, display: 'inline-block' }} />
             {val.label}
             {stats?.type_counts?.[key] != null && <span style={{ color: C.textTer }}>({stats.type_counts[key]})</span>}
           </span>
         ))}
-        <span style={{ color: C.textTer }}>◇img △audio ●text</span>
+        <span style={{ color: C.textTer, marginLeft: 8 }}>Edges:</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+          <span style={{ width: 14, borderTop: '2px solid rgba(239,68,68,0.35)' }} />
+          <span style={{ color: C.textTer }}>strong</span>
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+          <span style={{ width: 14, borderTop: '2px solid rgba(245,158,11,0.3)' }} />
+          <span style={{ color: C.textTer }}>medium</span>
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+          <span style={{ width: 14, borderTop: '2px dashed rgba(148,163,184,0.5)' }} />
+          <span style={{ color: C.textTer }}>weak</span>
+        </span>
         {summaryText && <span style={{ marginLeft: 'auto', color: C.textTer }}>{summaryText}</span>}
       </div>
 
@@ -833,39 +873,6 @@ function MapTab() {
           height={dimensions.height * (window.devicePixelRatio || 1)}
           style={{ display: 'block', width: dimensions.width, height: dimensions.height, cursor: 'grab' }}
         />
-
-        {/* Hover tooltip */}
-        {hovered && (
-          <div style={{
-            position: 'absolute', top: 8, left: 8,
-            background: 'rgba(255,255,255,0.96)',
-            border: `1px solid ${C.border}`, borderRadius: 8,
-            padding: '8px 12px', maxWidth: 220,
-            boxShadow: '0 2px 12px rgba(0,0,0,0.10)',
-            pointerEvents: 'none', zIndex: 3,
-            fontSize: 10, lineHeight: 1.5,
-          }}>
-            <div style={{ fontWeight: 700, fontSize: 11, marginBottom: 4, display: 'flex', gap: 6, alignItems: 'center' }}>
-              <Badge color={(TYPE_COLORS[String(hovered.infon_type).toUpperCase()] || TYPE_COLORS._default).fill}>
-                {hovered.infon_type}
-              </Badge>
-              <Badge color={C.textTer}>{hovered.modality}</Badge>
-            </div>
-            <div style={{ fontWeight: 600, color: C.text }}>{hovered.entity || '(no entity)'}</div>
-            {hovered.attribute && <div style={{ color: C.textSec }}>{hovered.attribute}</div>}
-            <div style={{ color: C.textTer, fontSize: 9, marginTop: 4 }}>
-              iid: {hovered.iid}
-            </div>
-            <div style={{ color: C.textTer, fontSize: 9 }}>
-              session: {hovered.session_id} · R{hovered.round_num}
-            </div>
-            {hovered.associations?.length > 0 && (
-              <div style={{ color: C.teal, fontSize: 9, marginTop: 3 }}>
-                {hovered.associations.length} association{hovered.associations.length > 1 ? 's' : ''}
-              </div>
-            )}
-          </div>
-        )}
 
         {/* 右下角快捷提示 */}
         <div style={{
@@ -917,7 +924,7 @@ function MapTab() {
 // ======================== 主面板 ========================
 
 const TABS = [
-  { key: 'map', label: '🗺 Map' },
+  { key: 'map', label: 'User Profile' },
   { key: 'store', label: 'Store' },
   { key: 'triggers', label: 'Triggers' },
   { key: 'search', label: 'Search' },
@@ -926,6 +933,8 @@ const TABS = [
 export default function MemoryStreamDebugPanel() {
   const [open, setOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('map')
+  const panelRef = useRef(null)
+  const fabRef = useRef(null)
   // 监听用户变化：用户切换时 key 变化 → 所有子组件强制重新挂载
   // 这样所有 useEffect 重新触发、本地状态重置、Canvas 清空
   const currentUserId = useStore(s => s.currentUserId)
@@ -937,24 +946,43 @@ export default function MemoryStreamDebugPanel() {
     return () => window.removeEventListener('keydown', handleKey)
   }, [open])
 
+  // 点击面板外区域自动收起
+  useEffect(() => {
+    if (!open) return
+    const handleOutside = (e) => {
+      const target = e.target
+      if (panelRef.current?.contains(target)) return
+      if (fabRef.current?.contains(target)) return
+      setOpen(false)
+    }
+    window.addEventListener('mousedown', handleOutside)
+    window.addEventListener('touchstart', handleOutside, { passive: true })
+    return () => {
+      window.removeEventListener('mousedown', handleOutside)
+      window.removeEventListener('touchstart', handleOutside)
+    }
+  }, [open])
+
   return (
     <>
       {/* FAB toggle */}
       <button
+        ref={fabRef}
         onClick={() => setOpen(v => !v)}
         style={{
           ...fabStyle,
-          transform: open ? 'rotate(45deg)' : 'rotate(0deg)',
-          background: open ? C.accentHover : C.accent,
+          borderColor: open ? C.accent + '80' : C.borderMed,
+          boxShadow: open ? '0 4px 14px rgba(14,165,233,0.18)' : fabStyle.boxShadow,
+          background: open ? C.accentLight : C.bg,
         }}
-        title="Memory Stream Debug Panel"
+        title={open ? 'Close Memory Stream panel' : 'Open Memory Stream panel'}
       >
-        {open ? '\u00D7' : '\u29C9'}
+        <PanelToggleIcon open={open} />
       </button>
 
       {/* Panel */}
       {open && (
-        <div style={panelStyle}>
+        <div ref={panelRef} style={panelStyle}>
           {/* Header */}
           <div style={{
             display: 'flex',
