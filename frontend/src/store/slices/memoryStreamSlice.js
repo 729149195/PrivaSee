@@ -67,7 +67,23 @@ function _scopeInfonsForSession(infons, userId, sessionId, roundNum) {
   })
 }
 
-export const createMemoryStreamSlice = (set, get) => ({
+export const createMemoryStreamSlice = (set, get) => {
+  const pushAssociationEvent = (event) => {
+    const now = Date.now()
+    const normalized = {
+      id: `assoc_evt_${now}_${Math.random().toString(36).slice(2, 7)}`,
+      ts: now,
+      type: event?.type || 'unknown',
+      title: event?.title || '',
+      detail: event?.detail || '',
+      payload: event?.payload || {},
+    }
+    set(s => ({
+      memoryAssociationEvents: [normalized, ...(s.memoryAssociationEvents || [])].slice(0, 120),
+    }))
+  }
+
+  return ({
   // ==================== 状态 ====================
   
   // 记忆流健康/统计状态
@@ -84,6 +100,8 @@ export const createMemoryStreamSlice = (set, get) => ({
   
   // 回溯查询结果缓存
   memoryBacktraceCache: {},  // { [iid]: { evidence_pointer, associations, ... } }
+  // 关联线索调取/回溯事件时间线（用于 Debug 可视化）
+  memoryAssociationEvents: [],
   
   // 加载状态
   memoryStreamLoading: false,
@@ -137,6 +155,18 @@ export const createMemoryStreamSlice = (set, get) => ({
       
       // 将关联信息回写到 infon 对象 (更新前端状态)
       if (result.ingested && result.ingested.length > 0) {
+        const linked = result.ingested.filter(item => Array.isArray(item.associations) && item.associations.length > 0)
+        pushAssociationEvent({
+          type: 'ingest_association_bind',
+          title: 'Ingest association binding',
+          detail: `${result.ingested.length} 条写入，${linked.length} 条产生关联`,
+          payload: {
+            ingested_count: result.ingested.length,
+            linked_count: linked.length,
+            linked_iids: linked.slice(0, 8).map(item => item.iid),
+          },
+        })
+
         const infonSession = get().infonSessions?.[sessionId]
         if (infonSession) {
           const ingestedMap = new Map()
@@ -305,9 +335,26 @@ export const createMemoryStreamSlice = (set, get) => ({
       const result = await response.json()
       
       const retrievedInfons = result.retrieved_infons || []
+      const triggerTypes = Array.isArray(result.triggers)
+        ? result.triggers.map(t => t.trigger_type).filter(Boolean)
+        : []
+      const queryIids = Array.isArray(infons) ? infons.map(i => i?.iid).filter(Boolean).slice(0, 10) : []
+      const retrievedIids = retrievedInfons.map(i => i?.iid).filter(Boolean).slice(0, 12)
       set({
         memoryRetrievedInfons: retrievedInfons,
         memoryTriggerResult: result,
+      })
+      pushAssociationEvent({
+        type: 'trigger_check',
+        title: result.triggered ? 'Trigger check: retrieval triggered' : 'Trigger check: not triggered',
+        detail: `触发器: ${triggerTypes.length > 0 ? triggerTypes.join(', ') : 'none'}; 检索 ${retrievedInfons.length} 条`,
+        payload: {
+          triggered: !!result.triggered,
+          trigger_types: triggerTypes,
+          query_iids: queryIids,
+          retrieved_iids: retrievedIids,
+          retrieved_count: retrievedInfons.length,
+        },
       })
       
       if (result.triggered) {
@@ -369,7 +416,21 @@ export const createMemoryStreamSlice = (set, get) => ({
     
     // 检查缓存
     const cached = get().memoryBacktraceCache?.[iid]
-    if (cached) return cached
+    if (cached) {
+      pushAssociationEvent({
+        type: 'backtrace_cache_hit',
+        title: 'Backtrace cache hit',
+        detail: `${iid} 命中缓存`,
+        payload: {
+          iid,
+          evidence_pointer: cached?.evidence_pointer || null,
+          association_iids: Array.isArray(cached?.associations)
+            ? cached.associations.map(a => a?.iid).filter(Boolean).slice(0, 12)
+            : [],
+        },
+      })
+      return cached
+    }
     
     try {
       const params = new URLSearchParams({ user_id: get()._getMemoryUserId() })
@@ -378,11 +439,31 @@ export const createMemoryStreamSlice = (set, get) => ({
       )
       
       if (!response.ok) {
-        if (response.status === 404) return null
+        if (response.status === 404) {
+          pushAssociationEvent({
+            type: 'backtrace_miss',
+            title: 'Backtrace miss',
+            detail: `${iid} 未找到可回溯记录`,
+            payload: { iid },
+          })
+          return null
+        }
         throw new Error('回溯查询失败')
       }
       
       const result = await response.json()
+      pushAssociationEvent({
+        type: 'backtrace_query',
+        title: 'Backtrace queried',
+        detail: `${iid} -> ${(result?.associations || []).length} 条关联`,
+        payload: {
+          iid,
+          evidence_pointer: result?.evidence_pointer || null,
+          association_iids: Array.isArray(result?.associations)
+            ? result.associations.map(a => a?.iid).filter(Boolean).slice(0, 20)
+            : [],
+        },
+      })
       
       // 缓存结果
       set(s => ({
@@ -474,6 +555,7 @@ export const createMemoryStreamSlice = (set, get) => ({
         memoryRetrievedInfons: [],
         memoryTriggerResult: null,
         memoryBacktraceCache: {},
+        memoryAssociationEvents: [],
         memoryStreamStatus: null,
         memoryVisualizationData: null,
       })
@@ -486,5 +568,6 @@ export const createMemoryStreamSlice = (set, get) => ({
       return false
     }
   },
-})
+  })
+}
 

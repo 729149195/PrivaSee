@@ -113,10 +113,166 @@ function EmptyHint({ text }) {
   return <div style={{ color: C.textTer, fontSize: 11, textAlign: 'center', padding: '20px 0' }}>{text}</div>
 }
 
+function formatTs(ts) {
+  if (!ts) return '-'
+  const d = new Date(ts)
+  const date = d.toLocaleDateString()
+  const time = d.toLocaleTimeString()
+  return `${date} ${time}`
+}
+
+function iidAlias(iid) {
+  const raw = String(iid || '')
+  if (!raw) return '-'
+  const idx = raw.indexOf('__u')
+  return idx > 0 ? raw.slice(0, idx) : raw
+}
+
+function shortenText(text, max = 34) {
+  const raw = String(text || '')
+  if (raw.length <= max) return raw
+  const head = Math.max(8, Math.floor(max * 0.55))
+  const tail = Math.max(6, max - head - 1)
+  return `${raw.slice(0, head)}…${raw.slice(-tail)}`
+}
+
+function shortenHead(text, max = 24) {
+  const raw = String(text || '')
+  if (raw.length <= max) return raw
+  return `${raw.slice(0, Math.max(1, max - 1))}…`
+}
+
+function sanitizeDisplayText(text) {
+  // 去掉 embedding 文本里夹带的 iid / 作用域 token（例如 desc_r1_3__uuser_xxx...）
+  // 这类 token 对调试可视化很干扰；原始 iid 仍可在详情面板中查看。
+  const raw = String(text || '')
+  if (!raw) return ''
+  return raw
+    // remove scoped infon ids like "desc_r1_3__uuser_xxx_ssession_r1" (and unscoped "desc_r1_3")
+    .replace(/\b(?:desc|scen|rel)_r\d+_\d+(?:__u[a-zA-Z0-9_-]+)?\b/g, '')
+    // remove leftover scope tokens if they appear alone
+    .replace(/\b__u[a-zA-Z0-9_-]+\b/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+function getInfonPrimaryText(inf) {
+  // Search/列表标题优先显示实际 embedding 文本（最贴近“内容是什么”）
+  const embed = sanitizeDisplayText(inf?.text_for_embedding || '')
+  if (embed) return embed
+  const type = String(inf?.infon_type || '').toUpperCase()
+  if (type === 'REL') {
+    return inf?.relation_name || inf?.relation || ''
+  }
+  return inf?.entity || inf?.temporal || inf?.relation_name || ''
+}
+
+function useInfonLookup() {
+  const {
+    memoryVisualizationData,
+    memoryRetrievedInfons,
+    memoryStreamLastIngest,
+    memoryBacktraceCache,
+  } = useStore()
+
+  const infonByIid = useMemo(() => {
+    const map = new Map()
+
+    ;(memoryVisualizationData?.points || []).forEach(p => { if (p?.iid) map.set(p.iid, p) })
+    ;(memoryRetrievedInfons || []).forEach(p => { if (p?.iid) map.set(p.iid, p) })
+    ;(memoryStreamLastIngest?.ingested || []).forEach(p => { if (p?.iid) map.set(p.iid, p) })
+
+    // backtrace cache often includes enriched associations (with text_for_embedding)
+    Object.values(memoryBacktraceCache || {}).forEach(bt => {
+      ;(bt?.associations || []).forEach(a => { if (a?.iid) map.set(a.iid, a) })
+      if (bt?.iid) map.set(bt.iid, bt)
+    })
+
+    return map
+  }, [memoryVisualizationData, memoryRetrievedInfons, memoryStreamLastIngest, memoryBacktraceCache])
+
+  const resolve = useCallback((iid) => infonByIid.get(iid), [infonByIid])
+  return { resolve }
+}
+
+function InfonChip({ iid, resolve, color = C.teal, maxLen = 22 }) {
+  const inf = resolve?.(iid)
+  const content = inf ? (getInfonPrimaryText(inf) || getEmbeddingLabel(inf)) : ''
+  const label = content ? shortenHead(content, maxLen) : iidAlias(iid)
+  return (
+    <span
+      title={inf ? `${content}\n${iid}` : String(iid || '')}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        border: `1px solid ${C.border}`,
+        background: C.bg,
+        borderRadius: 10,
+        padding: '1px 6px',
+        fontSize: 9,
+        color,
+        maxWidth: 220,
+      }}
+    >
+      {label || '-'}
+    </span>
+  )
+}
+
+function ReadableIid({ iid, color = C.textSec, showRaw = true }) {
+  const raw = String(iid || '')
+  const alias = iidAlias(raw)
+  const needRaw = showRaw && raw && alias !== raw
+  return (
+    <span title={raw || alias} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4, minWidth: 0 }}>
+      <span style={{ color, fontWeight: 600, wordBreak: 'break-all' }}>{alias || '-'}</span>
+      {needRaw && <span style={{ color: C.textTer, fontSize: 9 }}>{shortenText(raw, 30)}</span>}
+    </span>
+  )
+}
+
+function IidList({ label, iids, color = C.teal, resolve }) {
+  const uniq = Array.from(new Set((iids || []).filter(Boolean))).slice(0, 8)
+  if (uniq.length === 0) return null
+  return (
+    <div style={{ marginTop: 2 }}>
+      <span style={{ fontSize: 9, color: C.textTer }}>{label}:</span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
+        {uniq.map(iid => (
+          <InfonChip key={iid} iid={iid} resolve={resolve} color={color} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function SimScore({ value }) {
   const pct = (value * 100).toFixed(1)
   const color = value >= 0.85 ? C.red : value >= 0.5 ? C.yellow : C.teal
   return <span style={{ fontSize: 10, fontWeight: 700, color, flexShrink: 0 }}>{pct}%</span>
+}
+
+function getTypeBadgeColor(infonType) {
+  const type = String(infonType || '').toUpperCase()
+  if (type === 'DESC') return C.blue
+  if (type === 'SCEN') return C.green
+  if (type === 'REL') return C.purple
+  return C.textTer
+}
+
+function getEmbeddingLabel(p) {
+  // 节点内部 label 优先展示 embedding 文本（对调试最直观），避免满屏 iid
+  const embedText = sanitizeDisplayText(p?.text_for_embedding || '')
+  return (
+    embedText ||
+    p?.entity ||
+    p?.attribute ||
+    p?.temporal ||
+    p?.spatial ||
+    p?.relation_name ||
+    p?.iid ||
+    ''
+  )
 }
 
 function InfonMini({ infon, similarity }) {
@@ -201,6 +357,7 @@ function PanelToggleIcon({ open }) {
 
 function StoreTab() {
   const { memoryStreamStatus, memoryStreamLastIngest, fetchMemoryStreamStatus, clearMemoryStream } = useStore()
+  const { resolve } = useInfonLookup()
   const [clearing, setClearing] = useState(false)
 
   useEffect(() => { fetchMemoryStreamStatus() }, [fetchMemoryStreamStatus])
@@ -238,14 +395,16 @@ function StoreTab() {
             {(last.ingested || []).map((item) => (
               <div key={item.iid} style={{ background: C.bgCard, borderRadius: 6, padding: '5px 10px', border: `1px solid ${C.border}`, fontSize: 11 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 600 }}>{item.iid}</span>
+                  <ReadableIid iid={item.iid} color={C.text} />
                   {item.associations?.length > 0 && <Badge color={C.teal}>{item.associations.length} assoc</Badge>}
                 </div>
                 <div style={{ color: C.textTer, fontSize: 10, marginTop: 2 }}>ptr: {item.evidence_pointer || 'n/a'}</div>
                 {item.associations?.length > 0 && (
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
                     {item.associations.map((a, i) => (
-                      <span key={i} style={{ fontSize: 9, color: C.teal }}>{a.iid} ({(a.similarity * 100).toFixed(1)}%)</span>
+                      <span key={i} style={{ fontSize: 9, color: C.teal }}>
+                        <InfonChip iid={a.iid} resolve={resolve} color={C.teal} /> ({(a.similarity * 100).toFixed(1)}%)
+                      </span>
                     ))}
                   </div>
                 )}
@@ -314,7 +473,7 @@ function TriggersTab() {
                   detail = `${t.categories_count} categories: ${(t.categories || []).join(', ')}`
                   labelColor = C.yellow
                 } else if (type === 'refinement_detection') {
-                  detail = `max sim: ${(t.max_similarity * 100).toFixed(1)}% (threshold: ${(t.threshold * 100).toFixed(0)}%), infon: ${t.triggered_infon_iid || '-'}`
+                  detail = `max sim: ${(t.max_similarity * 100).toFixed(1)}% (threshold: ${(t.threshold * 100).toFixed(0)}%), infon: ${iidAlias(t.triggered_infon_iid) || '-'}`
                   labelColor = C.red
                 } else if (type === 'sensitive_domain_hit') {
                   detail = `domains: ${(t.domains_hit || []).join(', ')}`
@@ -350,10 +509,171 @@ function TriggersTab() {
 
 // ======================== Tab: Associations ========================
 
+function TraceTab() {
+  const {
+    memoryAssociationEvents,
+    memoryBacktraceCache,
+    memoryRetrievedInfons,
+    memoryStreamLastIngest,
+    queryBacktrace,
+  } = useStore()
+  const { resolve } = useInfonLookup()
+  const [iidInput, setIidInput] = useState('')
+  const [querying, setQuerying] = useState(false)
+  const [selectedIid, setSelectedIid] = useState('')
+
+  const candidateIids = useMemo(() => {
+    const set = new Set()
+    ;(memoryRetrievedInfons || []).forEach(inf => { if (inf?.iid) set.add(inf.iid) })
+    ;(memoryStreamLastIngest?.ingested || []).forEach(item => { if (item?.iid) set.add(item.iid) })
+    ;(memoryAssociationEvents || []).forEach(evt => {
+      if (evt?.payload?.iid) set.add(evt.payload.iid)
+      ;(evt?.payload?.retrieved_iids || []).forEach(iid => set.add(iid))
+      ;(evt?.payload?.association_iids || []).forEach(iid => set.add(iid))
+      ;(evt?.payload?.linked_iids || []).forEach(iid => set.add(iid))
+    })
+    return Array.from(set).slice(0, 40)
+  }, [memoryRetrievedInfons, memoryStreamLastIngest, memoryAssociationEvents])
+
+  const selectedBacktrace = selectedIid ? memoryBacktraceCache?.[selectedIid] : null
+
+  const handleBacktrace = useCallback(async () => {
+    const iid = iidInput.trim()
+    if (!iid) return
+    setQuerying(true)
+    const result = await queryBacktrace(iid)
+    setSelectedIid(iid)
+    if (!result) {
+      // 保留选中，便于用户看到 miss 事件和输入值
+      setSelectedIid(iid)
+    }
+    setQuerying(false)
+  }, [iidInput, queryBacktrace])
+
+  const handleQuickPick = useCallback(async (iid) => {
+    if (!iid) return
+    setIidInput(iid)
+    setQuerying(true)
+    await queryBacktrace(iid)
+    setSelectedIid(iid)
+    setQuerying(false)
+  }, [queryBacktrace])
+
+  const typeStyle = (type) => {
+    if (type === 'backtrace_query') return { color: C.teal, bg: C.tealBg, label: 'BACKTRACE' }
+    if (type === 'backtrace_cache_hit') return { color: C.blue, bg: C.blueBg, label: 'CACHE' }
+    if (type === 'backtrace_miss') return { color: C.red, bg: C.redBg, label: 'MISS' }
+    if (type === 'trigger_check') return { color: C.purple, bg: C.purpleBg, label: 'TRIGGER' }
+    if (type === 'ingest_association_bind') return { color: C.green, bg: C.greenBg, label: 'INGEST' }
+    return { color: C.textSec, bg: C.bgCard, label: 'EVENT' }
+  }
+
+  return (
+    <div style={{ padding: '10px 14px', overflow: 'auto', flex: 1 }}>
+      <SectionTitle>Association Backtrace Probe</SectionTitle>
+      <InputRow
+        value={iidInput}
+        onChange={setIidInput}
+        onSubmit={handleBacktrace}
+        placeholder="Input infon iid to backtrace"
+        buttonText="Backtrace"
+        loading={querying}
+        disabled={!iidInput.trim()}
+      />
+
+      {candidateIids.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, color: C.textTer, marginBottom: 6 }}>Quick pick iid</div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
+            {candidateIids.slice(0, 12).map(iid => (
+              <button
+                key={iid}
+                onClick={() => handleQuickPick(iid)}
+                style={{
+                  fontSize: 9,
+                  padding: '2px 6px',
+                  borderRadius: 10,
+                  border: `1px solid ${C.border}`,
+                  background: selectedIid === iid ? C.accentLight : C.bgCard,
+                  color: selectedIid === iid ? C.accent : C.textSec,
+                  cursor: 'pointer',
+                }}
+              >
+                {iidAlias(iid)}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      <SectionTitle>Selected Backtrace</SectionTitle>
+      {selectedIid ? (
+        selectedBacktrace ? (
+          <div style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 10px', marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 700 }}><ReadableIid iid={selectedIid} color={C.text} /></div>
+            <div style={{ marginTop: 3, fontSize: 10, color: C.textSec }}>
+              evidence: {selectedBacktrace.evidence_pointer || 'n/a'}
+            </div>
+            <div style={{ marginTop: 6, fontSize: 10, color: C.textTer }}>
+              associations: {selectedBacktrace.associations?.length || 0}
+            </div>
+            {selectedBacktrace.associations?.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+                {selectedBacktrace.associations.slice(0, 8).map((a, idx) => (
+                  <div key={`${a.iid}_${idx}`} style={{ fontSize: 10, color: C.teal }}>
+                    → <InfonChip iid={a.iid} resolve={resolve} color={C.teal} /> ({((a.similarity || 0) * 100).toFixed(1)}%)
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ marginBottom: 12 }}>
+            <EmptyHint text={`No backtrace result for ${selectedIid}`} />
+          </div>
+        )
+      ) : (
+        <EmptyHint text="Query or quick-pick an iid to inspect backtrace result" />
+      )}
+
+      <SectionTitle>Association Timeline ({memoryAssociationEvents?.length || 0})</SectionTitle>
+      {memoryAssociationEvents?.length > 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {memoryAssociationEvents.map(evt => {
+            const style = typeStyle(evt.type)
+            return (
+              <div key={evt.id} style={{ background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 8, padding: '7px 10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <Badge color={style.color} bg={style.bg}>{style.label}</Badge>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: C.text }}>{evt.title || evt.type}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 9, color: C.textTer }}>{formatTs(evt.ts)}</span>
+                </div>
+                {evt.detail && <div style={{ fontSize: 10, color: C.textSec, marginBottom: 3 }}>{evt.detail}</div>}
+                {(evt.payload?.trigger_types || []).length > 0 && (
+                  <div style={{ fontSize: 9, color: C.purple }}>
+                    trigger: {evt.payload.trigger_types.join(', ')}
+                  </div>
+                )}
+                <IidList label="query" iids={evt.payload?.query_iids} color={C.textSec} resolve={resolve} />
+                <IidList label="retrieved" iids={evt.payload?.retrieved_iids} color={C.teal} resolve={resolve} />
+                <IidList label="assoc" iids={evt.payload?.association_iids} color={C.teal} resolve={resolve} />
+                <IidList label="linked" iids={evt.payload?.linked_iids} color={C.green} resolve={resolve} />
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <EmptyHint text="No association events yet" />
+      )}
+    </div>
+  )
+}
+
 // ======================== Tab: Search ========================
 
 function SearchTab() {
   const { searchMemoryStream, memoryStreamLoading } = useStore()
+  const { resolve } = useInfonLookup()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [searched, setSearched] = useState(false)
@@ -385,23 +705,49 @@ function SearchTab() {
                 <div key={inf.iid} style={{ background: C.bgCard, borderRadius: 6, padding: '6px 10px', border: `1px solid ${C.border}` }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>
-                      <Badge color={C.blue}>{inf.infon_type || '?'}</Badge>
-                      <span style={{ fontWeight: 600, fontSize: 11 }}>{inf.entity || inf.temporal || inf.relation_name || ''}</span>
-                      <span style={{ color: C.textSec, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {inf.attribute || inf.spatial || ''}
+                      <Badge color={getTypeBadgeColor(inf.infon_type)}>{String(inf.infon_type || '?').toUpperCase()}</Badge>
+                      <span style={{ fontWeight: 600, fontSize: 11 }}>
+                        {getInfonPrimaryText(inf) || iidAlias(inf.iid)}
                       </span>
+                      {String(inf.infon_type || '').toUpperCase() !== 'REL' && (
+                        <span style={{ color: C.textSec, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {inf.attribute || inf.spatial || ''}
+                        </span>
+                      )}
                     </div>
                     <SimScore value={inf.similarity} />
                   </div>
+                  {String(inf.infon_type || '').toUpperCase() === 'REL' && (
+                    <div style={{ marginTop: 4, fontSize: 9, color: C.textSec }}>
+                      <span style={{ color: C.textTer }}>args:</span>{' '}
+                      {Array.isArray(inf.arg_refs) && inf.arg_refs.length > 0
+                        ? inf.arg_refs.slice(0, 4).map((iid, idx) => (
+                          <span key={`${iid}_${idx}`} style={{ marginRight: 6 }}>
+                            <ReadableIid iid={iid} color={C.purple} />
+                          </span>
+                        ))
+                        : <span style={{ color: C.textTer }}>n/a</span>
+                      }
+                    </div>
+                  )}
                   <div style={{ fontSize: 9, color: C.textTer, marginTop: 3, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <span>iid: {inf.iid}</span>
+                    <span>iid: <ReadableIid iid={inf.iid} color={C.textSec} /></span>
                     <span>session: {inf.session_id}</span>
                     <span>R{inf.round_num}</span>
                     <span>{inf.modality}</span>
                   </div>
                   {inf.associations?.length > 0 && (
-                    <div style={{ fontSize: 9, color: C.teal, marginTop: 2 }}>
-                      assoc: {inf.associations.map(a => `${a.iid}(${(a.similarity * 100).toFixed(0)}%)`).join(', ')}
+                    <div style={{ marginTop: 2 }}>
+                      <div style={{ fontSize: 9, color: C.teal }}>
+                        assoc:
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 }}>
+                        {inf.associations.slice(0, 6).map((a, idx) => (
+                          <span key={`${a.iid}_${idx}`} style={{ fontSize: 9, color: C.teal, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <InfonChip iid={a.iid} resolve={resolve} color={C.teal} /> ({(a.similarity * 100).toFixed(0)}%)
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -544,8 +890,10 @@ function drawCanvas(ctx, data, pointMap, transform, dimensions, showEdges, showD
     let fontSize = isSel ? 10 : 9
 
     if (showNodeLabel) {
-      label = String(p.entity || p.attribute || p.iid || '')
-      label = label.length > 10 ? `${label.slice(0, 9)}…` : label
+      label = String(getEmbeddingLabel(p))
+      const maxLen = isSel ? 18 : 14
+      // 节点标签只保留开头，避免尾部把 iid/噪音又带回来
+      label = shortenHead(label, maxLen)
       ctx.font = `${isSel ? 'bold ' : ''}${fontSize}px -apple-system, sans-serif`
       const tw = Math.min(120, ctx.measureText(label).width)
       w = Math.max(w, tw + 12)
@@ -894,8 +1242,13 @@ function MapTab() {
             <Badge color={(TYPE_COLORS[String(selectedPoint.infon_type).toUpperCase()] || TYPE_COLORS._default).fill}>
               {selectedPoint.infon_type}
             </Badge>
-            <span style={{ fontWeight: 700, fontSize: 11 }}>{selectedPoint.entity || selectedPoint.iid}</span>
+            <span style={{ fontWeight: 700, fontSize: 11 }}>
+              {getEmbeddingLabel(selectedPoint) || selectedPoint.entity || ''}
+            </span>
             {selectedPoint.attribute && <span style={{ color: C.textSec }}>: {selectedPoint.attribute}</span>}
+          </div>
+          <div style={{ color: C.textTer, fontSize: 9, marginBottom: 3 }}>
+            iid: <ReadableIid iid={selectedPoint.iid} color={C.textTer} />
           </div>
           <div style={{ color: C.textTer, fontSize: 9, marginBottom: 3 }}>
             embed: &quot;{selectedPoint.text_for_embedding}&quot; · {selectedPoint.modality} · R{selectedPoint.round_num}
@@ -910,7 +1263,7 @@ function MapTab() {
                     textDecoration: 'underline', textDecorationColor: C.teal + '40',
                   }}
                 >
-                  → {a.iid} ({(a.similarity * 100).toFixed(0)}%)
+                  → {sanitizeDisplayText(getEmbeddingLabel(pointMap.get(a.iid) || { iid: a.iid })) || iidAlias(a.iid)} ({(a.similarity * 100).toFixed(0)}%)
                 </span>
               ))}
             </div>
@@ -925,6 +1278,7 @@ function MapTab() {
 
 const TABS = [
   { key: 'map', label: 'User Profile' },
+  { key: 'trace', label: 'Trace' },
   { key: 'store', label: 'Store' },
   { key: 'triggers', label: 'Triggers' },
   { key: 'search', label: 'Search' },
@@ -1032,6 +1386,7 @@ export default function MemoryStreamDebugPanel() {
           {/* Tab content — key 随 currentUserId 变化，强制子组件重新挂载 */}
           <div key={currentUserId ?? '_anon'} style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             {activeTab === 'map' && <MapTab />}
+            {activeTab === 'trace' && <TraceTab />}
             {activeTab === 'store' && <StoreTab />}
             {activeTab === 'triggers' && <TriggersTab />}
             {activeTab === 'search' && <SearchTab />}

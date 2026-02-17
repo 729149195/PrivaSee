@@ -14,6 +14,7 @@ export const createUserSlice = (set, get) => ({
       memoryRetrievedInfons: [],
       memoryTriggerResult: null,
       memoryBacktraceCache: {},
+      memoryAssociationEvents: [],
       memoryStreamStatus: null,
       memoryVisualizationData: null,
     })
@@ -33,6 +34,7 @@ export const createUserSlice = (set, get) => ({
       memoryRetrievedInfons: [],
       memoryTriggerResult: null,
       memoryBacktraceCache: {},
+      memoryAssociationEvents: [],
       memoryStreamStatus: null,
       memoryVisualizationData: null,
     })
@@ -53,6 +55,7 @@ export const createUserSlice = (set, get) => ({
       memoryRetrievedInfons: [],
       memoryTriggerResult: null,
       memoryBacktraceCache: {},
+      memoryAssociationEvents: [],
       memoryStreamStatus: null,
       memoryVisualizationData: null,
     })
