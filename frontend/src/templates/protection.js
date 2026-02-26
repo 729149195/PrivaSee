@@ -1,4 +1,5 @@
 // Privacy Protection Suggestions — optimized for 4B models
+import { buildCurrentTimeInstruction } from './timeContext.js'
 
 // fillProtectionPrompt generates the full prompt (no separate template needed)
 export function fillProtectionPrompt(originalText, privacyRisks, infons) {
@@ -26,7 +27,9 @@ export function fillProtectionPrompt(originalText, privacyRisks, infons) {
     if (items.length) infonsSection = `\nExtracted data points: ${items.join(', ')}`
   }
 
-  return `Rewrite the user's text to protect privacy. Provide 3 versions with different protection levels.
+  return `${buildCurrentTimeInstruction()}
+
+Rewrite the user's text to protect privacy. Provide 3 versions with different protection levels.
 
 ## Original Text
 ${originalText || ''}

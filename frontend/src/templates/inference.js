@@ -1,4 +1,5 @@
 // Privacy Inference Prompt Template — 针对4B小参数模型优化
+import { buildCurrentTimeInstruction } from './timeContext.js'
 
 // Extract information elements summary with ID mapping
 export function extractInfonsSummary(infons) {
@@ -113,7 +114,9 @@ export function fillPromptTemplate(infons, lawData) {
   }
   
   // 构建精简版提示词，使用编号映射，严格控制误报
-  const simplePrompt = `Check if information elements reveal the USER's own personal privacy.
+  const simplePrompt = `${buildCurrentTimeInstruction()}
+
+Check if information elements reveal the USER's own personal privacy.
 
 ## Information Elements
 ${infonSummary}

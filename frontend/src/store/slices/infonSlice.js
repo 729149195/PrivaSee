@@ -391,33 +391,45 @@ export const createInfonSlice = (set, get) => ({
       let res
       if (provider) {
         console.log('[InfonSlice] image extraction start (provider): model=%s, url=%s/chat/completions', configuredModel, provider.baseUrl)
+        const imageUserPrompt = [
+          'Extract Situation Theory infons from this image in compact CSV format.',
+          'Output only lines that start with desc:, scen:, or rel: .',
+          'Do not output run_metadata, JSON, schema text, markdown, or explanations.',
+          'One fact per line. Skip uncertain facts.'
+        ].join(' ')
         const messages = [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: [{ type: 'text', text: 'Extract Situation Theory infons in compact format.' }, { type: 'image_url', image_url: { url: dataUrl } }] },
+          { role: 'user', content: [{ type: 'text', text: imageUserPrompt }, { type: 'image_url', image_url: { url: dataUrl } }] },
         ]
         const isOmni = configuredModel.toLowerCase().includes('omni')
         res = await fetch(`${provider.baseUrl}/chat/completions`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(provider.apiKey ? { 'Authorization': `Bearer ${provider.apiKey}` } : {}), 'Connection': 'keep-alive' },
+          headers: { 'Content-Type': 'application/json', ...(provider.apiKey ? { 'Authorization': `Bearer ${provider.apiKey}` } : {}) },
           body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true, max_tokens: isOmni ? 2000 : 4096, top_p: 0.95, think }),
-          signal: controller.signal, keepalive: true
+          signal: controller.signal
         })
       } else {
         // 统一走 OpenAI 兼容端点 /v1/chat/completions，避免 /api/chat 在反向代理下流式连接被截断
         const ollamaBaseUrl = get().baseUrl || '/v1'
         console.log('[InfonSlice] image extraction start (ollama-compat): model=%s, url=%s/chat/completions', configuredModel, ollamaBaseUrl)
+        const imageUserPrompt = [
+          'Extract Situation Theory infons from this image in compact CSV format.',
+          'Output only lines that start with desc:, scen:, or rel: .',
+          'Do not output run_metadata, JSON, schema text, markdown, or explanations.',
+          'One fact per line. Skip uncertain facts.'
+        ].join(' ')
         const messages = [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: [
-            { type: 'text', text: 'Extract Situation Theory infons in compact format.' },
+            { type: 'text', text: imageUserPrompt },
             { type: 'image_url', image_url: { url: dataUrl } }
           ] },
         ]
         res = await fetch(`${ollamaBaseUrl}/chat/completions`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Connection': 'keep-alive' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true, max_tokens: 4096, top_p: 0.95, think }),
-          signal: controller.signal, keepalive: true
+          signal: controller.signal
         })
       }
       
@@ -437,14 +449,10 @@ export const createInfonSlice = (set, get) => ({
 
       let parseTimer = null, lastParseTime = 0
       const PARSE_DEBOUNCE_MS = 50
-      let tokenCount = 0
+      let finishHandled = false
 
       await streamHandler(reader, async ({ content, finish }) => {
         if (typeof content === 'string' && content.length) {
-          tokenCount++
-          if (tokenCount <= 3 || tokenCount % 20 === 0) {
-            console.log('[InfonSlice] image stream token #%d: %s', tokenCount, JSON.stringify(content).slice(0, 100))
-          }
           try {
             const curRun = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)
             const buffer = (curRun?.buffer || '') + content
@@ -457,7 +465,6 @@ export const createInfonSlice = (set, get) => ({
                 const { state: newState, yielded } = await incrementalExtractInfons(run.buffer || '', get().infonParsers?.[runId] || null)
                 set(s => ({ infonParsers: { ...s.infonParsers, [runId]: newState } }))
                 if (yielded?.length > 0) {
-                  console.log('[InfonSlice] image incremental yielded %d infons', yielded.length, yielded.map(i => i.iid || i._objIndex))
                   get()._updateInfonRun(session.id, runId, r => {
                     const infons = [...(r.resultJson?.infons || [])]
                     yielded.forEach(ni => {
@@ -482,34 +489,30 @@ export const createInfonSlice = (set, get) => ({
           }
         }
         if (finish) {
-          console.log('[InfonSlice] image stream FINISH received, total tokens: %d', tokenCount)
+          if (finishHandled) return
+          finishHandled = true
           if (parseTimer) clearTimeout(parseTimer)
           try {
             const raw = get().infonSessions?.[session.id]?.runs.find(x => x.id === runId)?.buffer || ''
-            console.log('[InfonSlice] image raw buffer length: %d, first 500 chars:\n%s', raw.length, raw.slice(0, 500))
             const parserState = get().infonParsers?.[runId]
-            console.log('[InfonSlice] image parserState: isCompact=%s, formatDetected=%s', parserState?.isCompact, parserState?.formatDetected)
             let finalInfons = [], parseSuccess = false
             
             if (parserState?.isCompact) {
               const { parseCompactInfonsFormat } = await import('../../templates/infons.js')
               const result = parseCompactInfonsFormat(raw)
-              console.log('[InfonSlice] image compact parse result: %d infons', result?.infons?.length || 0)
               if (result?.infons) { finalInfons = result.infons; parseSuccess = true }
             } else {
               const sliced = extractFirstJSONObject(raw) || raw
-              console.log('[InfonSlice] image JSON parse attempt, sliced length: %d', sliced.length)
               const { ok, value } = tryParseJSON(sliced)
-              console.log('[InfonSlice] image JSON parse ok=%s', ok)
               if (ok) {
                 const normalized = normalizeInfonOutput(value, { recordTimeISO: nowISO, defaultModality: 'image', sessionId: session.id, messageRound: currentRound, infonIndex: 0, infonType: 'desc' })
                 finalInfons = normalized.infons || []; parseSuccess = true
               }
             }
             
-            console.log('[InfonSlice] image final: parseSuccess=%s, finalInfons=%d', parseSuccess, finalInfons.length)
             if (parseSuccess && finalInfons.length) {
               const deduplicated = deduplicateAndMergeInfons(finalInfons, existingInfons)
+              console.log('[InfonSlice] image extraction done: total=%d, infons=%o', deduplicated.length, deduplicated)
               get()._updateInfonRun(session.id, runId, r => ({ ...r, status: 'done', progress: 100, resultJson: { infons: deduplicated } }))
               // === 主记忆流：写入向量索引库 ===
               const infonsForMemory = deduplicated.map(inf => ({

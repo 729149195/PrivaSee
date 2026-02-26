@@ -1,7 +1,7 @@
 // 配置管理 Slice
 import { getDefaultModelsConfig } from '../../config/defaultModelsConfig'
 import { getDefaultApiModels, getDefaultApiModelIds } from '../../config/defaultApiModelsConfig'
-import { IMAGE_ANALYSIS_SYSTEM_PROMPT, IMAGE_ANALYSIS_USER_PROMPT, getImageAnalysisMaxTokens } from '../../templates/imageAnalysis.js'
+import { getImageAnalysisSystemPrompt, IMAGE_ANALYSIS_USER_PROMPT, getImageAnalysisMaxTokens } from '../../templates/imageAnalysis.js'
 
 export const createConfigSlice = (set, get) => ({
   // 基础配置
@@ -116,7 +116,7 @@ export const createConfigSlice = (set, get) => ({
         body: JSON.stringify({
           model: configuredModel,
           messages: [
-            { role: 'system', content: IMAGE_ANALYSIS_SYSTEM_PROMPT },
+            { role: 'system', content: getImageAnalysisSystemPrompt() },
             { role: 'user', content: [
               { type: 'text', text: IMAGE_ANALYSIS_USER_PROMPT },
               { type: 'image_url', image_url: { url: imageDataUrl } }

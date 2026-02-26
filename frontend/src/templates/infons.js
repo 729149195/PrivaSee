@@ -2,6 +2,7 @@
  * infons.js - 信息元提取提示词模板（针对4B小参数模型优化）
  * 特点：精简上下文、原子化提取、格式清晰
  */
+import { buildCurrentTimeInstruction } from './timeContext.js'
 
 // ============================================================================
 // 核心提示词模块（精简版）
@@ -100,6 +101,7 @@ Mark speakers if multiple.
 
 export const SELF_CHECKLIST = String.raw`**Checklist**:
 - Extract from actual user input only
+- Never extract system-injected current-time context line
 - One attribute per DESC line
 - Use exact text from input
 - SCEN rare (0-2 max)
@@ -156,10 +158,11 @@ export function buildSystemPrompt(options = {}) {
 
   // Benchmark模式使用精简提示词
   if (benchmark) {
-    return `${BENCHMARK_EXTRACTION}\n\nRound: ${currentRound}\nIID format: {type}:r${currentRound}_{index}`;
+    return `${BENCHMARK_EXTRACTION}\n\n${buildCurrentTimeInstruction()}\n\nRound: ${currentRound}\nIID format: {type}:r${currentRound}_{index}`;
   }
 
   const parts = [CORE_DEFINITION, OUTPUT_FORMAT];
+  parts.push(buildCurrentTimeInstruction());
 
   if (modalities.includes("text")) parts.push(TEXT_EXTRACTION);
   if (modalities.includes("image")) parts.push(IMAGE_EXTRACTION);

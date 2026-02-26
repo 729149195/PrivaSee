@@ -1,6 +1,7 @@
 // 图片分析提示词模板
+import { buildCurrentTimeInstruction } from './timeContext.js'
 
-export const IMAGE_ANALYSIS_SYSTEM_PROMPT = `You are a privacy-focused AI assistant. Analyze the provided image and extract ALL details that could potentially be used to infer personal information or be associated with other data to deduce privacy-related information.
+const IMAGE_ANALYSIS_SYSTEM_PROMPT_BASE = `You are a privacy-focused AI assistant. Analyze the provided image and extract ALL details that could potentially be used to infer personal information or be associated with other data to deduce privacy-related information.
 
 Your task:
 1. Identify and describe ALL visible elements in the image (people, objects, locations, text, symbols, etc.)
@@ -16,6 +17,13 @@ Output format:
 - Highlight privacy-sensitive elements
 - Keep your response concise but comprehensive
 - Use clear and structured language`
+
+export function getImageAnalysisSystemPrompt() {
+  return `${IMAGE_ANALYSIS_SYSTEM_PROMPT_BASE}\n\n${buildCurrentTimeInstruction()}`
+}
+
+// Backward compatibility for legacy imports; prefer getImageAnalysisSystemPrompt()
+export const IMAGE_ANALYSIS_SYSTEM_PROMPT = getImageAnalysisSystemPrompt()
 
 export const IMAGE_ANALYSIS_USER_PROMPT = 'Analyze this image and extract all details as instructed.'
 

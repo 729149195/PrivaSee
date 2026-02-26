@@ -164,6 +164,8 @@ export const createMemoryStreamSlice = (set, get) => {
 
   // 记忆流后端可用性（null=未检测, true=可用, false=不可用）
   memoryApiAvailable: null,
+  // 记忆流数据版本号（任意写入/删除后自增，供界面联动刷新）
+  memoryDataVersion: 0,
 
   // 主动刷新可用性检测（重置后下次调用时重新探测）
   resetMemoryApiAvailability() {
@@ -256,8 +258,27 @@ export const createMemoryStreamSlice = (set, get) => {
         _ingestedRunIds.add(runId)
         _runIdSessionMap.set(runId, sessionId)
       })
-      
-      set({ memoryStreamLastIngest: result })
+      set(s => {
+        const nextTotal = Number.isFinite(Number(result?.total_in_store))
+          ? Number(result.total_in_store)
+          : null
+        return {
+          memoryStreamLastIngest: result,
+          // 写入后触发依赖缓存失效，避免 Map/Trace 继续显示旧数据
+          memoryVisualizationData: null,
+          memoryRetrievedInfons: [],
+          memoryTriggerResult: null,
+          memoryBacktraceCache: {},
+          memoryDataVersion: (s.memoryDataVersion || 0) + 1,
+          memoryStreamStatus: s.memoryStreamStatus
+            ? {
+              ...s.memoryStreamStatus,
+              ...(nextTotal === null ? {} : { total_infons: nextTotal, index_size: nextTotal }),
+            }
+            : s.memoryStreamStatus,
+        }
+      })
+      try { await get().fetchMemoryStreamStatus?.() } catch (_) {}
       
       // 将关联信息回写到 infon 对象 (更新前端状态)
       if (result.ingested && result.ingested.length > 0) {
@@ -371,6 +392,27 @@ export const createMemoryStreamSlice = (set, get) => {
         _ingestingRunIds.delete(runId)
         _runIdSessionMap.delete(runId)
       })
+      set(s => {
+        const nextTotal = Number.isFinite(Number(result?.total_in_store))
+          ? Number(result.total_in_store)
+          : null
+        return {
+          // 删除后清空依赖缓存，防止其它面板继续显示已删除信息元
+          memoryVisualizationData: null,
+          memoryRetrievedInfons: [],
+          memoryTriggerResult: null,
+          memoryBacktraceCache: {},
+          memoryStreamLastIngest: null,
+          memoryDataVersion: (s.memoryDataVersion || 0) + 1,
+          memoryStreamStatus: s.memoryStreamStatus
+            ? {
+              ...s.memoryStreamStatus,
+              ...(nextTotal === null ? {} : { total_infons: nextTotal, index_size: nextTotal }),
+            }
+            : s.memoryStreamStatus,
+        }
+      })
+      try { await get().fetchMemoryStreamStatus?.() } catch (_) {}
       return result
     } catch (_) {
       return null
@@ -404,6 +446,26 @@ export const createMemoryStreamSlice = (set, get) => {
           _ingestingRunIds.delete(runId)
         }
       }
+      set(s => {
+        const nextTotal = Number.isFinite(Number(result?.total_in_store))
+          ? Number(result.total_in_store)
+          : null
+        return {
+          memoryVisualizationData: null,
+          memoryRetrievedInfons: [],
+          memoryTriggerResult: null,
+          memoryBacktraceCache: {},
+          memoryStreamLastIngest: null,
+          memoryDataVersion: (s.memoryDataVersion || 0) + 1,
+          memoryStreamStatus: s.memoryStreamStatus
+            ? {
+              ...s.memoryStreamStatus,
+              ...(nextTotal === null ? {} : { total_infons: nextTotal, index_size: nextTotal }),
+            }
+            : s.memoryStreamStatus,
+        }
+      })
+      try { await get().fetchMemoryStreamStatus?.() } catch (_) {}
       return result
     } catch (_) {
       return null
@@ -696,6 +758,7 @@ export const createMemoryStreamSlice = (set, get) => {
         memoryAssociationEvents: [],
         memoryStreamStatus: null,
         memoryVisualizationData: null,
+        memoryDataVersion: (get().memoryDataVersion || 0) + 1,
       })
       
       console.log('[MemoryStream] 所有数据已清空')

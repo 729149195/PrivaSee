@@ -4,6 +4,22 @@ import {
   mergeRisks, cleanAndParseBuffer, parseSSELine
 } from './privacyHelpers'
 
+function _buildPrivacyInfonDebugRows(list = [], sourceLabel = '') {
+  return (Array.isArray(list) ? list : []).map((inf, idx) => ({
+    idx,
+    source: sourceLabel,
+    iid: inf?.iid || '',
+    infon_type: inf?.infon_type || '',
+    entity: inf?.entity || '',
+    attribute: inf?.attribute || '',
+    temporal: inf?.temporal || '',
+    spatial: inf?.spatial || '',
+    relation_name: inf?.relation_name || '',
+    arg_refs: Array.isArray(inf?.arg_refs) ? inf.arg_refs.join(', ') : '',
+    retrieval_similarity: inf?.retrieval_similarity ?? '',
+  }))
+}
+
 export const createPrivacySlice = (set, get) => ({
   privacyInferences: {},
   privacyParsers: {},
@@ -43,6 +59,38 @@ export const createPrivacySlice = (set, get) => ({
       } catch (_) {}
       
       const infons = memoryInfons.length > 0 ? [...memoryInfons, ...allInfons] : allInfons
+      // 调试输出：每次隐私风险分析都打印参与推理的信息元（当前 + 回溯插入 + 最终输入）
+      try {
+        const currentRows = _buildPrivacyInfonDebugRows(allInfons, 'current')
+        const memoryRows = _buildPrivacyInfonDebugRows(memoryInfons, 'memory_retrieved')
+        const finalRows = [
+          ...memoryRows,
+          ...currentRows,
+        ].map((row, idx) => ({ ...row, final_order: idx }))
+        console.groupCollapsed(
+          `[PrivacyInference] session=${session.id} current=${allInfons.length} memory=${memoryInfons.length} total=${infons.length}`
+        )
+        if (currentRows.length > 0) {
+          console.log('[PrivacyInference] current infons')
+          console.table(currentRows)
+        } else {
+          console.log('[PrivacyInference] current infons: (empty)')
+        }
+        if (memoryRows.length > 0) {
+          console.log('[PrivacyInference] memory retrieved infons')
+          console.table(memoryRows)
+        } else {
+          console.log('[PrivacyInference] memory retrieved infons: (empty)')
+        }
+        if (finalRows.length > 0) {
+          console.log('[PrivacyInference] final infons for analysis (input order)')
+          console.table(finalRows)
+        } else {
+          console.log('[PrivacyInference] final infons for analysis: (empty)')
+        }
+        console.log('[PrivacyInference] final infon payload', infons)
+        console.groupEnd()
+      } catch (_) {}
       const model = get().infonPrivacyInferenceModel || 'deepseek-chat'
       const think = !!get().infonPrivacyInferenceThinkMode
       const provider = get().customProviders?.[model]
