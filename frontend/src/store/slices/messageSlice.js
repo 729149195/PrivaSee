@@ -101,6 +101,7 @@ export const createMessageSlice = (set, get) => ({
     ;(async () => {
       try {
         const { baseUrl, headers, maxTokens } = getModelApiConfig(get, get().model)
+        const think = !!get().conversationThinkMode
         const res = await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
           headers: { ...headers, 'Connection': 'keep-alive' },
@@ -110,7 +111,8 @@ export const createMessageSlice = (set, get) => ({
             temperature: 0.7,
             stream: true,
             max_tokens: maxTokens,
-            top_p: 0.9
+            top_p: 0.9,
+            think,
           }),
           signal: controller.signal,
           keepalive: true
@@ -229,10 +231,11 @@ export const createMessageSlice = (set, get) => ({
           const isVL = modelName.includes('vl') && !isOmni
           const useStreaming = !(hasImages && isVL)
           const maxTokens = isOmni ? 2000 : 4096
+          const think = !!get().conversationThinkMode
 
           const requestBody = (hasImages && isVL)
-            ? { model: currentModel, messages: payloadMessages, temperature: 0.3, max_tokens: 2000 }
-            : { model: currentModel, messages: payloadMessages, temperature: 0.7, stream: true, max_tokens: maxTokens, top_p: 0.9 }
+            ? { model: currentModel, messages: payloadMessages, temperature: 0.3, max_tokens: 2000, think }
+            : { model: currentModel, messages: payloadMessages, temperature: 0.7, stream: true, max_tokens: maxTokens, top_p: 0.9, think }
 
           const res = await fetch(`${baseUrl}/chat/completions`, {
             method: 'POST',
@@ -278,6 +281,7 @@ export const createMessageSlice = (set, get) => ({
     const sessionMsgs = get().getCurrentSession().messages
     const history = buildOllamaHistory(sessionMsgs, assistantMsgId)
     const apiBase = (get().baseUrl || '').replace(/\/?v1\/?$/, '/api')
+    const ollamaThink = !!get().conversationThinkMode
 
     ;(async () => {
       try {
@@ -288,6 +292,7 @@ export const createMessageSlice = (set, get) => ({
             model: currentModel,
             messages: history,
             stream: true,
+            think: ollamaThink,
             options: { temperature: 0.2 }
           }),
           signal: controller.signal,

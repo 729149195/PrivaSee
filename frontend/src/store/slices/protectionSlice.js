@@ -36,6 +36,7 @@ export const createProtectionSlice = (set, get) => ({
     let parseTimer = null
     try {
       const model = get().protectionSuggestionModel || 'deepseek-chat'
+      const think = !!get().protectionSuggestionThinkMode
       const provider = get().customProviders?.[model]
       const apiUrl = provider ? provider.baseUrl : get().baseUrl
       const apiKey = provider?.apiKey || ''
@@ -48,7 +49,7 @@ export const createProtectionSlice = (set, get) => ({
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}) },
-        body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: true, temperature: 0.7, max_tokens: maxTokens }),
+        body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: true, temperature: 0.7, max_tokens: maxTokens, think }),
         signal: abortController.signal
       })
       if (!response.ok) throw new Error(`API error: ${response.status}`)

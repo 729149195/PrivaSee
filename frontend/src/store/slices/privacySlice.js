@@ -44,6 +44,7 @@ export const createPrivacySlice = (set, get) => ({
       
       const infons = memoryInfons.length > 0 ? [...memoryInfons, ...allInfons] : allInfons
       const model = get().infonPrivacyInferenceModel || 'deepseek-chat'
+      const think = !!get().infonPrivacyInferenceThinkMode
       const provider = get().customProviders?.[model]
       const apiUrl = provider ? provider.baseUrl : get().baseUrl
       const apiKey = provider?.apiKey || ''
@@ -65,7 +66,7 @@ export const createPrivacySlice = (set, get) => ({
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Connection': 'keep-alive', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}) },
-        body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: true, temperature: 0.5, max_tokens: maxTokens, top_p: 0.9 }),
+        body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: true, temperature: 0.5, max_tokens: maxTokens, top_p: 0.9, think }),
         signal: abortController.signal, keepalive: true
       })
       if (!response.ok) throw new Error(`API error: ${response.status}`)

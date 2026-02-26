@@ -244,6 +244,14 @@ export function useMessageHandlers(
     // 清理被删除消息的信息元和所有即将过期的信息元
     const currentInfonSession = infonSessions?.[session.id]
     if (currentInfonSession?.runs) {
+      const removedRunIds = currentInfonSession.runs
+        .filter(run => {
+          if (run.targetType === 'message' && deletedMessageIds.has(run.targetKey)) return true
+          if (run.expiring) return true
+          return false
+        })
+        .map(run => run.id)
+        .filter(Boolean)
       const filteredRuns = currentInfonSession.runs.filter(run => {
         // 删除属于被删除消息的 runs
         if (run.targetType === 'message' && deletedMessageIds.has(run.targetKey)) {
@@ -262,6 +270,11 @@ export function useMessageHandlers(
           [session.id]: { ...currentInfonSession, runs: filteredRuns }
         }
       })
+      if (removedRunIds.length > 0) {
+        try {
+          await useStore.getState().removeMemoryInfonsByRunIds?.(session.id, removedRunIds)
+        } catch (_) {}
+      }
       
       console.log('[SaveEdit] 删除被删除消息的信息元和即将过期的信息元')
     }

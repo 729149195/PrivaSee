@@ -15,13 +15,21 @@ const ModelConfigPanel = ({ visible, onClose }) => {
     models,
     customProviders,
     infonExtractionModel,
+    infonExtractionThinkMode,
     infonPrivacyInferenceModel,
+    infonPrivacyInferenceThinkMode,
     imageParsingModel,
+    imageParsingThinkMode,
     protectionSuggestionModel,
+    protectionSuggestionThinkMode,
     setInfonExtractionModel,
+    setInfonExtractionThinkMode,
     setInfonPrivacyInferenceModel,
+    setInfonPrivacyInferenceThinkMode,
     setImageParsingModel,
+    setImageParsingThinkMode,
     setProtectionSuggestionModel,
+    setProtectionSuggestionThinkMode,
     resetToDefaultModels,
     removeApiModel,
     addApiModel,
@@ -111,9 +119,13 @@ const ModelConfigPanel = ({ visible, onClose }) => {
         selectedLawIdx: selectedLawIdx || 0,
         selectedPrivacyItems: selectedPrivacyItems || [],
         infonExtractionModel,
+        infonExtractionThinkMode,
         infonPrivacyInferenceModel,
+        infonPrivacyInferenceThinkMode,
         imageParsingModel,
+        imageParsingThinkMode,
         protectionSuggestionModel,
+        protectionSuggestionThinkMode,
       }
       
       const dataStr = JSON.stringify(exportData, null, 2)
@@ -166,9 +178,13 @@ const ModelConfigPanel = ({ visible, onClose }) => {
                 selectedPrivacyItems: importedData.selectedPrivacyItems || [],
                 currentSessionId: importedData.sessions?.[0]?.id || null,
                 infonExtractionModel: importedData.infonExtractionModel || 'deepseek-chat',
+                infonExtractionThinkMode: importedData.infonExtractionThinkMode ?? false,
                 infonPrivacyInferenceModel: importedData.infonPrivacyInferenceModel || 'deepseek-chat',
+                infonPrivacyInferenceThinkMode: importedData.infonPrivacyInferenceThinkMode ?? false,
                 imageParsingModel: importedData.imageParsingModel || 'gemma3:12b',
+                imageParsingThinkMode: importedData.imageParsingThinkMode ?? false,
                 protectionSuggestionModel: importedData.protectionSuggestionModel || 'deepseek-chat',
+                protectionSuggestionThinkMode: importedData.protectionSuggestionThinkMode ?? false,
               })
               
               message.success('数据导入成功')
@@ -314,6 +330,17 @@ const ModelConfigPanel = ({ visible, onClose }) => {
                 onChange={setInfonExtractionModel}
                 options={allModels.map(renderModelOption)}
               />
+              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>
+                  开启思考模式 (Think)
+                </div>
+                <Switch
+                  size="small"
+                  checked={!!infonExtractionThinkMode}
+                  onChange={setInfonExtractionThinkMode}
+                  disabled={!supportsChainOfThought(infonExtractionModel, customProviders)}
+                />
+              </div>
             </div>
             <div>
               <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
@@ -325,6 +352,17 @@ const ModelConfigPanel = ({ visible, onClose }) => {
                 onChange={setInfonPrivacyInferenceModel}
                 options={allModels.map(renderModelOption)}
               />
+              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>
+                  开启思考模式 (Think)
+                </div>
+                <Switch
+                  size="small"
+                  checked={!!infonPrivacyInferenceThinkMode}
+                  onChange={setInfonPrivacyInferenceThinkMode}
+                  disabled={!supportsChainOfThought(infonPrivacyInferenceModel, customProviders)}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -347,6 +385,17 @@ const ModelConfigPanel = ({ visible, onClose }) => {
                 onChange={setImageParsingModel}
                 options={allModels.map(renderModelOption)}
               />
+              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>
+                  开启思考模式 (Think)
+                </div>
+                <Switch
+                  size="small"
+                  checked={!!imageParsingThinkMode}
+                  onChange={setImageParsingThinkMode}
+                  disabled={!supportsChainOfThought(imageParsingModel, customProviders)}
+                />
+              </div>
             </div>
             <div>
               <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
@@ -360,6 +409,17 @@ const ModelConfigPanel = ({ visible, onClose }) => {
                 placeholder={allModels.length === 0 ? '没有可用的模型' : '选择模型'}
                 disabled={allModels.length === 0}
               />
+              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>
+                  开启思考模式 (Think)
+                </div>
+                <Switch
+                  size="small"
+                  checked={!!protectionSuggestionThinkMode}
+                  onChange={setProtectionSuggestionThinkMode}
+                  disabled={!supportsChainOfThought(protectionSuggestionModel, customProviders)}
+                />
+              </div>
               {allModels.length === 0 && (
                 <div style={{ fontSize: 11, color: '#ef4444', marginTop: 4 }}>
                   请至少添加一个模型以使用隐私保护建议功能

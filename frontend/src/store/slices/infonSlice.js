@@ -74,7 +74,7 @@ export const createInfonSlice = (set, get) => ({
     return cleaned
   },
 
-  clearAllPendingInfons() {
+  async clearAllPendingInfons() {
     get()._ensureCurrentSession()
     const session = get().getCurrentSession()
     if (!session) return
@@ -83,7 +83,7 @@ export const createInfonSlice = (set, get) => ({
       const pendingRunIds = runs.filter(r => r.targetType === 'pending').map(r => r.id).filter(Boolean)
       runs.forEach(r => { if (r.targetType === 'pending' && r.status === 'running') try { r.controller?.abort?.() } catch (_) {} })
       if (pendingRunIds.length > 0) {
-        get().removeMemoryInfonsByRunIds?.(session.id, pendingRunIds, 'pending')
+        await get().removeMemoryInfonsByRunIds?.(session.id, pendingRunIds, 'pending')
       }
     } catch (_) {}
     set(s => {
@@ -135,7 +135,7 @@ export const createInfonSlice = (set, get) => ({
   startMessageInfons(messageId) { get().triggerInfonsForMessage(messageId) },
 
   // 启动 pending 信息元提取（用户输入时）
-  startPendingInfons(text, images = [], audios = []) {
+  async startPendingInfons(text, images = [], audios = []) {
     const session = get().getCurrentSession()
     if (!session) return
 
@@ -144,7 +144,8 @@ export const createInfonSlice = (set, get) => ({
     // 文本处理：计算 hash 判断是否需要重新提取
     const textHash = text?.trim() ? computeHashId(text.trim()) : null
     const lastTextHash = get().lastPendingTextHash
-    if (textHash && textHash !== lastTextHash) {
+    const textChanged = textHash !== lastTextHash
+    if (textChanged) {
       const removedPendingTextRunIds = runs
         .filter(r => r.targetType === 'pending' && r.modality === 'text')
         .map(r => r.id)
@@ -161,9 +162,12 @@ export const createInfonSlice = (set, get) => ({
         }
       })
       if (removedPendingTextRunIds.length > 0) {
-        get().removeMemoryInfonsByRunIds?.(session.id, removedPendingTextRunIds, 'pending')
+        await get().removeMemoryInfonsByRunIds?.(session.id, removedPendingTextRunIds, 'pending')
       }
-      get()._startTextInfonRun({ targetType: 'pending', targetKey: 'pending', text: text.trim() })
+      // 文本被清空时仅清理旧 pending，不再触发新提取
+      if (textHash) {
+        get()._startTextInfonRun({ targetType: 'pending', targetKey: 'pending', text: text.trim() })
+      }
     }
 
     // 图片处理：检查新增图片
@@ -188,11 +192,12 @@ export const createInfonSlice = (set, get) => ({
         return { infonSessions: { ...s.infonSessions, [session.id]: { runs: box.runs.filter(r => !(r.targetType === 'pending' && r.modality === 'image' && removedImages.includes(r._hash))) } } }
       })
       if (removedPendingImageRunIds.length > 0) {
-        get().removeMemoryInfonsByRunIds?.(session.id, removedPendingImageRunIds, 'pending')
+        await get().removeMemoryInfonsByRunIds?.(session.id, removedPendingImageRunIds, 'pending')
       }
     }
+    // 无论是否有新增，都更新快照，避免后续 diff 基于过期哈希
+    set({ lastPendingImageHashes: imageHashes })
     if (newImages.length > 0) {
-      set({ lastPendingImageHashes: imageHashes })
       images.forEach((img, idx) => {
         const url = typeof img === 'string' ? img : img.url
         const hash = computeHashId(url)
@@ -238,6 +243,7 @@ export const createInfonSlice = (set, get) => ({
     get()._appendInfonRun(session.id, run)
 
     const configuredModel = get().infonExtractionModel || 'deepseek-chat'
+    const think = !!get().infonExtractionThinkMode
     const { provider, baseUrl, headers, maxTokens } = getModelApiConfig(get, configuredModel)
     const nowISO = new Date().toISOString()
     const systemPrompt = buildInfonSystemPrompt(['text'], nowISO, { currentRound, existingInfons })
@@ -256,7 +262,7 @@ export const createInfonSlice = (set, get) => ({
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: { ...headers, 'Connection': 'keep-alive' },
-        body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true, max_tokens: maxTokens, top_p: 0.95 }),
+        body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true, max_tokens: maxTokens, top_p: 0.95, think }),
         signal: controller.signal, keepalive: true
       })
       clearTimeout(timeoutId)
@@ -366,6 +372,7 @@ export const createInfonSlice = (set, get) => ({
     get()._appendInfonRun(session.id, run)
 
     const configuredModel = get().imageParsingModel || 'gemma3:12b'
+    const think = !!get().imageParsingThinkMode
     const customProviders = get().customProviders
     
     if (!getModelModalities(configuredModel, customProviders).image) {
@@ -392,7 +399,7 @@ export const createInfonSlice = (set, get) => ({
         res = await fetch(`${provider.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(provider.apiKey ? { 'Authorization': `Bearer ${provider.apiKey}` } : {}), 'Connection': 'keep-alive' },
-          body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true, max_tokens: isOmni ? 2000 : 4096, top_p: 0.95 }),
+          body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true, max_tokens: isOmni ? 2000 : 4096, top_p: 0.95, think }),
           signal: controller.signal, keepalive: true
         })
       } else {
@@ -409,7 +416,7 @@ export const createInfonSlice = (set, get) => ({
         res = await fetch(`${ollamaBaseUrl}/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Connection': 'keep-alive' },
-          body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true, max_tokens: 4096, top_p: 0.95 }),
+          body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true, max_tokens: 4096, top_p: 0.95, think }),
           signal: controller.signal, keepalive: true
         })
       }
@@ -550,6 +557,7 @@ export const createInfonSlice = (set, get) => ({
     get()._appendInfonRun(session.id, run)
 
     const configuredModel = get().infonExtractionModel || 'deepseek-chat'
+    const think = !!get().infonExtractionThinkMode
     const { baseUrl, headers, maxTokens } = getModelApiConfig(get, configuredModel)
     const nowISO = new Date().toISOString()
     const systemPrompt = buildInfonSystemPrompt(['audio'], nowISO, { currentRound, existingInfons })
@@ -566,7 +574,7 @@ export const createInfonSlice = (set, get) => ({
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: { ...headers, 'Connection': 'keep-alive' },
-        body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true, max_tokens: maxTokens, top_p: 0.95 }),
+        body: JSON.stringify({ model: configuredModel, messages, temperature: 0, stream: true, max_tokens: maxTokens, top_p: 0.95, think }),
         signal: controller.signal, keepalive: true
       })
       clearTimeout(timeoutId)

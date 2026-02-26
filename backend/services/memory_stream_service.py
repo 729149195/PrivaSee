@@ -556,6 +556,8 @@ class HNSWIndex:
         """从存储中重建索引"""
         iids, vectors = store.get_all_vectors()
         if len(iids) == 0:
+            # 存储为空时也必须重置内存索引状态，否则 current_count 会残留旧值
+            self.clear()
             logger.info("存储为空，无需重建索引")
             return
 
@@ -810,8 +812,9 @@ class MemoryStreamManager:
                             session_id: str, round_num: int,
                             reserved_iids: set) -> str:
         """
-        为写入库生成唯一 iid。
-        强制带作用域后缀：user/session/round，避免跨窗口与跨轮次混淆。
+        为写入库生成稳定 iid（带 user/session/round 作用域）。
+        注意：对于历史库中已存在的 iid，这里不再自动改名，交由插入阶段按 duplicate 跳过，
+        以保证重复请求具备幂等性，不会被写成新的后缀记录。
         """
         base = str(source_iid or '').strip() or f"desc:r{round_num}_auto"
         safe_user = _sanitize_iid_component(self.user_id, 'user')
@@ -819,17 +822,15 @@ class MemoryStreamManager:
         safe_session = _sanitize_iid_component(session_id, 'session')
         suffix_seed = f"u{safe_user}_s{safe_session}_r{int(round_num)}_{safe_modality}"
         scoped_base = f"{base}__{suffix_seed}"
-
-        # 优先使用稳定作用域 IID，便于排查与回溯
-        if scoped_base not in reserved_iids and not self.store.exists_iid(scoped_base):
+        if scoped_base not in reserved_iids:
             reserved_iids.add(scoped_base)
             return scoped_base
 
-        # 同一作用域下再次冲突时再追加序号
+        # 仅处理“同一次 ingest 请求内部”的重名冲突（历史冲突不在这里改名）
         idx = 1
         while True:
             candidate = f"{scoped_base}_{idx}"
-            if candidate not in reserved_iids and not self.store.exists_iid(candidate):
+            if candidate not in reserved_iids:
                 reserved_iids.add(candidate)
                 return candidate
             idx += 1

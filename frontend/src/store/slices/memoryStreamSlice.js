@@ -13,7 +13,12 @@
 // 后端 Memory Stream 服务基础 URL
 // 使用 Vite 代理路径: /memory-api -> http://127.0.0.1:5000/api/memory
 // 与 OCR (/ocr-api) 和 Whisper (/whisper-api) 保持一致的代理模式
-const MEMORY_API_BASE = import.meta.env.VITE_MEMORY_URL || '/memory-api'
+// 约定：
+// - 开发环境使用 Vite 代理别名 /memory-api -> /api/memory
+// - 生产环境默认直连同源后端 /api/memory
+// - 如有独立后端域名，可通过 VITE_MEMORY_URL 覆盖
+const MEMORY_API_BASE =
+  import.meta.env.VITE_MEMORY_URL || (import.meta.env.DEV ? '/memory-api' : '/api/memory')
 
 // 匿名临时 ID：仅存在于内存中，刷新浏览器即消失
 // 未登录用户的记忆流功能照常工作，但数据不会跨页面会话保留
@@ -67,6 +72,77 @@ function _scopeInfonsForSession(infons, userId, sessionId, roundNum) {
   })
 }
 
+// 记忆流后端可用性标志（模块级单例，避免多次重复尝试）
+// null = 未检测, true = 可用, false = 不可用
+let _memoryApiAvailable = null
+let _memoryUnavailableWarnedOnce = false
+let _memoryApiUnavailableReason = ''
+// 防重：同一个 infon run 只允许成功写入一次
+const _ingestedRunIds = new Set()
+const _ingestingRunIds = new Set()
+const _runIdSessionMap = new Map() // runId -> sessionId
+
+function _markMemoryApiUnavailable(reason = '') {
+  _memoryApiAvailable = false
+  _memoryApiUnavailableReason = reason || _memoryApiUnavailableReason
+  if (!_memoryUnavailableWarnedOnce) {
+    _memoryUnavailableWarnedOnce = true
+    const suffix = _memoryApiUnavailableReason ? `，原因: ${_memoryApiUnavailableReason}` : ''
+    console.warn(`[MemoryStream] 记忆流后端不可用，已跳过所有记忆 API 请求${suffix}。`)
+  }
+}
+
+function _extractRunIds(infons = []) {
+  const set = new Set()
+  infons.forEach(inf => {
+    const runId = String(inf?._memory_run_id || '').trim()
+    if (runId) set.add(runId)
+  })
+  return [...set]
+}
+
+/**
+ * 在发出请求前检查后端可用性。
+ * 首次使用时发送 health 探测；此后缓存结果，不可用时直接跳过请求。
+ * @returns {Promise<boolean>}
+ */
+async function _ensureMemoryApi() {
+  if (_memoryApiAvailable === true) return true
+  if (_memoryApiAvailable === false) {
+    _markMemoryApiUnavailable(_memoryApiUnavailableReason || '已缓存不可用状态')
+    return false
+  }
+  // null → 首次探测
+  try {
+    const res = await fetch(`${MEMORY_API_BASE}/health`, { signal: AbortSignal.timeout(3000) })
+    if (!res.ok) {
+      _markMemoryApiUnavailable(`health 状态码 ${res.status}`)
+      return false
+    }
+    // 某些环境会把未知路径 fallback 到 index.html (200)，这里校验响应格式避免误判可用
+    const contentType = (res.headers.get('content-type') || '').toLowerCase()
+    if (!contentType.includes('application/json')) {
+      _markMemoryApiUnavailable('health 返回非 JSON 响应')
+      return false
+    }
+    const payload = await res.json().catch(() => null)
+    const looksLikeMemoryHealth = !!(
+      payload &&
+      typeof payload === 'object' &&
+      ('status' in payload || 'total_infons' in payload || 'index_size' in payload)
+    )
+    if (!looksLikeMemoryHealth) {
+      _markMemoryApiUnavailable('health 返回内容不符合 memory 服务格式')
+      return false
+    }
+    _memoryApiAvailable = true
+    _memoryApiUnavailableReason = ''
+  } catch (_) {
+    _markMemoryApiUnavailable('health 请求失败')
+  }
+  return _memoryApiAvailable
+}
+
 export const createMemoryStreamSlice = (set, get) => {
   const pushAssociationEvent = (event) => {
     const now = Date.now()
@@ -85,6 +161,17 @@ export const createMemoryStreamSlice = (set, get) => {
 
   return ({
   // ==================== 状态 ====================
+
+  // 记忆流后端可用性（null=未检测, true=可用, false=不可用）
+  memoryApiAvailable: null,
+
+  // 主动刷新可用性检测（重置后下次调用时重新探测）
+  resetMemoryApiAvailability() {
+    _memoryApiAvailable = null
+    _memoryUnavailableWarnedOnce = false
+    _memoryApiUnavailableReason = ''
+    set({ memoryApiAvailable: null })
+  },
   
   // 记忆流健康/统计状态
   memoryStreamStatus: null,  // { status, total_infons, index_size, embedding_dim }
@@ -128,10 +215,24 @@ export const createMemoryStreamSlice = (set, get) => {
 
   async ingestInfonsToMemory(infons, sessionId, roundNum) {
     if (!Array.isArray(infons) || infons.length === 0) return
-    
+    if (!(await _ensureMemoryApi())) return
+    const runIds = _extractRunIds(infons)
+    const eligibleRunIds = runIds.filter(runId => !_ingestedRunIds.has(runId) && !_ingestingRunIds.has(runId))
+    if (runIds.length > 0 && eligibleRunIds.length === 0) {
+      console.log('[MemoryStream] 跳过重复写入: run 已入库或正在入库', runIds)
+      return
+    }
+    const filteredInfons = runIds.length > 0
+      ? infons.filter(inf => {
+        const runId = String(inf?._memory_run_id || '').trim()
+        return !runId || eligibleRunIds.includes(runId)
+      })
+      : infons
+    if (filteredInfons.length === 0) return
+    eligibleRunIds.forEach(runId => _ingestingRunIds.add(runId))
     try {
       const userId = get()._getMemoryUserId()
-      const scopedInfons = _scopeInfonsForSession(infons, userId, sessionId, roundNum)
+      const scopedInfons = _scopeInfonsForSession(filteredInfons, userId, sessionId, roundNum)
       const response = await fetch(`${MEMORY_API_BASE}/ingest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -150,6 +251,11 @@ export const createMemoryStreamSlice = (set, get) => {
       }
       
       const result = await response.json()
+      eligibleRunIds.forEach(runId => {
+        _ingestingRunIds.delete(runId)
+        _ingestedRunIds.add(runId)
+        _runIdSessionMap.set(runId, sessionId)
+      })
       
       set({ memoryStreamLastIngest: result })
       
@@ -233,6 +339,7 @@ export const createMemoryStreamSlice = (set, get) => {
       
       console.log(`[MemoryStream] 写入完成: ${result.ingested_count} 条, 跳过 ${result.skipped_count} 条`)
     } catch (err) {
+      eligibleRunIds.forEach(runId => _ingestingRunIds.delete(runId))
       console.warn('[MemoryStream] 写入请求异常:', err.message)
     }
   },
@@ -242,6 +349,7 @@ export const createMemoryStreamSlice = (set, get) => {
    */
   async removeMemoryInfonsByRunIds(sessionId, runIds = [], targetType = 'pending') {
     if (!sessionId || !Array.isArray(runIds) || runIds.length === 0) return null
+    if (!(await _ensureMemoryApi())) return null
     try {
       const response = await fetch(`${MEMORY_API_BASE}/remove`, {
         method: 'POST',
@@ -253,8 +361,17 @@ export const createMemoryStreamSlice = (set, get) => {
           run_ids: runIds,
         }),
       })
-      if (!response.ok) return null
-      return await response.json()
+      if (!response.ok) {
+        if (response.status === 404) _markMemoryApiUnavailable('remove 端点不可达(404)')
+        return null
+      }
+      const result = await response.json()
+      runIds.forEach(runId => {
+        _ingestedRunIds.delete(runId)
+        _ingestingRunIds.delete(runId)
+        _runIdSessionMap.delete(runId)
+      })
+      return result
     } catch (_) {
       return null
     }
@@ -265,6 +382,7 @@ export const createMemoryStreamSlice = (set, get) => {
    */
   async removeMemoryBySession(sessionId) {
     if (!sessionId) return null
+    if (!(await _ensureMemoryApi())) return null
     try {
       const response = await fetch(`${MEMORY_API_BASE}/remove`, {
         method: 'POST',
@@ -274,8 +392,19 @@ export const createMemoryStreamSlice = (set, get) => {
           session_id: sessionId,
         }),
       })
-      if (!response.ok) return null
-      return await response.json()
+      if (!response.ok) {
+        if (response.status === 404) _markMemoryApiUnavailable('remove 端点不可达(404)')
+        return null
+      }
+      const result = await response.json()
+      for (const [runId, mappedSessionId] of _runIdSessionMap.entries()) {
+        if (mappedSessionId === sessionId) {
+          _runIdSessionMap.delete(runId)
+          _ingestedRunIds.delete(runId)
+          _ingestingRunIds.delete(runId)
+        }
+      }
+      return result
     } catch (_) {
       return null
     }
@@ -286,6 +415,7 @@ export const createMemoryStreamSlice = (set, get) => {
    */
   async promotePendingMemoryInfons(sessionId, runIds = [], messageId = '') {
     if (!sessionId || !Array.isArray(runIds) || runIds.length === 0) return null
+    if (!(await _ensureMemoryApi())) return null
     try {
       const response = await fetch(`${MEMORY_API_BASE}/promote-pending`, {
         method: 'POST',
@@ -297,7 +427,10 @@ export const createMemoryStreamSlice = (set, get) => {
           message_id: messageId,
         }),
       })
-      if (!response.ok) return null
+      if (!response.ok) {
+        if (response.status === 404) _markMemoryApiUnavailable('promote-pending 端点不可达(404)')
+        return null
+      }
       return await response.json()
     } catch (_) {
       return null
@@ -318,7 +451,10 @@ export const createMemoryStreamSlice = (set, get) => {
       set({ memoryRetrievedInfons: [], memoryTriggerResult: null })
       return []
     }
-    
+    if (!(await _ensureMemoryApi())) {
+      set({ memoryRetrievedInfons: [], memoryTriggerResult: null })
+      return []
+    }
     try {
       const response = await fetch(`${MEMORY_API_BASE}/trigger-check`, {
         method: 'POST',
@@ -382,6 +518,7 @@ export const createMemoryStreamSlice = (set, get) => {
    * @returns {Array} 搜索结果
    */
   async searchMemoryStream(queryText, k = 5) {
+    if (!(await _ensureMemoryApi())) return []
     try {
       set({ memoryStreamLoading: true, memoryStreamError: null })
       
@@ -538,6 +675,7 @@ export const createMemoryStreamSlice = (set, get) => {
    * 用于测试、调参和保证实验可复现性
    */
   async clearMemoryStream() {
+    if (!(await _ensureMemoryApi())) return false
     try {
       set({ memoryStreamLoading: true, memoryStreamError: null })
       

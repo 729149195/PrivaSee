@@ -2,7 +2,14 @@
 // 为每个登录用户单独保存会话历史和信息元数据
 
 // 保存用户的所有会话数据
-export function saveUserSessions(userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems, conversationModel, infonExtractionModel, infonPrivacyInferenceModel, imageParsingModel, protectionSuggestionModel, autoPrivacyInference, memoryStreamMeta) {
+export function saveUserSessions(
+  userId, sessions, infonSessions, privacyInferences, customPrivacyItems, selectedLawIdx, selectedPrivacyItems,
+  conversationModel, conversationThinkMode, infonExtractionModel, infonExtractionThinkMode,
+  infonPrivacyInferenceModel, infonPrivacyInferenceThinkMode,
+  imageParsingModel, imageParsingThinkMode,
+  protectionSuggestionModel, protectionSuggestionThinkMode,
+  autoPrivacyInference, memoryStreamMeta
+) {
   if (!userId) return
   
   try {
@@ -17,10 +24,15 @@ export function saveUserSessions(userId, sessions, infonSessions, privacyInferen
       selectedPrivacyItems: selectedPrivacyItems || [],
       // 模型配置
       conversationModel: conversationModel || 'deepseek-chat',
+      conversationThinkMode: !!conversationThinkMode,
       infonExtractionModel: infonExtractionModel || 'deepseek-chat',
+      infonExtractionThinkMode: !!infonExtractionThinkMode,
       infonPrivacyInferenceModel: infonPrivacyInferenceModel || 'deepseek-chat',
+      infonPrivacyInferenceThinkMode: !!infonPrivacyInferenceThinkMode,
       imageParsingModel: imageParsingModel || 'gemma3:12b',
+      imageParsingThinkMode: !!imageParsingThinkMode,
       protectionSuggestionModel: protectionSuggestionModel || 'deepseek-chat',
+      protectionSuggestionThinkMode: !!protectionSuggestionThinkMode,
       autoPrivacyInference: autoPrivacyInference ?? true, // 保存自动隐私保护开关
       // 主记忆流元数据 (实际数据存储在后端 SQLite)
       memoryStreamMeta: memoryStreamMeta || null,
@@ -57,10 +69,15 @@ export function loadUserSessions(userId, defaultModelsConfig = {}) {
       selectedPrivacyItems: parsed.selectedPrivacyItems || [],
       // 模型配置
       conversationModel: parsed.conversationModel || defaultModelsConfig.conversationModel || 'deepseek-chat',
+      conversationThinkMode: parsed.conversationThinkMode ?? defaultModelsConfig.conversationThinkMode ?? false,
       infonExtractionModel: parsed.infonExtractionModel || defaultModelsConfig.infonExtractionModel || 'deepseek-chat',
+      infonExtractionThinkMode: parsed.infonExtractionThinkMode ?? defaultModelsConfig.infonExtractionThinkMode ?? false,
       infonPrivacyInferenceModel: parsed.infonPrivacyInferenceModel || defaultModelsConfig.infonPrivacyInferenceModel || 'deepseek-chat',
+      infonPrivacyInferenceThinkMode: parsed.infonPrivacyInferenceThinkMode ?? defaultModelsConfig.infonPrivacyInferenceThinkMode ?? false,
       imageParsingModel: parsed.imageParsingModel || defaultModelsConfig.imageParsingModel || 'gemma3:12b',
+      imageParsingThinkMode: parsed.imageParsingThinkMode ?? defaultModelsConfig.imageParsingThinkMode ?? false,
       protectionSuggestionModel: parsed.protectionSuggestionModel || defaultModelsConfig.protectionSuggestionModel || 'deepseek-chat',
+      protectionSuggestionThinkMode: parsed.protectionSuggestionThinkMode ?? defaultModelsConfig.protectionSuggestionThinkMode ?? false,
       autoPrivacyInference: parsed.autoPrivacyInference ?? true, // 加载自动隐私保护开关
       // 主记忆流元数据
       memoryStreamMeta: parsed.memoryStreamMeta || null,
@@ -142,10 +159,15 @@ export function importUserData(userId, file) {
           data.selectedLawIdx,
           data.selectedPrivacyItems,
           data.conversationModel,
+          data.conversationThinkMode,
           data.infonExtractionModel,
+          data.infonExtractionThinkMode,
           data.infonPrivacyInferenceModel,
+          data.infonPrivacyInferenceThinkMode,
           data.imageParsingModel,
+          data.imageParsingThinkMode,
           data.protectionSuggestionModel,
+          data.protectionSuggestionThinkMode,
           data.autoPrivacyInference,
           data.memoryStreamMeta
         )

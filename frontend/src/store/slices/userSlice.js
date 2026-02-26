@@ -25,9 +25,20 @@ export const createUserSlice = (set, get) => ({
     const { currentUserId } = get()
     if (currentUserId) get()._saveUserHistory(currentUserId)
     const emptySession = createEmptySession()
+    const defaults = getDefaultModelsConfig()
     set({
       currentUserId: null, sessions: [emptySession], currentSessionId: emptySession.id,
-      model: getDefaultModelsConfig().conversationModel, infonSessions: {},
+      model: defaults.conversationModel,
+      conversationThinkMode: defaults.conversationThinkMode,
+      infonExtractionModel: defaults.infonExtractionModel,
+      infonExtractionThinkMode: defaults.infonExtractionThinkMode,
+      infonPrivacyInferenceModel: defaults.infonPrivacyInferenceModel,
+      infonPrivacyInferenceThinkMode: defaults.infonPrivacyInferenceThinkMode,
+      imageParsingModel: defaults.imageParsingModel,
+      imageParsingThinkMode: defaults.imageParsingThinkMode,
+      protectionSuggestionModel: defaults.protectionSuggestionModel,
+      protectionSuggestionThinkMode: defaults.protectionSuggestionThinkMode,
+      infonSessions: {},
       privacyInferences: {},
       // 切换用户时清空记忆流前端状态 (后端数据按用户隔离，不受影响)
       memoryStreamLastIngest: null,
@@ -45,9 +56,20 @@ export const createUserSlice = (set, get) => ({
     try { get().clearMemoryStream?.() } catch (_) {}
     
     const emptySession = createEmptySession()
+    const defaults = getDefaultModelsConfig()
     set({
       sessions: [emptySession], currentSessionId: emptySession.id,
-      model: getDefaultModelsConfig().conversationModel, infonSessions: {},
+      model: defaults.conversationModel,
+      conversationThinkMode: defaults.conversationThinkMode,
+      infonExtractionModel: defaults.infonExtractionModel,
+      infonExtractionThinkMode: defaults.infonExtractionThinkMode,
+      infonPrivacyInferenceModel: defaults.infonPrivacyInferenceModel,
+      infonPrivacyInferenceThinkMode: defaults.infonPrivacyInferenceThinkMode,
+      imageParsingModel: defaults.imageParsingModel,
+      imageParsingThinkMode: defaults.imageParsingThinkMode,
+      protectionSuggestionModel: defaults.protectionSuggestionModel,
+      protectionSuggestionThinkMode: defaults.protectionSuggestionThinkMode,
+      infonSessions: {},
       privacyInferences: {}, protectionSuggestions: {},
       customPrivacyItems: [], selectedPrivacyItems: [],
       // 清空主记忆流前端状态
@@ -74,18 +96,35 @@ export const createUserSlice = (set, get) => ({
           selectedLawIdx: data.selectedLawIdx ?? 0,
           selectedPrivacyItems: data.selectedPrivacyItems || [],
           model: data.conversationModel || getDefaultModelsConfig().conversationModel,
+          conversationThinkMode: data.conversationThinkMode ?? getDefaultModelsConfig().conversationThinkMode,
           infonExtractionModel: data.infonExtractionModel || getDefaultModelsConfig().infonExtractionModel,
+          infonExtractionThinkMode: data.infonExtractionThinkMode ?? getDefaultModelsConfig().infonExtractionThinkMode,
           infonPrivacyInferenceModel: data.infonPrivacyInferenceModel || getDefaultModelsConfig().infonPrivacyInferenceModel,
+          infonPrivacyInferenceThinkMode: data.infonPrivacyInferenceThinkMode ?? getDefaultModelsConfig().infonPrivacyInferenceThinkMode,
           imageParsingModel: data.imageParsingModel || getDefaultModelsConfig().imageParsingModel,
+          imageParsingThinkMode: data.imageParsingThinkMode ?? getDefaultModelsConfig().imageParsingThinkMode,
           protectionSuggestionModel: data.protectionSuggestionModel || getDefaultModelsConfig().protectionSuggestionModel,
+          protectionSuggestionThinkMode: data.protectionSuggestionThinkMode ?? getDefaultModelsConfig().protectionSuggestionThinkMode,
           autoPrivacyInference: data.autoPrivacyInference ?? true
         })
       } else {
         const newSession = createEmptySession()
+        const defaults = getDefaultModelsConfig()
         set({
           sessions: [newSession], currentSessionId: newSession.id,
           infonSessions: {}, privacyInferences: {},
-          customPrivacyItems: [], selectedLawIdx: 0, selectedPrivacyItems: []
+          customPrivacyItems: [], selectedLawIdx: 0, selectedPrivacyItems: [],
+          model: defaults.conversationModel,
+          conversationThinkMode: defaults.conversationThinkMode,
+          infonExtractionModel: defaults.infonExtractionModel,
+          infonExtractionThinkMode: defaults.infonExtractionThinkMode,
+          infonPrivacyInferenceModel: defaults.infonPrivacyInferenceModel,
+          infonPrivacyInferenceThinkMode: defaults.infonPrivacyInferenceThinkMode,
+          imageParsingModel: defaults.imageParsingModel,
+          imageParsingThinkMode: defaults.imageParsingThinkMode,
+          protectionSuggestionModel: defaults.protectionSuggestionModel,
+          protectionSuggestionThinkMode: defaults.protectionSuggestionThinkMode,
+          autoPrivacyInference: true
         })
       }
     } catch (error) {
@@ -116,8 +155,9 @@ export const createUserSlice = (set, get) => ({
       saveUserSessions(
         userId, state.sessions, state.infonSessions, serializableInferences,
         state.customPrivacyItems, state.selectedLawIdx, state.selectedPrivacyItems,
-        state.model, state.infonExtractionModel,
-        state.infonPrivacyInferenceModel, state.imageParsingModel, state.protectionSuggestionModel,
+        state.model, state.conversationThinkMode, state.infonExtractionModel,
+        state.infonExtractionThinkMode, state.infonPrivacyInferenceModel, state.infonPrivacyInferenceThinkMode,
+        state.imageParsingModel, state.imageParsingThinkMode, state.protectionSuggestionModel, state.protectionSuggestionThinkMode,
         state.autoPrivacyInference, memoryStreamMeta
       )
     } catch (error) {

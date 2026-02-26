@@ -44,6 +44,8 @@ export default function AgentPage() {
     model,
     models,
     customProviders,
+    conversationThinkMode,
+    setConversationThinkMode,
     addApiModel,
     sessions,
     currentSessionId,
@@ -809,6 +811,8 @@ export default function AgentPage() {
             addApiModel={addApiModel}
             contextHasImages={contextHasImages}
             selectedImagesCount={selectedImages.length}
+            conversationThinkMode={conversationThinkMode}
+            setConversationThinkMode={setConversationThinkMode}
           />
           <Splitter className={styles.splitterRoot} key={rightPanelVisible ? 'with-panel' : 'no-panel'}>
             <Splitter.Panel style={{ overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>

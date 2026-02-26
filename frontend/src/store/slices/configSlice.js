@@ -7,15 +7,20 @@ export const createConfigSlice = (set, get) => ({
   // 基础配置
   baseUrl: '/v1',
   model: getDefaultModelsConfig().conversationModel,
+  conversationThinkMode: getDefaultModelsConfig().conversationThinkMode,
   models: [...getDefaultApiModelIds()],
   customModels: [...getDefaultApiModelIds()],
   customProviders: getDefaultApiModels(),
   
   // 模型配置
   infonExtractionModel: getDefaultModelsConfig().infonExtractionModel,
+  infonExtractionThinkMode: getDefaultModelsConfig().infonExtractionThinkMode,
   infonPrivacyInferenceModel: getDefaultModelsConfig().infonPrivacyInferenceModel,
+  infonPrivacyInferenceThinkMode: getDefaultModelsConfig().infonPrivacyInferenceThinkMode,
   imageParsingModel: getDefaultModelsConfig().imageParsingModel,
+  imageParsingThinkMode: getDefaultModelsConfig().imageParsingThinkMode,
   protectionSuggestionModel: getDefaultModelsConfig().protectionSuggestionModel,
+  protectionSuggestionThinkMode: getDefaultModelsConfig().protectionSuggestionThinkMode,
   autoPrivacyInference: true,
   
   // OCR 文件对象
@@ -23,23 +28,33 @@ export const createConfigSlice = (set, get) => ({
 
   // Setters
   setInfonExtractionModel: (modelId) => set({ infonExtractionModel: modelId }),
+  setInfonExtractionThinkMode: (enabled) => set({ infonExtractionThinkMode: !!enabled }),
   setInfonPrivacyInferenceModel: (modelId) => set({ infonPrivacyInferenceModel: modelId }),
+  setInfonPrivacyInferenceThinkMode: (enabled) => set({ infonPrivacyInferenceThinkMode: !!enabled }),
   setImageParsingModel: (modelId) => set({ imageParsingModel: modelId }),
+  setImageParsingThinkMode: (enabled) => set({ imageParsingThinkMode: !!enabled }),
   setProtectionSuggestionModel: (modelId) => set({ protectionSuggestionModel: modelId }),
+  setProtectionSuggestionThinkMode: (enabled) => set({ protectionSuggestionThinkMode: !!enabled }),
   
   resetToDefaultModels: () => {
     const d = getDefaultModelsConfig()
     set({
+      conversationThinkMode: d.conversationThinkMode,
       infonExtractionModel: d.infonExtractionModel,
+      infonExtractionThinkMode: d.infonExtractionThinkMode,
       infonPrivacyInferenceModel: d.infonPrivacyInferenceModel,
+      infonPrivacyInferenceThinkMode: d.infonPrivacyInferenceThinkMode,
       imageParsingModel: d.imageParsingModel,
+      imageParsingThinkMode: d.imageParsingThinkMode,
       protectionSuggestionModel: d.protectionSuggestionModel,
+      protectionSuggestionThinkMode: d.protectionSuggestionThinkMode,
     })
   },
   
   setAutoPrivacyInference: (enabled) => set({ autoPrivacyInference: enabled }),
   
   setModel(modelId) { set({ model: modelId }) },
+  setConversationThinkMode: (enabled) => set({ conversationThinkMode: !!enabled }),
 
   async fetchModels() {
     try {
@@ -72,10 +87,15 @@ export const createConfigSlice = (set, get) => ({
         customModels: (s.customModels || []).filter(m => m !== id),
         models: (s.models || []).filter(m => m !== id),
         model: s.model === id ? getDefaultModelsConfig().conversationModel : s.model,
+        conversationThinkMode: s.model === id ? false : s.conversationThinkMode,
         infonExtractionModel: s.infonExtractionModel === id ? 'deepseek-chat' : s.infonExtractionModel,
+        infonExtractionThinkMode: s.infonExtractionModel === id ? false : s.infonExtractionThinkMode,
         infonPrivacyInferenceModel: s.infonPrivacyInferenceModel === id ? 'deepseek-chat' : s.infonPrivacyInferenceModel,
+        infonPrivacyInferenceThinkMode: s.infonPrivacyInferenceModel === id ? false : s.infonPrivacyInferenceThinkMode,
         imageParsingModel: s.imageParsingModel === id ? 'gemma3:12b' : s.imageParsingModel,
+        imageParsingThinkMode: s.imageParsingModel === id ? false : s.imageParsingThinkMode,
         protectionSuggestionModel: s.protectionSuggestionModel === id ? 'deepseek-chat' : s.protectionSuggestionModel,
+        protectionSuggestionThinkMode: s.protectionSuggestionModel === id ? false : s.protectionSuggestionThinkMode,
       }
     })
   },
@@ -84,6 +104,7 @@ export const createConfigSlice = (set, get) => ({
   async analyzeImage(imageDataUrl) {
     try {
       const configuredModel = get().imageParsingModel || 'gemma3:12b'
+      const think = !!get().imageParsingThinkMode
       const provider = get().customProviders?.[configuredModel]
       const apiUrl = provider ? provider.baseUrl : get().baseUrl
       const headers = { 'Content-Type': 'application/json' }
@@ -103,6 +124,7 @@ export const createConfigSlice = (set, get) => ({
           ],
           temperature: 0.3,
           max_tokens: getImageAnalysisMaxTokens(configuredModel),
+          think,
         })
       })
       

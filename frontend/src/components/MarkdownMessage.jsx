@@ -31,83 +31,27 @@ export default function MarkdownMessage({ content = '' }) {
   }, [content])
 
   const components = useMemo(() => ({
-    // 段落渲染：检查是否包含块级元素，避免嵌套错误
-    p({ children, node, ...props }) {
-      // 检查是否为空段落或只包含换行符
-      const isEmptyParagraph = () => {
-        if (!children) return true
-        const childArray = React.Children.toArray(children)
-        if (childArray.length === 0) return true
-        
-        // 检查是否只包含空白字符
-        const textContent = childArray
-          .map(child => typeof child === 'string' ? child : '')
-          .join('')
-          .trim()
-        
-        return textContent === ''
-      }
-      
-      // 如果是空段落，不渲染
-      if (isEmptyParagraph()) {
-        return null
-      }
-      
-      // 递归检查所有子元素，确保没有块级元素
-      const hasBlockChild = (child) => {
-        if (!React.isValidElement(child)) {
-          return false
-        }
-        
-        const type = child.type
-        const className = child.props?.className || ''
-        
-        // 检查是否是块级元素
-        const blockTypes = ['div', 'pre', 'blockquote', 'ul', 'ol', 'table']
-        if (blockTypes.includes(type)) {
-          return true
-        }
-        
-        // 检查是否是代码块
-        if (type === 'code') {
-          if (typeof className === 'string' && className.includes('language-')) {
-            return true
-          }
-        }
-        
-        // 检查自定义类名
-        if (typeof className === 'string' && (
-          className.includes('blockWrap') || 
-          className.includes('tableWrap')
-        )) {
-          return true
-        }
-        
-        // 递归检查子元素
-        if (child.props && child.props.children) {
-          const nestedChildren = React.Children.toArray(child.props.children)
-          return nestedChildren.some(hasBlockChild)
-        }
-        
-        return false
-      }
-      
-      const childArray = React.Children.toArray(children)
-      const hasBlockElement = childArray.some(hasBlockChild)
-      
-      // 如果包含块级元素，使用 div 替代 p
-      if (hasBlockElement) {
-        return <div {...props}>{children}</div>
-      }
-      
+    p({ children, ...props }) {
+      const textContent = React.Children.toArray(children)
+        .map(child => (typeof child === 'string' ? child : ''))
+        .join('')
+        .trim()
+      if (!textContent && React.Children.count(children) === 0) return null
       return <p {...props}>{children}</p>
     },
-    // 代码块渲染：添加标题栏与复制
-    code({ inline, className, children, ...props }) {
-      const match = /language-(\w+)/.exec(className || '')
-      const lang = match ? match[1] : ''
-      
-      // 正确提取文本内容，处理 children 可能是数组或对象的情况
+    // 行内 code 仅保留行内样式；代码块由 pre 统一渲染，避免 DOM 嵌套告警
+    code({ className, children, ...props }) {
+      return <code className={clsx(styles.inlineCode, className)} {...props}>{children}</code>
+    },
+    pre({ children }) {
+      const codeEl = React.Children.toArray(children)[0]
+      if (!React.isValidElement(codeEl)) return <pre>{children}</pre>
+
+      const className = codeEl.props?.className || ''
+      const match = /language-(\w+)/.exec(className)
+      const lang = match ? match[1] : 'text'
+      const codeChildren = codeEl.props?.children
+
       const extractText = (node) => {
         if (typeof node === 'string') return node
         if (typeof node === 'number') return String(node)
@@ -117,9 +61,8 @@ export default function MarkdownMessage({ content = '' }) {
         }
         return ''
       }
-      
-      const codeText = extractText(children) || ''
-      
+
+      const codeText = extractText(codeChildren) || ''
       const handleCopy = async () => {
         try {
           await navigator.clipboard.writeText(codeText)
@@ -127,17 +70,15 @@ export default function MarkdownMessage({ content = '' }) {
           try { copyToClipboard(codeText) } catch (_) {}
         }
       }
-      if (inline) {
-        return <code className={styles.inlineCode} {...props}>{children}</code>
-      }
+
       return (
         <div className={styles.blockWrap}>
           <div className={styles.blockHeader}>
-            <span className={styles.lang}>{lang || 'text'}</span>
+            <span className={styles.lang}>{lang}</span>
             <button className={styles.copyBtn} onClick={handleCopy}>Copy</button>
           </div>
           <pre className={clsx('hljs', styles.pre)}>
-            <code className={className} {...props}>{children}</code>
+            <code className={className}>{codeChildren}</code>
           </pre>
         </div>
       )

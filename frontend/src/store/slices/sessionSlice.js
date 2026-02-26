@@ -4,6 +4,18 @@ import { getDefaultModelsConfig } from '../../config/defaultModelsConfig'
 import { deleteSessionFiles } from '../../utils/fileStorage'
 import { SESSION_TITLE_SYSTEM_PROMPT, buildSessionTitleUserPrompt, cleanGeneratedTitle, generateOcrTitle } from '../../templates/sessionTitle.js'
 
+const shallowEqualMessage = (a, b) => {
+  if (a === b) return true
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
+  const aKeys = Object.keys(a)
+  const bKeys = Object.keys(b)
+  if (aKeys.length !== bKeys.length) return false
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false
+  }
+  return true
+}
+
 export const createSessionSlice = (set, get) => ({
   // 状态
   sessions: [createEmptySession()],
@@ -33,17 +45,19 @@ export const createSessionSlice = (set, get) => ({
 
   switchSession(id) { set({ currentSessionId: id }) },
 
-  deleteSession(id) {
+  async deleteSession(id) {
     // 删除会话时同步清理主记忆库中该会话窗口的全部信息元
-    try { get().removeMemoryBySession?.(id) } catch (_) {}
+    try { await get().removeMemoryBySession?.(id) } catch (_) {}
     set(s => {
       const nextSessions = s.sessions.filter(x => x.id !== id)
+      const nextInfonSessions = { ...(s.infonSessions || {}) }
+      delete nextInfonSessions[id]
       if (nextSessions.length === 0) {
         const newSession = createEmptySession()
-        return { sessions: [newSession], currentSessionId: newSession.id }
+        return { sessions: [newSession], currentSessionId: newSession.id, infonSessions: nextInfonSessions }
       }
       const nextCurrent = s.currentSessionId === id ? nextSessions[0]?.id : s.currentSessionId
-      return { sessions: nextSessions, currentSessionId: nextCurrent }
+      return { sessions: nextSessions, currentSessionId: nextCurrent, infonSessions: nextInfonSessions }
     })
     deleteSessionFiles(id).catch(err => console.error('[deleteSession] 清理失败:', err))
   },
@@ -88,6 +102,7 @@ export const createSessionSlice = (set, get) => ({
     
     try {
       const configuredModel = get().infonExtractionModel || 'deepseek-chat'
+      const think = !!get().infonExtractionThinkMode
       const provider = get().customProviders?.[configuredModel]
       const apiUrl = provider ? provider.baseUrl : get().baseUrl
       const headers = { 'Content-Type': 'application/json' }
@@ -103,7 +118,8 @@ export const createSessionSlice = (set, get) => ({
             { role: 'user', content: buildSessionTitleUserPrompt(content.slice(0, 500)) }
           ],
           temperature: 0.7,
-          max_tokens: 20
+          max_tokens: 20,
+          think
         })
       })
       
@@ -123,12 +139,33 @@ export const createSessionSlice = (set, get) => ({
   },
 
   _updateMessage(sessionId, messageId, updater) {
-    set(s => ({
-      sessions: s.sessions.map(x => {
+    set(s => {
+      let sessionChanged = false
+      let changedMessage = false
+
+      const nextSessions = s.sessions.map(x => {
         if (x.id !== sessionId) return x
-        return { ...x, messages: x.messages.map(m => m.id === messageId ? updater(m) : m), updatedAt: Date.now() }
+
+        let nextMessages = x.messages
+        nextMessages = x.messages.map(m => {
+          if (m.id !== messageId) return m
+          const updated = updater(m)
+          if (updated === m || shallowEqualMessage(updated, m)) return m
+          changedMessage = true
+          return updated
+        })
+
+        if (!changedMessage) return x
+        sessionChanged = true
+
+        // 流式过程中不更新 updatedAt，否则 currentSession 引用每帧变化会触发 effect 循环
+        const isStreaming = nextMessages.some(m => m.streaming)
+        return { ...x, messages: nextMessages, ...(isStreaming ? {} : { updatedAt: Date.now() }) }
       })
-    }))
+
+      if (!sessionChanged) return s
+      return { sessions: nextSessions }
+    })
   },
 
   stopGenerating() {

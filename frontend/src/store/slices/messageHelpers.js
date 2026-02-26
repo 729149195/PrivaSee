@@ -56,14 +56,50 @@ export function createAssistantMessage() {
  */
 export function createThinkTagHandler(get, sessionId, assistantMsgId) {
   let inThink = false
+  let pendingContent = ''
+  let pendingReasoning = ''
+  let pendingPhase = null
+  let flushTimer = null
+
+  const flushPending = () => {
+    if (!pendingContent && !pendingReasoning && !pendingPhase) return
+    const contentDelta = pendingContent
+    const reasoningDelta = pendingReasoning
+    const phaseDelta = pendingPhase
+    pendingContent = ''
+    pendingReasoning = ''
+    pendingPhase = null
+
+    get()._updateMessage(sessionId, assistantMsgId, (m) => {
+      const nextContent = contentDelta ? (m.content || '') + contentDelta : (m.content || '')
+      const nextReasoning = reasoningDelta ? (m.reasoning || '') + reasoningDelta : (m.reasoning || '')
+      const nextPhase = phaseDelta || m.phase
+      if (nextContent === (m.content || '') && nextReasoning === (m.reasoning || '') && nextPhase === m.phase) {
+        return m
+      }
+      return {
+        ...m,
+        content: nextContent,
+        reasoning: nextReasoning,
+        phase: nextPhase
+      }
+    })
+  }
+
+  const scheduleFlush = () => {
+    if (flushTimer) return
+    flushTimer = setTimeout(() => {
+      flushTimer = null
+      flushPending()
+    }, 16)
+  }
   
   return ({ content, reasoning, finish }) => {
-    if (reasoning) {
-      get()._updateMessage(sessionId, assistantMsgId, (m) => ({
-        ...m,
-        reasoning: (m.reasoning || '') + reasoning
-      }))
-    }
+    let appendContent = ''
+    let appendReasoning = ''
+    let nextPhase = null
+
+    if (reasoning) appendReasoning += reasoning
 
     if (typeof content === 'string' && content.length) {
       let rest = content
@@ -73,20 +109,12 @@ export function createThinkTagHandler(get, sessionId, assistantMsgId) {
           if (endIdx >= 0) {
             const head = rest.slice(0, endIdx)
             const tail = rest.slice(endIdx + 8)
-            if (head) {
-              get()._updateMessage(sessionId, assistantMsgId, (m) => ({
-                ...m,
-                reasoning: (m.reasoning || '') + head
-              }))
-            }
+            if (head) appendReasoning += head
             inThink = false
             rest = tail
             continue
           } else {
-            get()._updateMessage(sessionId, assistantMsgId, (m) => ({
-              ...m,
-              reasoning: (m.reasoning || '') + rest
-            }))
+            appendReasoning += rest
             rest = ''
             break
           }
@@ -95,22 +123,14 @@ export function createThinkTagHandler(get, sessionId, assistantMsgId) {
           if (startIdx >= 0) {
             const before = rest.slice(0, startIdx)
             const tail = rest.slice(startIdx + 7)
-            if (before) {
-              get()._updateMessage(sessionId, assistantMsgId, (m) => ({
-                ...m,
-                content: (m.content || '') + before,
-                phase: 'answering'
-              }))
-            }
+            if (before) appendContent += before
+            nextPhase = 'answering'
             inThink = true
             rest = tail
             continue
           } else {
-            get()._updateMessage(sessionId, assistantMsgId, (m) => ({
-              ...m,
-              content: (m.content || '') + rest,
-              phase: 'answering'
-            }))
+            appendContent += rest
+            nextPhase = 'answering'
             rest = ''
             break
           }
@@ -118,11 +138,23 @@ export function createThinkTagHandler(get, sessionId, assistantMsgId) {
       }
     }
 
+    if (appendContent || appendReasoning || nextPhase) {
+      if (appendContent) pendingContent += appendContent
+      if (appendReasoning) pendingReasoning += appendReasoning
+      if (nextPhase) pendingPhase = nextPhase
+      scheduleFlush()
+    }
+
     if (finish) {
+      if (flushTimer) {
+        clearTimeout(flushTimer)
+        flushTimer = null
+      }
+      flushPending()
       get()._updateMessage(sessionId, assistantMsgId, (m) => ({
-        ...m,
-        streaming: false,
-        phase: 'done'
+        ...(m.streaming === false && m.phase === 'done')
+          ? m
+          : { ...m, streaming: false, phase: 'done' }
       }))
     }
   }
@@ -254,19 +286,43 @@ export function buildOllamaHistory(messages, excludeAssistantId) {
  * @returns {Function} 响应处理回调
  */
 export function createOllamaStreamHandler(get, sessionId, assistantMsgId) {
+  let pendingContent = ''
+  let flushTimer = null
+
+  const flushPending = () => {
+    if (!pendingContent) return
+    const contentDelta = pendingContent
+    pendingContent = ''
+    get()._updateMessage(sessionId, assistantMsgId, (m) => {
+      const nextContent = (m.content || '') + contentDelta
+      if (nextContent === (m.content || '') && m.phase === 'answering') return m
+      return { ...m, content: nextContent, phase: 'answering' }
+    })
+  }
+
+  const scheduleFlush = () => {
+    if (flushTimer) return
+    flushTimer = setTimeout(() => {
+      flushTimer = null
+      flushPending()
+    }, 16)
+  }
+
   return ({ content, finish }) => {
     if (typeof content === 'string' && content.length) {
-      get()._updateMessage(sessionId, assistantMsgId, (m) => ({
-        ...m,
-        content: (m.content || '') + content,
-        phase: 'answering'
-      }))
+      pendingContent += content
+      scheduleFlush()
     }
     if (finish) {
+      if (flushTimer) {
+        clearTimeout(flushTimer)
+        flushTimer = null
+      }
+      flushPending()
       get()._updateMessage(sessionId, assistantMsgId, (m) => ({
-        ...m,
-        streaming: false,
-        phase: 'done'
+        ...(m.streaming === false && m.phase === 'done')
+          ? m
+          : { ...m, streaming: false, phase: 'done' }
       }))
     }
   }

@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
-import { Select, Button, Modal, Input, message } from 'antd'
-import { SettingOutlined, FileTextOutlined, PictureOutlined, SoundOutlined, ThunderboltOutlined, KeyOutlined } from '@ant-design/icons'
+import { Select, Button, Modal, Input, message, Switch, Tooltip } from 'antd'
+import { SettingOutlined, FileTextOutlined, PictureOutlined, SoundOutlined, ThunderboltOutlined, KeyOutlined, BulbOutlined } from '@ant-design/icons'
 import styles from '../AgentPage.module.css'
 import { isModelMultimodal, getModelModalities, supportsChainOfThought, prettifyModelName } from '../../utils/modelUtils'
 import ModelConfigPanel from './ModelConfigPanel'
@@ -14,6 +14,8 @@ import ModelConfigPanel from './ModelConfigPanel'
  * @param {function} addApiModel - 添加 API 模型的回调函数
  * @param {boolean} contextHasImages - 上下文是否包含图片
  * @param {number} selectedImagesCount - 已选择的图片数量
+ * @param {boolean} conversationThinkMode - 对话模型 think 模式开关
+ * @param {function} setConversationThinkMode - 设置对话模型 think 模式
  */
 const ModelPickerToolbar = ({ 
   model, 
@@ -22,7 +24,9 @@ const ModelPickerToolbar = ({
   setModel, 
   addApiModel,
   contextHasImages,
-  selectedImagesCount
+  selectedImagesCount,
+  conversationThinkMode,
+  setConversationThinkMode,
 }) => {
   const [apiModalOpen, setApiModalOpen] = useState(false)
   const [configPanelOpen, setConfigPanelOpen] = useState(false)
@@ -96,6 +100,29 @@ const ModelPickerToolbar = ({
             })()}
           />
           <Button onClick={() => setApiModalOpen(true)}>添加 API 模型</Button>
+          <Tooltip
+            title={
+              supportsChainOfThought(model, customProviders)
+                ? (conversationThinkMode ? '关闭思考模式' : '开启思考模式')
+                : '当前模型不支持思考模式'
+            }
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <BulbOutlined
+                style={{
+                  fontSize: 14,
+                  color: conversationThinkMode ? '#ef4444' : 'var(--color-text-tertiary)',
+                  transition: 'color 0.2s',
+                }}
+              />
+              <Switch
+                size="small"
+                checked={!!conversationThinkMode}
+                onChange={setConversationThinkMode}
+                disabled={!supportsChainOfThought(model, customProviders)}
+              />
+            </div>
+          </Tooltip>
         </div>
         <Button 
           icon={<SettingOutlined />} 
